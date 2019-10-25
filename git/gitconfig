@@ -1,0 +1,54 @@
+[alias]
+    co = checkout
+    br = branch
+    ci = commit -v
+    st = status -sb
+    unstage = reset HEAD --
+    last = log -1 HEAD
+    hist = log --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %C(bold blue)<%an>%Creset' --abbrev-commit --date=relative
+    prune-local = !git branch --merged | grep -v \"^\\*\" | xargs git branch -d
+    stats = shortlog -sne
+    whatsnew = log HEAD@{1}..
+    incoming = "!git remote update -p; git log ..@{u}"
+    outgoing = log @{u}..
+    new = log --color --pretty=format:'%C(cyan)%h%C(reset) ➜  %C(yellow)%s%C(reset) %C(white)(%cr)%C(reset) %an' -10
+    newlog = log --color --pretty=format:'%C(green)-%C(reset) %C(white)%s%C(reset)' -10
+
+[branch]
+    autosetuprebase = always
+    autosetupmerge = always
+
+[color]
+    ui = auto
+    diff = auto
+	status = auto
+	branch = auto
+
+[color "diff-highlight"]
+	oldNormal = red
+	oldHighlight = red bold 217
+	newNormal = green
+	newHighlight = green bold 157
+
+[core]
+    editor = vi
+    excludesfile = ~/Documents/Applikasjoner/dotfiles/git/gitignore_global
+    pager = diff-so-fancy | less --tabs=4 -RFX
+
+[pull]
+    rebase = true
+
+[push]
+    default = simple
+
+[user]
+    name = Henrik Kjersem
+    email = hkjersem@gmail.com
+
+[diff]
+    algorithm = patience
+
+[filter "lfs"]
+	clean = git-lfs clean %f
+	smudge = git-lfs smudge %f
+	required = true

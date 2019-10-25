@@ -1,0 +1,30 @@
+files:
+  include: '**/*.scss'
+rules:
+  class-name-format: 0
+  empty-line-between-blocks: 0
+  hex-notation: 0
+  id-name-format: 0
+  leading-zero: 0
+  nesting-depth: 0
+  no-color-literals: 0
+  no-css-comments: 0
+  no-important: 0
+  no-vendor-prefixes: 0
+  placeholder-name-format: 0
+  property-sort-order: 0
+  quotes: 0
+  single-line-per-selector: 0
+  no-misspelled-properties:
+    - 1
+    - extra-properties:
+        - composes
+        - -webkit-touch-callout
+        - -webkit-overflow-scrolling
+        - -ms-interpolation-mode
+        - scroll-snap-align
+        - scroll-snap-margin-left
+        - grid-column-gap
+        - grid-row-gap
+        - grid-gap
+        - font-display
