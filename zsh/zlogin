@@ -1,6 +1,4 @@
-#
 # Executes commands at login post-zshrc.
-#
 
 # Execute code that does not affect the current session in the background.
 {
@@ -20,8 +18,18 @@
     fi
 } &!
 
-# Print a random, hopefully interesting, adage.
-if (( $+commands[fortune] )); then
-    fortune -a | cowsay | lolcat
-    print
+# Speed up zsh compinit by only checking cache once a day.
+autoload -Uz compinit
+if [ $(date +'%j') != $(stat -f '%Sm' -t '%j' ~/.zcompdump) ]; then
+    compinit
+    compdump
+else
+    compinit -C
 fi
+
+# Set zsh-autosuggestions color
+ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=214'
+
+# Bind zsh-history-substring-search keys
+bindkey '^[[A' history-substring-search-up
+bindkey '^[[B' history-substring-search-down

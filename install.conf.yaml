@@ -8,23 +8,15 @@
 - link:
     ~/.dotfiles: ''
     ~/.ackrc: ackrc
-    ~/.atom/config.cson: atom/config.cson
-    ~/.atom/init.coffee: atom/init.coffee
-    ~/.atom/keymap.cson: atom/keymap.cson
-    ~/.atom/linter-config.json: atom/linter-config.json
-    ~/.atom/package-deps-state.json: atom/package-deps-state.json
-    ~/.atom/snippets.cson: atom/snippets.cson
-    ~/.atom/styles.less: atom/styles.less
     ~/.aliases: bash/aliases
     ~/.bashrc: bash/bashrc
-    ~/.ctags: ctags
     ~/.eslintrc: eslintrc
     ~/.gitconfig: git/gitconfig
     ~/.gitignore_global: git/gitignore_global
-    ~/.scss-lint.yml: scss-lint.yml
+    ~/.hushlogin: hushlogin
     ~/.sass-lint.yml: sass-lint.yml
+    ~/.scss-lint.yml: scss-lint.yml
     ~/.ssh/config: ssh/config
-    ~/.tmux.conf: tmux.conf
     ~/.vimrc: vimrc
     ~/.zcompdump: zsh/zcompdump
     ~/.zlogin: zsh/zlogin

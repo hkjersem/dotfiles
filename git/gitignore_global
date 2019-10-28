@@ -1,24 +1,11 @@
-.tags
-tags
-.tags*
-.tags_sorted_by_file
-.ackrc
-.sync-config.cson
-.tern-project
+# Node
+npm-debug.log
 
-# Zsh generated files #
-#######################
-.zcache
-
-# OS generated files #
-######################
+# Mac
 .DS_Store
-ehthumbs.db
-Icon?
-Thumbs.db
-.*.swp
+.DS_Store?
+.Trashes
 
-# Sublime #
-###########
-.codeintel
-.sublime-grunt.cache
+# General
+log/
+*.log
