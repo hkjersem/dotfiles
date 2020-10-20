@@ -37,7 +37,7 @@ alias cpwd="pwd|tr -d '\n'|pbcopy"
 # npm
 alias ni="npm install"
 alias nun="npm uninstall"
-alias nup="npm update"
+alias nup="npm update && npm out"
 
 # Network
 alias ip="dig +short myip.opendns.com @resolver1.opendns.com"

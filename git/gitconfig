@@ -52,3 +52,7 @@
 	clean = git-lfs clean %f
 	smudge = git-lfs smudge %f
 	required = true
+
+# Override gitconfig in ~/dev and its subfolders
+[includeIf "gitdir:~/dev/"]
+    path = ~/dev/.gitconfig

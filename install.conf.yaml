@@ -10,7 +10,7 @@
     ~/.ackrc: ackrc
     ~/.aliases: bash/aliases
     ~/.bashrc: bash/bashrc
-    ~/.eslintrc: eslintrc
+    # ~/.eslintrc: eslintrc (deprecated since since v6.7.0)
     ~/.gitconfig: git/gitconfig
     ~/.gitignore_global: git/gitignore_global
     ~/.hushlogin: hushlogin
