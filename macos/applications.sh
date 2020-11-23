@@ -16,7 +16,7 @@ xcode-select --install
 # NVM
 if [ ! -d ~/.nvm ];
 then
-    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.35.0/install.sh | bash
+    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.36.0/install.sh | bash
     export NVM_DIR="$HOME/.nvm"
     [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
 fi
@@ -33,8 +33,6 @@ npm i -g diff-so-fancy@latest
 # Homebrew and Homebrew Cask
 yes '' | ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"
 brew analytics off
-
-# Install Tools and Applications (brew cask install [appname])
 brew install ack
 
 # ZSH

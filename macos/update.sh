@@ -10,7 +10,7 @@ while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
 softwareupdate -i -a
 
 # Update nvm
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.35.0/install.sh | bash
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.36.0/install.sh | bash
 
 # Update npm & packages
 npm cache verify -g
@@ -23,7 +23,7 @@ brew upgrade
 brew cleanup
 
 # Update Ruby & gems
-gem update —system
+gem update --system
 gem update
 gem cleanup
 

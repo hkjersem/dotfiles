@@ -23,9 +23,6 @@ defaults write com.apple.systemuiserver menuExtras -array \
 	"/System/Library/CoreServices/Menu Extras/Volume.menu" \
 	"/System/Library/CoreServices/Menu Extras/Clock.menu"
 
-# Enable Font Smoothing in macOS Mojave
-defaults write -g CGFontRenderingFontSmoothingDisabled -bool NO
-
 # Save to disk (not to iCloud) by default
 defaults write NSGlobalDomain NSDocumentSaveNewDocumentsToCloud -bool false
 
@@ -99,15 +96,15 @@ defaults write com.apple.finder FXInfoPanesExpanded -dict \
     OpenWith -bool true \
     Privileges -bool true
 
+# Make the titlebar proxy icon appear immediately in Big Sur
+defaults write -g NSToolbarTitleViewRolloverDelay -float 0
+
 ###############################################################################
 # Dock, Dashboard, and hot corners                                            #
 ###############################################################################
 
-# Dark dock and menu bar
-defaults write NSGlobalDomain AppleInterfaceStyle Dark
-
 # Set the icon size of Dock items
-defaults write com.apple.dock tilesize -int 44
+defaults write com.apple.dock tilesize -int 48
 
 # Change minimize/maximize window effect
 defaults write com.apple.dock mineffect -string "scale"
@@ -123,12 +120,6 @@ defaults write com.apple.dock expose-animation-duration -float 0.1
 defaults write com.apple.dock springboard-show-duration -float 0.1
 defaults write com.apple.dock springboard-hide-duration -float 0.1
 defaults write com.apple.dock autohide-time-modifier -float 0.1
-
-# Disable Dashboard
-defaults write com.apple.dashboard mcx-disabled -bool true
-
-# Don’t show Dashboard as a Space
-defaults write com.apple.dock dashboard-in-overlay -bool true
 
 # Add iOS & Watch Simulator to Launchpad
 if [ -d /Applications/Xcode.app ];
