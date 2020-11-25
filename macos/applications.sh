@@ -31,7 +31,7 @@ fi
 npm i -g diff-so-fancy@latest
 
 # Homebrew and Homebrew Cask
-yes '' | ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"
+yes '' | /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install.sh)"
 brew analytics off
 brew install ack
 
