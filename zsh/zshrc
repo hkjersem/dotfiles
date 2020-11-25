@@ -51,13 +51,14 @@ export TIMEFMT='
 autoload -U colors && colors
 
 # ssh
-export SSH_KEY_PATH="~/.ssh/id_rsa"
+if [ -f ~/.ssh/id_rsa ]; then
+  export SSH_KEY_PATH="~/.ssh/id_rsa"
+  zstyle :omz:plugins:ssh-agent agent-forwarding on
+  zstyle :omz:plugins:ssh-agent identities id_rsa
+fi
 
 # Set personal aliases, overriding those provided by oh-my-zsh libs, plugins, and themes.
 source ~/.aliases
-
-zstyle :omz:plugins:ssh-agent agent-forwarding on
-zstyle :omz:plugins:ssh-agent identities id_rsa
 
 source $ZSH/oh-my-zsh.sh
 
