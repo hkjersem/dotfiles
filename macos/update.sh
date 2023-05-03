@@ -10,7 +10,7 @@ while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
 softwareupdate -i -a
 
 # Update nvm
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.36.0/install.sh | bash
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.3/install.sh | bash
 
 # Update npm & packages
 npm cache verify -g
@@ -28,7 +28,7 @@ gem update
 gem cleanup
 
 # Update Zsh
-upgrade_oh_my_zsh
+omz update
 
 # Install or update zsh-syntax-highlighting
 if [ -d ~/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting ];
