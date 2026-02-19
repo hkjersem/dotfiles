@@ -18,7 +18,6 @@
     ~/.scss-lint.yml: scss-lint.yml
     ~/.ssh/config: ssh/config
     ~/.vimrc: vimrc
-    ~/.zcompdump: zsh/zcompdump
     ~/.zlogin: zsh/zlogin
     ~/.zshrc: zsh/zshrc
 
