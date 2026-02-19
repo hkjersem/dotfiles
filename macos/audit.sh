@@ -33,6 +33,12 @@ while IFS= read -r line; do
 
         symlink_path="${symlink/#\~/$HOME}"
 
+        # Check symlink target exists in the repo
+        if [ ! -e "$target" ]; then
+            fail "$symlink → source missing in repo ($target)"
+            continue
+        fi
+
         if [ ! -e "$symlink_path" ] && [ ! -L "$symlink_path" ]; then
             fail "$symlink → not found (run ./install)"
         elif [ -L "$symlink_path" ] && [ ! -e "$symlink_path" ]; then
@@ -42,6 +48,13 @@ while IFS= read -r line; do
         fi
     fi
 done < "$DOTFILES/install.conf.yaml"
+
+# Git submodules
+if [ ! -f "$DOTFILES/dotbot/bin/dotbot" ]; then
+    fail "dotbot submodule not initialised (run: git submodule update --init)"
+else
+    ok "dotbot submodule"
+fi
 
 # Orphaned dotfiles — removed from repo but may still exist on disk
 ORPHANS=(.vimrc .eslintrc .sass-lint.yml .scss-lint.yml .ackrc)
@@ -186,8 +199,14 @@ fi
 [ -e "$HOME/.viminfo" ] && warn "~/.viminfo exists (vim artifact, safe to delete)"
 [ -d "$HOME/.vim" ]     && warn "~/.vim/ directory exists (vim artifact, safe to delete)"
 
-# NVM directory
-[ -d "$HOME/.nvm" ] && warn "~/.nvm/ exists (consider migrating to fnm)"
+# NVM directory — orphan now that fnm is in use
+if [ -d "$HOME/.nvm" ]; then
+    if command -v fnm &>/dev/null; then
+        warn "~/.nvm/ exists but fnm is active — safe to remove: rm -rf ~/.nvm"
+    else
+        warn "~/.nvm/ exists (consider migrating to fnm)"
+    fi
+fi
 
 # Untracked dotfiles — scan ~ for hidden files/dirs not managed by dotbot
 # Skips: .local files (intentional per-machine overrides), known app/system items
