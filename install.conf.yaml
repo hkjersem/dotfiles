@@ -9,14 +9,10 @@
     ~/.dotfiles: ''
     ~/.aliases: bash/aliases
     ~/.bashrc: bash/bashrc
-    # ~/.eslintrc: eslintrc (deprecated since since v6.7.0)
     ~/.gitconfig: git/gitconfig
     ~/.gitignore_global: git/gitignore_global
     ~/.hushlogin: hushlogin
-    ~/.sass-lint.yml: sass-lint.yml
-    ~/.scss-lint.yml: scss-lint.yml
     ~/.ssh/config: ssh/config
-    ~/.vimrc: vimrc
     ~/.zlogin: zsh/zlogin
     ~/.zshrc: zsh/zshrc
 
