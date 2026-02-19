@@ -10,7 +10,7 @@ while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
 softwareupdate -i -a
 
 # Update nvm
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.3/install.sh | bash
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
 
 # Update npm & packages
 npm cache verify -g
@@ -52,6 +52,14 @@ then
     cd ~/.oh-my-zsh/custom/plugins/zsh-history-substring-search && ggpull && cd ~/.dotfiles
 else
     git clone https://github.com/zsh-users/zsh-history-substring-search.git ~/.oh-my-zsh/custom/plugins/zsh-history-substring-search
+fi
+
+# Install or update fzf-tab
+if [ -d ~/.oh-my-zsh/custom/plugins/fzf-tab ];
+then
+    cd ~/.oh-my-zsh/custom/plugins/fzf-tab && ggpull && cd ~/.dotfiles
+else
+    git clone https://github.com/Aloxaf/fzf-tab.git ~/.oh-my-zsh/custom/plugins/fzf-tab
 fi
 
 # Run settings script

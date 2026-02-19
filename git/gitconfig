@@ -13,6 +13,7 @@
     outgoing = log @{u}..
     new = log --color --pretty=format:'%C(cyan)%h%C(reset) ➜  %C(yellow)%s%C(reset) %C(white)(%cr)%C(reset) %an' -10
     newlog = log --color --pretty=format:'%C(green)-%C(reset) %C(white)%s%C(reset)' -10
+    amend-date = "!f() { GIT_COMMITTER_DATE=\"$1\" git commit --amend --no-edit --date \"$1\"; }; f"
 
 [branch]
     autosetuprebase = always

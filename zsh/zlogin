@@ -18,17 +18,12 @@
     fi
 } &!
 
-# Speed up zsh compinit by only checking cache once a day.
-autoload -Uz compinit
-if [ $(date +'%j') != $(stat -f '%Sm' -t '%j' ~/.zcompdump) ]; then
-    compinit
-    compdump
-else
-    compinit -C
-fi
-
 # Set zsh-autosuggestions color
 ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=214'
+ZSH_AUTOSUGGEST_STRATEGY=(history completion)
+
+# Clear autosuggestions when pasting to avoid confusion (the bracketed-paste-magic feature might be conflicting)
+zstyle ':bracketed-paste-magic' active-widgets '.self-*'
 
 # Bind zsh-history-substring-search keys
 bindkey '^[[A' history-substring-search-up

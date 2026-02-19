@@ -7,7 +7,6 @@
 
 - link:
     ~/.dotfiles: ''
-    ~/.ackrc: ackrc
     ~/.aliases: bash/aliases
     ~/.bashrc: bash/bashrc
     # ~/.eslintrc: eslintrc (deprecated since since v6.7.0)
