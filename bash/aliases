@@ -109,3 +109,7 @@ alias rebootuserspace="sudo launchctl reboot userspace"
 
 # Print each PATH entry on a separate line
 alias path='echo -e ${PATH//:/\\n}'
+
+# Install a Node version via fnm and carry over global packages
+# Usage: install_node [version]  e.g. install_node 20, install_node lts
+install_node() { bash "$HOME/.dotfiles/scripts/install-node.sh" "$@"; }
