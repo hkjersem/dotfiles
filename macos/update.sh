@@ -9,8 +9,8 @@ while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
 # Update App Store apps
 softwareupdate -i -a
 
-# Update node (fnm) — installs latest LTS if not already on it, carries over global packages
-fnm install --lts --reinstall-packages-from=current
+# Update node — install latest LTS, migrate globals if version changed
+bash "$(dirname "$0")/../scripts/install-node.sh" lts
 
 # Update npm & packages
 npm cache verify -g
