@@ -105,13 +105,26 @@ else
         fi
     done < <(echo "$PLUGINS")
 
-    # Check for cloned custom plugins not loaded in plugins=()
+    # Check for plugins sourced directly (e.g. fzf-tab which must load after compinit)
+    SOURCED_PLUGINS=$(grep -E "source.*oh-my-zsh/custom/plugins" "$DOTFILES/zsh/zshrc" \
+        | sed 's|.*custom/plugins/\([^/]*\)/.*|\1|')
+    while IFS= read -r plugin; do
+        [[ -z "$plugin" ]] && continue
+        if [ ! -d "$HOME/.oh-my-zsh/custom/plugins/$plugin" ]; then
+            fail "$plugin (sourced in zshrc but not installed at ~/.oh-my-zsh/custom/plugins/$plugin)"
+        else
+            ok "$plugin (sourced directly)"
+        fi
+    done < <(echo "$SOURCED_PLUGINS")
+
+    # Check for cloned custom plugins not loaded in plugins=() or sourced directly
+    ALL_LOADED=$(printf '%s\n' "$PLUGINS" "$SOURCED_PLUGINS")
     if [ -d "$HOME/.oh-my-zsh/custom/plugins" ]; then
         for dir in "$HOME/.oh-my-zsh/custom/plugins"/*/; do
             plugin=$(basename "$dir")
             [[ "$plugin" == "example" ]] && continue
-            if ! echo "$PLUGINS" | grep -qx "$plugin"; then
-                warn "$plugin (cloned but not loaded in plugins=())"
+            if ! echo "$ALL_LOADED" | grep -qx "$plugin"; then
+                warn "$plugin (cloned but not loaded in plugins=() or sourced)"
             fi
         done
     fi
