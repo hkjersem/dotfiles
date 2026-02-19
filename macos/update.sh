@@ -9,8 +9,8 @@ while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
 # Update App Store apps
 softwareupdate -i -a
 
-# Update nvm
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
+# Update node (fnm) — installs latest LTS if not already on it, carries over global packages
+fnm install --lts --reinstall-packages-from=current
 
 # Update npm & packages
 npm cache verify -g
@@ -44,14 +44,6 @@ then
     cd ~/.oh-my-zsh/custom/plugins/zsh-autosuggestions && ggpull && cd ~/.dotfiles
 else
     git clone https://github.com/zsh-users/zsh-autosuggestions.git ~/.oh-my-zsh/custom/plugins/zsh-autosuggestions
-fi
-
-# Install or update zsh-history-substring-search
-if [ -d ~/.oh-my-zsh/custom/plugins/zsh-history-substring-search ];
-then
-    cd ~/.oh-my-zsh/custom/plugins/zsh-history-substring-search && ggpull && cd ~/.dotfiles
-else
-    git clone https://github.com/zsh-users/zsh-history-substring-search.git ~/.oh-my-zsh/custom/plugins/zsh-history-substring-search
 fi
 
 # Install or update fzf-tab
