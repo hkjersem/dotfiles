@@ -76,15 +76,22 @@ source ~/.aliases
 
 export ZSH_COMPDUMP="$HOME/.zcompdump"
 export ZSH_DISABLE_COMPFIX=true
-source $ZSH/oh-my-zsh.sh
 
-# Speed up zsh compinit by only checking cache once a day.
+# Intercept omz's compinit call: use -C (skip compaudit) if dump is from today.
+# This ensures fpath is complete (omz adds plugins before calling compinit)
+# and avoids a redundant second compinit call.
 autoload -Uz compinit
-if [ $(date +'%j') != $(stat -f '%Sm' -t '%j' ~/.zcompdump) ]; then
-    compinit
-else
-    compinit -C
-fi
+function compinit() {
+    unfunction compinit
+    autoload -Uz compinit
+    if [[ $(date +'%j') == $(stat -f '%Sm' -t '%j' "${ZSH_COMPDUMP}" 2>/dev/null) ]]; then
+        compinit -C -d "${ZSH_COMPDUMP}"
+    else
+        compinit -d "${ZSH_COMPDUMP}"
+    fi
+}
+
+source $ZSH/oh-my-zsh.sh
 
 eval "$(fnm env --use-on-cd --shell zsh)"
 
