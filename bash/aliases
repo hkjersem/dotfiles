@@ -113,3 +113,9 @@ alias path='echo -e ${PATH//:/\\n}'
 # Install a Node version via fnm and carry over global packages
 # Usage: install_node [version]  e.g. install_node 20, install_node lts
 install_node() { bash "$HOME/.dotfiles/scripts/install-node.sh" "$@"; }
+
+# Diff global npm packages between two node versions
+# Usage: npm_globals_diff <version_a> [version_b]  (version_b defaults to current node)
+#   Versions can be a major (22), full string (v22.22.0), or lts
+#   e.g. npm_globals_diff 22, npm_globals_diff lts 22
+npm_globals_diff() { bash "$HOME/.dotfiles/scripts/npm-globals-diff.sh" "$@"; }
