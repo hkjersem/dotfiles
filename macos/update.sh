@@ -10,7 +10,7 @@ while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
 softwareupdate -i -a
 
 # Update node — install latest LTS, migrate globals if version changed
-bash "$(dirname "$0")/../scripts/install-node.sh" lts
+bash ~/.dotfiles/scripts/install-node.sh lts
 
 # Update npm & packages
 npm cache verify -g
@@ -22,18 +22,13 @@ brew update
 brew upgrade
 brew cleanup
 
-# Update Ruby & gems
-gem update --system
-gem update
-gem cleanup
-
 # Update Zsh
-omz update
+ZSH=~/.oh-my-zsh zsh ~/.oh-my-zsh/tools/upgrade.sh
 
 # Install or update zsh-syntax-highlighting
 if [ -d ~/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting ];
 then
-    cd ~/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting && ggpull && cd ~/.dotfiles
+    git -C ~/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting pull
 else
     git clone https://github.com/zsh-users/zsh-syntax-highlighting.git ~/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting
 fi
@@ -41,7 +36,7 @@ fi
 # Install or update zsh-autosuggestions
 if [ -d ~/.oh-my-zsh/custom/plugins/zsh-autosuggestions ];
 then
-    cd ~/.oh-my-zsh/custom/plugins/zsh-autosuggestions && ggpull && cd ~/.dotfiles
+    git -C ~/.oh-my-zsh/custom/plugins/zsh-autosuggestions pull
 else
     git clone https://github.com/zsh-users/zsh-autosuggestions.git ~/.oh-my-zsh/custom/plugins/zsh-autosuggestions
 fi
@@ -49,7 +44,7 @@ fi
 # Install or update fzf-tab
 if [ -d ~/.oh-my-zsh/custom/plugins/fzf-tab ];
 then
-    cd ~/.oh-my-zsh/custom/plugins/fzf-tab && ggpull && cd ~/.dotfiles
+    git -C ~/.oh-my-zsh/custom/plugins/fzf-tab pull
 else
     git clone https://github.com/Aloxaf/fzf-tab.git ~/.oh-my-zsh/custom/plugins/fzf-tab
 fi
@@ -59,3 +54,5 @@ source ./macos/osxdefaults.sh
 
 # End script
 echo "Done. Enjoy your updated install."
+
+bash ~/.dotfiles/scripts/audit.sh

@@ -5,24 +5,46 @@
 
 DOTFILES="$HOME/.dotfiles"
 
-BOLD='\033[1m'
-RED='\033[0;31m'
-YELLOW='\033[1;33m'
-GREEN='\033[0;32m'
-RESET='\033[0m'
+BOLD=$'\033[1m'
+RED=$'\033[0;31m'
+YELLOW=$'\033[1;33m'
+GREEN=$'\033[0;32m'
+RESET=$'\033[0m'
 
 ISSUES=0
 WARNINGS=0
 
-header() { echo ""; echo "${BOLD}── $1 ──────────────────────────────────${RESET}"; }
-ok()     { echo "  ${GREEN}✅${RESET} $1"; }
-warn()   { echo "  ${YELLOW}🟡${RESET} $1"; ((WARNINGS++)); }
-fail()   { echo "  ${RED}🔴${RESET} $1"; ((ISSUES++)); }
+# Section buffering — collapse to one line if all green
+SECTION_OUTPUT=()
+SECTION_ISSUES=0
+SECTION_WARNINGS=0
+CURRENT_SECTION=""
+
+section_start() {
+    CURRENT_SECTION="$1"
+    SECTION_OUTPUT=()
+    SECTION_ISSUES=0
+    SECTION_WARNINGS=0
+}
+
+section_end() {
+    echo ""
+    echo "${BOLD}── ${CURRENT_SECTION} ──────────────────────────────────${RESET}"
+    if [[ $SECTION_ISSUES -eq 0 && $SECTION_WARNINGS -eq 0 && ${#SECTION_OUTPUT[@]} -gt 0 ]]; then
+        echo "  ${GREEN}✅${RESET} All checks passed"
+    else
+        printf '%s\n' "${SECTION_OUTPUT[@]}"
+    fi
+}
+
+ok()   { SECTION_OUTPUT+=("  ${GREEN}✅${RESET} $1"); }
+warn() { SECTION_OUTPUT+=("  ${YELLOW}🟡${RESET} $1"); ((WARNINGS++)); ((SECTION_WARNINGS++)); }
+fail() { SECTION_OUTPUT+=("  ${RED}🔴${RESET} $1"); ((ISSUES++)); ((SECTION_ISSUES++)); }
 
 # ──────────────────────────────────────────────────────
 # 1. SYMLINKS
 # ──────────────────────────────────────────────────────
-header "Symlinks"
+section_start "Symlinks"
 
 while IFS= read -r line; do
     if [[ "$line" =~ ^[[:space:]]+(~/\.[^:]+):[[:space:]]*(.+)$ ]]; then
@@ -59,15 +81,15 @@ fi
 # Orphaned dotfiles — removed from repo but may still exist on disk
 ORPHANS=(.vimrc .eslintrc .sass-lint.yml .scss-lint.yml .ackrc)
 for f in "${ORPHANS[@]}"; do
-    if [ -e "$HOME/$f" ]; then
-        warn "Orphaned: ~/$f (removed from repo, safe to delete)"
-    fi
+    [ -e "$HOME/$f" ] && warn "Orphaned: ~/$f (removed from repo, safe to delete)"
 done
+
+section_end
 
 # ──────────────────────────────────────────────────────
 # 2. BREW FORMULAE
 # ──────────────────────────────────────────────────────
-header "Brew Formulae"
+section_start "Brew Formulae"
 
 if ! command -v brew &>/dev/null; then
     fail "Homebrew is not installed"
@@ -95,10 +117,12 @@ else
     done < <(echo "$BREW_LEAVES")
 fi
 
+section_end
+
 # ──────────────────────────────────────────────────────
 # 3. OH-MY-ZSH PLUGINS
 # ──────────────────────────────────────────────────────
-header "Oh-my-zsh Plugins"
+section_start "Oh-my-zsh Plugins"
 
 if [ ! -d "$HOME/.oh-my-zsh" ]; then
     fail "oh-my-zsh is not installed"
@@ -143,10 +167,12 @@ else
     fi
 fi
 
+section_end
+
 # ──────────────────────────────────────────────────────
 # 4. GLOBAL NPM PACKAGES
 # ──────────────────────────────────────────────────────
-header "Global npm Packages"
+section_start "Global npm Packages"
 
 if ! command -v npm &>/dev/null; then
     warn "npm is not available (NVM/fnm not loaded?)"
@@ -177,10 +203,12 @@ else
     done < <(echo "$NPM_GLOBALS")
 fi
 
+section_end
+
 # ──────────────────────────────────────────────────────
 # 5. HOME DIRECTORY
 # ──────────────────────────────────────────────────────
-header "Home Directory"
+section_start "Home Directory"
 
 # zcompdump duplicates — any ~/.zcompdump-<hostname>-<version> files mean
 # ZSH_COMPDUMP isn't being honoured and two caches are being written
@@ -267,6 +295,8 @@ for f in "$HOME"/.*; do
         warn "Untracked dotfile: ~/$name (not managed by dotbot)"
     fi
 done
+
+section_end
 
 # ──────────────────────────────────────────────────────
 # SUMMARY
