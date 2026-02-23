@@ -14,8 +14,12 @@ fnm_versions() {
 # Snapshot installed versions before we do anything
 PRE_INSTALL=$(fnm_versions)
 
-fnm install "$VERSION" >/dev/null 2>&1
-[[ "$VERSION" == "lts" ]] && fnm default lts-latest >/dev/null 2>&1
+if [[ "$VERSION" == "lts" ]]; then
+    fnm --corepack-enabled install --lts >/dev/null 2>&1
+    fnm default lts-latest >/dev/null 2>&1
+else
+    fnm --corepack-enabled install "$VERSION" >/dev/null 2>&1
+fi
 
 # Resolve the actual installed version by diffing before/after,
 # or by finding the best match in the current list
@@ -25,7 +29,7 @@ NEW_NODE=$(comm -13 <(echo "$PRE_INSTALL" | sort) <(echo "$POST_INSTALL" | sort)
 if [ -z "$NEW_NODE" ]; then
     # Nothing newly installed — find best match from existing versions
     if [[ "$VERSION" == "lts" ]]; then
-        NEW_NODE=$(fnm list 2>/dev/null | grep 'default' | awk '{print $2}')
+        NEW_NODE=$(fnm_versions | sort -V | tail -1)
     else
         MAJOR_REQ=$(echo "$VERSION" | sed 's/v//' | cut -d. -f1)
         NEW_NODE=$(echo "$POST_INSTALL" | grep "^v${MAJOR_REQ}\." | sort -V | tail -1)
@@ -59,11 +63,11 @@ fi
 OLD_VERSIONS=$(fnm_versions | grep "^v${MAJOR}\." | grep -vFx "$NEW_NODE")
 
 if [ -z "$OLD_VERSIONS" ]; then
-    # No same-major version — fall back to current default node
-    CURRENT_NODE=$(node --version 2>/dev/null)
-    if [ -n "$CURRENT_NODE" ] && [ "$CURRENT_NODE" != "$NEW_NODE" ]; then
-        echo "Installed $NEW_NODE — migrating globals from $CURRENT_NODE..."
-        GLOBALS=$(npm list -g --depth 0 2>/dev/null \
+    # No same-major version — migrate from whichever version was default before install
+    MIGRATE_FROM=$(echo "$PRE_INSTALL" | sort -V | tail -1)
+    if [ -n "$MIGRATE_FROM" ] && [ "$MIGRATE_FROM" != "$NEW_NODE" ]; then
+        echo "Installed $NEW_NODE — migrating globals from $MIGRATE_FROM..."
+        GLOBALS=$(fnm exec --using="$MIGRATE_FROM" npm list -g --depth 0 2>/dev/null \
             | grep -E '├──|└──' | sed 's/.*── //' | grep -v '^npm@')
         if [ -n "$GLOBALS" ]; then
             echo "  Reinstalling: $(echo "$GLOBALS" | tr '\n' ' ')"
