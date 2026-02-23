@@ -34,9 +34,6 @@ plugins=(git zsh-syntax-highlighting zsh-autosuggestions history-substring-searc
 # User configuration
 export PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
-# Composer
-export PATH="$HOME/.composer/vendor/bin:$PATH"
-
 # Homebrew
 export PATH=/opt/homebrew/bin:$PATH
 
@@ -54,13 +51,6 @@ export TIMEFMT='
   | System: [38;5;159m%P[0m CPU used, [38;5;159m%M[0m KB max memory used'
 
 autoload -U colors && colors
-
-# ssh
-if [ -f ~/.ssh/id_rsa ]; then
-  export SSH_KEY_PATH="~/.ssh/id_rsa"
-  zstyle :omz:plugins:ssh-agent agent-forwarding on
-  zstyle :omz:plugins:ssh-agent identities id_rsa
-fi
 
 # Disable Autocorrect for Specific Commands
 alias bun='nocorrect bun'
