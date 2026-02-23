@@ -5,6 +5,23 @@
 
 DOTFILES="$HOME/.dotfiles"
 
+# Load local ignore list (audit.ignore is gitignored — machine-specific)
+# Format: one entry per line, prefixed by category, e.g.:
+#   brew:fzf
+#   home:.npmrc
+LOCAL_IGNORE=()
+if [ -f "$DOTFILES/audit.ignore" ]; then
+    while IFS= read -r line; do
+        [[ -z "$line" || "$line" == \#* ]] && continue
+        LOCAL_IGNORE+=("$line")
+    done < "$DOTFILES/audit.ignore"
+fi
+
+is_ignored() {
+    local key="$1"
+    printf '%s\n' "${LOCAL_IGNORE[@]}" | grep -qFx "$key"
+}
+
 BOLD=$'\033[1m'
 RED=$'\033[0;31m'
 YELLOW=$'\033[1;33m'
@@ -112,6 +129,7 @@ else
     while IFS= read -r installed; do
         [[ -z "$installed" ]] && continue
         if ! echo "$DECLARED" | grep -qw "$installed"; then
+            is_ignored "brew:$installed" && continue
             warn "$installed (installed but not in applications.sh)"
         fi
     done < <(echo "$BREW_LEAVES")
@@ -179,6 +197,13 @@ if ! command -v npm &>/dev/null; then
 else
     NPM_GLOBALS=$(npm list -g --depth=0 2>/dev/null | grep -E '├──|└──' | sed 's/.*── //' | sed 's/@.*//')
 
+    # corepack — bundled with Node, should always be present
+    if echo "$NPM_GLOBALS" | grep -qx "corepack"; then
+        ok "corepack"
+    else
+        warn "corepack missing"
+    fi
+
     DECLARED_NPM=$(grep -E '^\s*npm i(nstall)? -g ' "$DOTFILES/macos/applications.sh" \
         | sed 's/.*-g //' \
         | tr ' ' '\n' \
@@ -196,7 +221,7 @@ else
 
     # Installed but not declared
     while IFS= read -r installed; do
-        [[ -z "$installed" || "$installed" == "npm" ]] && continue
+        [[ -z "$installed" || "$installed" == "npm" || "$installed" == "corepack" || "$installed" == "bun" ]] && continue
         if ! echo "$DECLARED_NPM" | grep -qx "$installed"; then
             warn "$installed (installed globally but not in applications.sh)"
         fi
@@ -223,10 +248,6 @@ else
     ok "No duplicate zcompdump files"
 fi
 
-# Vim artifacts (vimrc removed from repo, but these may linger)
-[ -e "$HOME/.viminfo" ] && warn "~/.viminfo exists (vim artifact, safe to delete)"
-[ -d "$HOME/.vim" ]     && warn "~/.vim/ directory exists (vim artifact, safe to delete)"
-
 # NVM directory — orphan now that fnm is in use
 if [ -d "$HOME/.nvm" ]; then
     if command -v fnm &>/dev/null; then
@@ -247,30 +268,19 @@ done < "$DOTFILES/install.conf.yaml"
 
 # App- and system-generated items that are not user config
 KNOWN_GENERATED=(
-    ".bash_history" ".zsh_history" ".zsh_sessions" ".zsh_favlist"
+    # macOS system
     ".CFUserTextEncoding" ".Trash" ".DS_Store" ".localized"
-    ".config" ".cache" ".local"
-    ".oh-my-zsh" ".nvm" ".npm" ".node_repl_history"
-    ".lesshst" ".wget-hsts" ".netrc"
-    ".vscode" ".docker" ".kube" ".gnupg"
-    ".colima" ".lima" ".orbstack"
-    ".gem" ".bundle" ".rbenv" ".pyenv"
-    ".cargo" ".rustup"
-    ".asdf" ".fnm" ".bun"
-    ".aws" ".azure" ".gcloud" ".boto"
-    ".cocoapods" ".gradle" ".m2"
-    ".gitk" ".cups"
+    # Shell
+    ".bash_history" ".zsh_history" ".zsh_sessions" ".zsh_favlist"
     ".zcompdump" ".zcompdump.zwc"
-    ".ssh"        # directory is system-managed; dotbot links the config inside it
-    ".viminfo" ".vim"  # already caught by specific check above
-    # AI coding assistants — app-managed, not user config
-    ".agents" ".claude" ".cline" ".codebuddy" ".codeium" ".codemod" ".codex"
-    ".commandcode" ".continue" ".copilot" ".copilot_here.sh" ".cursor"
-    ".enonic" ".factory" ".gemini" ".junie" ".kilocode" ".kiro" ".kode"
-    ".mcpjam" ".moltbot" ".neovate" ".openhands" ".pi" ".pochi"
-    ".qoder" ".qwen" ".roo" ".trae" ".zencoder"
-    # Local AI/ML tools
-    ".lmstudio" ".lmstudio-home-pointer" ".ollama"
+    # XDG dirs
+    ".config" ".cache" ".local"
+    # Common CLI tools
+    ".lesshst" ".wget-hsts" ".netrc" ".gnupg"
+    # SSH — system-managed; dotbot links only the config inside it
+    ".ssh"
+    # Node — managed by this dotfiles setup
+    ".oh-my-zsh" ".fnm" ".npm" ".npmrc" ".node_repl_history"
 )
 
 for f in "$HOME"/.*; do
@@ -290,8 +300,10 @@ for f in "$HOME"/.*; do
     if [ -L "$f" ]; then
         link=$(readlink "$f")
         [[ "$link" == "$DOTFILES"* ]] && continue
+        is_ignored "home:$name" && continue
         warn "Untracked symlink: ~/$name → $link"
     else
+        is_ignored "home:$name" && continue
         warn "Untracked dotfile: ~/$name (not managed by dotbot)"
     fi
 done

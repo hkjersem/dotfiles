@@ -17,15 +17,18 @@ fi
 
 # Node (fnm)
 brew install fnm
-eval "$(fnm env --shell bash)"
-fnm install --lts
-fnm default lts-latest
+if ! fnm list 2>/dev/null | grep -q 'lts'; then
+    eval "$(fnm env --shell bash)"
+    bash ~/.dotfiles/scripts/install-node.sh lts
+fi
 
 # NPM Essentials
 npm i -g diff-so-fancy@latest
 
 # Homebrew packages
-brew install fzf
+brew install fzf   # fuzzy finder
+brew install bat   # better cat with syntax highlighting
+brew install tree  # directory tree viewer
 
 # ZSH
 [ -d ~/.oh-my-zsh ] || git clone https://github.com/robbyrussell/oh-my-zsh.git ~/.oh-my-zsh

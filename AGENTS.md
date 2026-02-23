@@ -18,6 +18,7 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 | `git/gitignore_global` | Global gitignore |
 | `ssh/config` | SSH host config |
 | `scripts/audit.sh` | Read-only drift detection — compares repo declarations vs installed state |
+| `audit.ignore` | Machine-local audit suppressions (gitignored) — silence known-safe warnings per machine |
 | `scripts/install-node.sh` | Install a Node version via fnm, migrate globals, clean up old same-major versions |
 | `scripts/npm-globals-diff.sh` | Diff global npm packages between two node versions |
 | `macos/applications.sh` | Bootstrap script — installs brew formulae and tools |
