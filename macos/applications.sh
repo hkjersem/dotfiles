@@ -6,12 +6,14 @@ sudo -v
 # Keep-alive: update existing `sudo` time stamp until the script has finished
 while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
 
-# Install the Command Line Tools (so it works without Xcode installed)
-xcode-select --install
+# Install the Command Line Tools if not already installed (opens interactive dialog on first run)
+xcode-select -p &>/dev/null || xcode-select --install
 
-# Wait for install before we continue
-# echo "Press [Enter] key after Command Line Tools are installed..."
-# read -s
+# Homebrew
+if ! command -v brew &>/dev/null; then
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    brew analytics off
+fi
 
 # Node (fnm)
 brew install fnm
@@ -22,9 +24,7 @@ fnm default lts-latest
 # NPM Essentials
 npm i -g diff-so-fancy@latest
 
-# Homebrew and Homebrew Cask
-yes '' | /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install.sh)"
-brew analytics off
+# Homebrew packages
 brew install fzf
 
 # ZSH
@@ -33,5 +33,5 @@ brew install fzf
 [ -d ~/.oh-my-zsh/custom/plugins/zsh-autosuggestions ] || git clone https://github.com/zsh-users/zsh-autosuggestions.git ~/.oh-my-zsh/custom/plugins/zsh-autosuggestions
 [ -d ~/.oh-my-zsh/custom/plugins/fzf-tab ] || git clone https://github.com/Aloxaf/fzf-tab.git ~/.oh-my-zsh/custom/plugins/fzf-tab
 
-# End script                                                                  #
+# End script
 echo "Done. Applications are installed."

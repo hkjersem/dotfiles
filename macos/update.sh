@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
+# Usage: update.sh [--no-defaults]
+#   --no-defaults  Skip running osxdefaults.sh
 
-# Ask for the administrator password upfront
-sudo -v
-
-# Keep-alive: update existing `sudo` time stamp until the script has finished
-while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
+SKIP_DEFAULTS=false
+for arg in "$@"; do
+  [[ "$arg" == "--no-defaults" ]] && SKIP_DEFAULTS=true
+done
 
 # Update App Store apps
 softwareupdate -i -a
@@ -18,6 +19,7 @@ npm install npm -g
 npm update -g
 
 # Update Homebrew (Cask) & packages
+brew analytics off
 brew update
 brew upgrade
 brew cleanup
@@ -49,8 +51,10 @@ else
     git clone https://github.com/Aloxaf/fzf-tab.git ~/.oh-my-zsh/custom/plugins/fzf-tab
 fi
 
-# Run settings script
-source ./macos/osxdefaults.sh
+# Run settings script (skip with --no-defaults)
+if [[ "$SKIP_DEFAULTS" == false ]]; then
+    bash ~/.dotfiles/macos/osxdefaults.sh
+fi
 
 # End script
 echo "Done. Enjoy your updated install."
