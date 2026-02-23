@@ -2,45 +2,14 @@
 [ -z "$PS1" ] && return
 
 ###############################################################################
-# Input                                                                       #
-###############################################################################
-
-# Make Tab autocomplete regardless of filename case
-set completion-ignore-case on
-
-# List all matches in case multiple possible completions are possible
-set show-all-if-ambiguous on
-
-# Immediately add a trailing slash when autocompleting symlinks to directories
-set mark-symlinked-directories on
-
-# Show all autocomplete results at once
-set page-completions off
-
-# If there are more than 200 possible completions for a word, ask to show them all
-set completion-query-items 200
-
-# Show extra file information when completing, like `ls -F` does
-set visible-stats on
-
-# Be more intelligent when autocompleting by also looking at the text after the cursor
-set skip-completed-text on
-
-# Allow UTF-8 input and output, instead of showing stuff like $'\0123\0456'
-set input-meta on
-set output-meta on
-set convert-meta off
-
-###############################################################################
 # Exports                                                                     #
 ###############################################################################
 
 # Add `~/bin` to the `$PATH`
-export PATH="$HOME/bin:$PATH";
+export PATH="$HOME/bin:$PATH"
 
-# Add nvm
-export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+# fnm (Fast Node Manager)
+eval "$(fnm env --shell bash)"
 
 # Increase Bash history size. The default is 500.
 export HISTSIZE='30000';
@@ -51,7 +20,6 @@ export HISTCONTROL='ignoreboth';
 
 # set your terminal to be the color variant of xterm, turn on colors in grep, etc
 export TERM=xterm-color
-export GREP_OPTIONS='--color=auto' GREP_COLOR='1;32'
 export CLICOLOR=1
 
 # Case-insensitive globbing (used in pathname expansion)
@@ -111,13 +79,8 @@ export PROMPT_COMMAND='echo -ne "\\033]0;${PWD}"; echo -ne "\\007"'
 
 # Load the shell dotfiles
 source ~/.aliases
-# for file in ~/.{path,bash_prompt,exports,aliases,functions}; do
-	# [ -r "$file" ] && [ -f "$file" ] && source "$file";
-# done;
-# unset file;
 
 # Local overriding
 if [ -f ~/.bashrc_local ]; then
 	source ~/.bashrc_local
 fi
-[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion

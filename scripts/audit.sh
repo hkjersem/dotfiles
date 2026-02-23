@@ -277,6 +277,8 @@ KNOWN_GENERATED=(
     ".config" ".cache" ".local"
     # Common CLI tools
     ".lesshst" ".wget-hsts" ".netrc" ".gnupg"
+    # macOS ships with vim — viminfo gets created on first use
+    ".viminfo"
     # SSH — system-managed; dotbot links only the config inside it
     ".ssh"
     # Node — managed by this dotfiles setup

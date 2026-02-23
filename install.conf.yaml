@@ -9,6 +9,7 @@
     ~/.dotfiles: ''
     ~/.aliases: bash/aliases
     ~/.bashrc: bash/bashrc
+    ~/.inputrc: bash/inputrc
     ~/.gitconfig: git/gitconfig
     ~/.gitignore_global: git/gitignore_global
     ~/.hushlogin: hushlogin
