@@ -14,6 +14,7 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 | `zsh/zlogin` | Login shell config (runs after zshrc) |
 | `bash/aliases` | Shell aliases (sourced by zshrc) |
 | `bash/bashrc` | Bash config |
+| `bash/inputrc` | Readline config |
 | `git/gitconfig` | Git aliases, settings, user config |
 | `git/gitignore_global` | Global gitignore |
 | `ssh/config` | SSH host config |
