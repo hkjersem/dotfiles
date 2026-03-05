@@ -9,6 +9,7 @@ done
 
 # Update App Store apps
 softwareupdate -i -a
+command -v mas &>/dev/null && mas upgrade
 
 # Update node — install latest LTS, migrate globals if version changed
 bash ~/.dotfiles/scripts/install-node.sh lts
@@ -55,6 +56,10 @@ fi
 if [[ "$SKIP_DEFAULTS" == false ]]; then
     bash ~/.dotfiles/macos/osxdefaults.sh
 fi
+
+# Cleanup
+rm -rf ~/.npm/_npx
+pnpm store prune
 
 # End script
 echo "Done. Enjoy your updated install."
