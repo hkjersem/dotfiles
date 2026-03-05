@@ -8,7 +8,15 @@ for arg in "$@"; do
 done
 
 # Update App Store apps
-softwareupdate -i -a
+UPDATE_OUT=$(softwareupdate -i -a 2>&1)
+echo "$UPDATE_OUT"
+if echo "$UPDATE_OUT" | grep -qi "restart"; then
+    read -r -p "A restart is required to complete installation. Restart now? [y/N] " _response
+    if [[ "$_response" =~ ^[Yy]$ ]]; then
+        sudo -n true 2>/dev/null && echo "Restarting..." || { echo "Administrator access required to restart. Please enter your password:"; sudo -v; echo "Restarting..."; }
+        sudo shutdown -r now
+    fi
+fi
 command -v mas &>/dev/null && mas upgrade
 
 # Update node — install latest LTS, migrate globals if version changed
@@ -26,7 +34,7 @@ brew upgrade
 brew cleanup
 
 # Update Zsh
-ZSH=~/.oh-my-zsh zsh ~/.oh-my-zsh/tools/upgrade.sh
+ZSH=~/.oh-my-zsh DISABLE_UPDATE_PROMPT=true zsh ~/.oh-my-zsh/tools/upgrade.sh
 
 # Install or update zsh-syntax-highlighting
 if [ -d ~/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting ];
