@@ -45,23 +45,40 @@ fi
 
 NOW=$(date +%s)
 APPLE_LOCALE=$(defaults read NSGlobalDomain AppleLocale 2>/dev/null || echo "")
-HELPER="$(dirname "$0")/helpers/format-dates.py"
 
-# Match only stable X.Y.Z versions by default; include pre-release with --beta
-$SHOW_BETA \
-    && VER_PAT='"[0-9]+\.[0-9]+\.[0-9]+[^"]*"' \
-    || VER_PAT='"[0-9]+\.[0-9]+\.[0-9]+"'
+if ! command -v gdate &>/dev/null; then
+    echo "Error: 'gdate' not found. Run: brew install coreutils" >&2
+    exit 1
+fi
 
-# Prepend package name to ver field so the helper label is "pkg@ver"
+# Format "label iso_date" pairs: uses gdate (coreutils) for locale-aware formatting
 format_rows() {
     local package="$1"
-    awk -v pkg="$package" '{print pkg "@" $0}' \
-        | python3 "$HELPER" "$APPLE_LOCALE" "$NOW"
+    while IFS=' ' read -r ver iso; do
+        label="${package}@${ver}"
+        iso_clean="${iso%%.*}"
+        iso_clean="${iso_clean%Z}"
+        epoch=$(LC_ALL="${APPLE_LOCALE}.UTF-8" gdate -d "$iso_clean" +%s 2>/dev/null) || continue
+        secs=$(( NOW - epoch ))
+        days=$(( secs / 86400 ))
+        if (( days < 7 )); then
+            age="${days}d $(( (secs % 86400) / 3600 ))h ago"
+        else
+            age="${days} days ago"
+        fi
+        fmt_date=$(LC_ALL="${APPLE_LOCALE}.UTF-8" gdate -d "$iso_clean" "+%x %H:%M" 2>/dev/null)
+        printf "%s\t%s\t(%s)\n" "$label" "$age" "$fmt_date"
+    done | column -t -s $'\t'
 }
 
 maybe_tail() {
     $SHOW_ALL && cat || tail -10
 }
+
+# Match only stable X.Y.Z versions by default; include pre-release with --beta
+$SHOW_BETA \
+    && VER_PAT='"[0-9]+\.[0-9]+\.[0-9]+[^"]*"' \
+    || VER_PAT='"[0-9]+\.[0-9]+\.[0-9]+"'
 
 # Sort "ver iso" lines — by semver (default) or by release date
 sort_versions() {
