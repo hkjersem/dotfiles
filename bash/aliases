@@ -105,3 +105,8 @@ install_node() { bash "$HOME/.dotfiles/scripts/install-node.sh" "$@"; }
 #   Versions can be a major (22), full string (v22.22.0), or lts
 #   e.g. npm_globals_diff 22, npm_globals_diff lts 22
 npm_globals_diff() { bash "$HOME/.dotfiles/scripts/npm-globals-diff.sh" "$@"; }
+
+# Check days since release for an npm package (last 10 versions by default)
+# Usage: npm_release_age <package>[@version] [--all|-a] [--date|-d] [--beta|-b]
+#   e.g. npm_release_age react, npm_release_age react@19 --all, npm_release_age react@19.1.1
+npm_release_age() { bash "$HOME/.dotfiles/scripts/npm-release-age.sh" "$@"; }
