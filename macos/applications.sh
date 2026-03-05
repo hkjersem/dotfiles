@@ -26,8 +26,9 @@ fi
 npm i -g diff-so-fancy@latest
 
 # Homebrew packages
-brew install fzf   # fuzzy finder
 brew install bat   # better cat with syntax highlighting
+brew install coreutils  # GNU date, sed, etc. (gdate, gsed, ...)
+brew install fzf        # fuzzy finder
 brew install tree  # directory tree viewer
 
 # ZSH
