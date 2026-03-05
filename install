@@ -8,11 +8,17 @@ DOTBOT_DIR="dotbot"
 DOTBOT_BIN="bin/dotbot"
 BASEDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+SKIP_AUDIT=false
+DOTBOT_ARGS=()
+for arg in "$@"; do
+  [[ "$arg" == "--no-audit" ]] && SKIP_AUDIT=true || DOTBOT_ARGS+=("$arg")
+done
+
 # Always run audit on exit, even if dotbot reports errors
-trap 'bash "${BASEDIR}/scripts/audit.sh"' EXIT
+$SKIP_AUDIT || trap 'bash "${BASEDIR}/scripts/audit.sh"' EXIT
 
 cd "${BASEDIR}"
 git -C "${DOTBOT_DIR}" submodule sync --quiet --recursive
 git submodule update --init --recursive "${DOTBOT_DIR}"
 
-"${BASEDIR}/${DOTBOT_DIR}/${DOTBOT_BIN}" -d "${BASEDIR}" -c "${CONFIG}" "${@}"
+"${BASEDIR}/${DOTBOT_DIR}/${DOTBOT_BIN}" -d "${BASEDIR}" -c "${CONFIG}" "${DOTBOT_ARGS[@]}"

@@ -29,6 +29,7 @@ npm i -g diff-so-fancy@latest
 brew install bat   # better cat with syntax highlighting
 brew install coreutils  # GNU date, sed, etc. (gdate, gsed, ...)
 brew install fzf        # fuzzy finder
+brew install mas        # Mac App Store CLI
 brew install tree  # directory tree viewer
 
 # ZSH

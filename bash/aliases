@@ -26,7 +26,7 @@ alias ...="cd ../.."
 alias ....="cd ../../.."
 alias -- -="cd -"                  # Go to previous dir with -
 alias cd.='cd $(readlink -f .)'    # Go to real dir (i.e. if current dir is linked)
-alias tree="tree -A"
+alias tree="tree -A -C -L 2 --gitignore"
 alias treed="tree -d"
 alias tree1="tree -d -L 1"
 alias tree2="tree -d -L 2"
@@ -60,8 +60,10 @@ alias week="date +%V"
 # Enable aliases to be sudo’ed
 alias sudo='sudo '
 
-# Update everything
-alias update='bash ~/.dotfiles/macos/update.sh --no-defaults'
+# Dotfiles management
+alias dotfiles-update='bash ~/.dotfiles/macos/update.sh --no-defaults'
+alias dotfiles-install='bash ~/.dotfiles/install --no-audit; bash ~/.dotfiles/macos/install.sh --no-defaults'
+alias dotfiles-audit='bash ~/.dotfiles/scripts/audit.sh'
 
 # Flush Directory Service cache
 alias flush="dscacheutil -flushcache && killall -HUP mDNSResponder"
