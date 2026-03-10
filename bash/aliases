@@ -24,8 +24,8 @@ alias ld="ls -ld */"
 alias ..="cd .."
 alias ...="cd ../.."
 alias ....="cd ../../.."
-alias -- -="cd -"                  # Go to previous dir with -
-alias cd.='cd $(readlink -f .)'    # Go to real dir (i.e. if current dir is linked)
+alias -- -="cd -" # Go to previous dir with -
+alias cd.='cd $(readlink -f .)' # Go to real dir (i.e. if current dir is linked)
 alias tree="tree -A -C -L 2 --gitignore"
 alias tree1="tree -d -L 1"
 alias tree2="tree -d -L 2"
@@ -36,6 +36,8 @@ alias ni="npm install"
 alias nun="npm uninstall"
 alias nup="npm update && npm out"
 alias nrr="find . -name 'node_modules' -type d -prune -exec rm -rf '{}' +"
+alias pn=pnpm
+alias pnx='pnpm dlx'
 
 # Network
 alias ip="dig +short myip.opendns.com @resolver1.opendns.com"
@@ -105,3 +107,28 @@ npm_globals_diff() { bash "$HOME/.dotfiles/scripts/npm-globals-diff.sh" "$@"; }
 # Usage: npm_release_age <package>[@version] [--all|-a] [--date|-d] [--beta|-b]
 #   e.g. npm_release_age react, npm_release_age react@19 --all, npm_release_age react@19.1.1
 npm_release_age() { bash "$HOME/.dotfiles/scripts/npm-release-age.sh" "$@"; }
+
+# Updates minor/patch only, skips major version bumps
+# Usage: pn_update [--dry-run] [--yes] [--cooldown <days>]
+pn_update() { bash "$HOME/.dotfiles/scripts/pnpm-update.sh" "$@"; }
+
+# Create a directory and cd into it
+mkd() { mkdir -p "$@" && cd "$_"; }
+
+# Open current directory (or given path) in Finder
+o() { open "${1:-.}"; }
+
+# Clone a git repo and cd into it: gclone <url> [name]
+gclone() { git clone "$@" && cd "${2:-$(basename "${1%.git}")}"; }
+
+# Serve current directory over HTTP: server [port] (default: 8080)
+server() { python3 -m http.server "${1:-8080}"; }
+
+# Prevent iCloud from syncing specific folders: nosync [folder...] (default: node_modules .git)
+nosync() {
+    [[ $# -eq 0 ]] && set -- "node_modules" ".git"
+    for arg in "$@"; do
+        mkdir -p "$arg"
+        xattr -w 'com.apple.fileprovider.ignore#P' 1 "$arg"
+    done
+}

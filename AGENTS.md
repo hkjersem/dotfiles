@@ -24,6 +24,7 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 | `scripts/install-node.sh` | Install a Node version via fnm, migrate globals, clean up old same-major versions |
 | `scripts/npm-globals-diff.sh` | Diff global npm packages between two node versions |
 | `scripts/npm-release-age.sh` | Check days since release for an npm package or version |
+| `scripts/pnpm-update.sh` | Updates minor/patch only, skips major version bumps |
 | `macos/applications.sh` | Bootstrap script — installs brew formulae and tools |
 | `macos/install.sh` | Full machine setup entry point (calls applications.sh etc.) |
 | `macos/update.sh` | Update installed tools |
