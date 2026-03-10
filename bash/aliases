@@ -108,8 +108,8 @@ npm_globals_diff() { bash "$HOME/.dotfiles/scripts/npm-globals-diff.sh" "$@"; }
 #   e.g. npm_release_age react, npm_release_age react@19 --all, npm_release_age react@19.1.1
 npm_release_age() { bash "$HOME/.dotfiles/scripts/npm-release-age.sh" "$@"; }
 
-# Updates minor/patch only, skips major version bumps
-# Usage: pn_update [--dry-run] [--yes] [--cooldown <days>]
+# Updates minor/patch only, skips major version bumps by default
+# Usage: pn_update [--dry-run] [--yes] [--force] [--major] [--cooldown <days>] [<package>]
 pn_update() { bash "$HOME/.dotfiles/scripts/pnpm-update.sh" "$@"; }
 
 # Create a directory and cd into it

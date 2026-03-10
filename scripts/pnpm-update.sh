@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 # pnpm-update
-# Like `pnpm outdated` + `pnpm update`, but skips major version bumps.
+# Like `pnpm outdated` + `pnpm update`, but skips major version bumps by default.
 # For packages where only a major bump exists, updates to latest within current major.
 # Respects minimumReleaseAge / minimumReleaseAgeExclude from pnpm-workspace.yaml or .npmrc.
 # Handles pnpm workspaces and catalog: entries.
 #
-# Usage: pnpm-update [--dry-run] [-y] [--cooldown <days>]
+# Usage: pnpm-update [--dry-run] [-y] [--force] [--major] [--cooldown <days>] [<package>]
+#   <package>          Only update this package
 #   --dry-run          Show what would change, make no changes
 #   -y / --yes         Skip confirmation prompt
+#   --force            Check all exact pins directly via npm
+#   --major            Allow major version bumps
 #   --cooldown <days>  Override cooldown in days (0 = disable)
 
 set -euo pipefail
@@ -23,12 +26,17 @@ fi
 # ── Args ──────────────────────────────────────────────────────────────────────
 DRY_RUN=false
 AUTO_YES=false
+FORCE_CHECK=false
+ALLOW_MAJOR=false
 CLI_COOLDOWN=""   # explicitly set via flag; "0" disables cooldown
+FILTER_PKG=""     # if set, only process this package
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run|-n)  DRY_RUN=true; shift ;;
     --yes|-y)      AUTO_YES=true; shift ;;
+    --force|-f)    FORCE_CHECK=true; shift ;;
+    --major|-m)    ALLOW_MAJOR=true; shift ;;
     --cooldown)
       if [[ $# -lt 2 ]]; then
         echo -e "${RED}Error: --cooldown requires a value${RESET}" >&2; exit 1
@@ -36,12 +44,16 @@ while [[ $# -gt 0 ]]; do
       CLI_COOLDOWN="$2"; shift 2 ;;
     --cooldown=*)  CLI_COOLDOWN="${1#*=}"; shift ;;
     --help|-h)
-      echo "Usage: pnpm-update [--dry-run] [--yes] [--cooldown <days>]"
+      echo "Usage: pnpm-update [--dry-run] [--yes] [--force] [--major] [--cooldown <days>] [<package>]"
+      echo "  <package>         Only update this package"
       echo "  --dry-run         Show planned updates without making changes"
       echo "  --yes             Skip confirmation prompt"
+      echo "  --force           Check all exact pins directly via npm"
+      echo "  --major           Allow major version bumps"
       echo "  --cooldown <days> Override cooldown in days (0 = disable)"
       exit 0 ;;
-    *) shift ;;
+    -*) shift ;;
+    *)  FILTER_PKG="$1"; shift ;;
   esac
 done
 
@@ -67,6 +79,7 @@ cd "$ROOT"
 COOLDOWN_MINUTES=""
 COOLDOWN_SOURCE=""
 COOLDOWN_EXCLUDE=()
+CONFIG_RELEASE_AGE=""   # raw minimumReleaseAge from config (before any CLI override)
 
 if [[ -n "$CLI_COOLDOWN" ]]; then
   if ! [[ "$CLI_COOLDOWN" =~ ^[0-9]+$ ]]; then
@@ -93,6 +106,8 @@ if [[ -f "$ROOT/pnpm-workspace.yaml" ]]; then
       COOLDOWN_SOURCE="pnpm-workspace.yaml"
     fi
   fi
+  [[ -z "$CONFIG_RELEASE_AGE" ]] && CONFIG_RELEASE_AGE=$(grep -E '^minimumReleaseAge[[:space:]]*:' \
+    "$ROOT/pnpm-workspace.yaml" | grep -oE '[0-9]+' | head -1 || true)
   # Only honour excludes when cooldown is not explicitly overridden via flag
   if [[ -z "$CLI_COOLDOWN" ]]; then
     while IFS= read -r _line; do
@@ -113,6 +128,8 @@ if [[ -f "$ROOT/.npmrc" ]]; then
       COOLDOWN_SOURCE=".npmrc"
     fi
   fi
+  [[ -z "$CONFIG_RELEASE_AGE" ]] && CONFIG_RELEASE_AGE=$(grep -E '^minimum-release-age[[:space:]]*=' \
+    "$ROOT/.npmrc" | grep -oE '[0-9]+' | head -1 || true)
   # Only honour excludes when cooldown is not explicitly overridden via flag
   if [[ -z "$CLI_COOLDOWN" ]]; then
     # Array style:  minimum-release-age-exclude[]=pattern
@@ -144,6 +161,12 @@ breaking_prefix() {
   elif [[ "$minor" -gt 0 ]]; then echo "0.$minor"
   else                            echo "0.0.${patch}"
   fi
+}
+
+# Returns true (exit 0) if $1 is strictly newer than $2 per semver
+# Handles prerelease correctly: 1.0.0 > 1.0.0-rc.1 > 1.0.0-beta.1
+semver_newer() {
+  node -e 'const parse=v=>{const m=v.match(/^(\d+)\.(\d+)\.(\d+)(?:-(.+))?$/);return m?[+m[1],+m[2],+m[3],m[4]||null]:null};const cmp=(a,b)=>{for(let i=0;i<3;i++)if(a[i]!==b[i])return a[i]-b[i];if(!a[3]&&!b[3])return 0;if(!a[3])return 1;if(!b[3])return -1;return a[3]<b[3]?-1:1};const[a,b]=[process.argv[1],process.argv[2]].map(parse);process.exit(a&&b&&cmp(a,b)>0?0:1)' "$1" "$2" 2>/dev/null
 }
 
 latest_in_prefix() {
@@ -265,21 +288,149 @@ RECURSIVE_FLAG=""
 [[ -f "$ROOT/pnpm-workspace.yaml" ]] && RECURSIVE_FLAG="--recursive"
 
 OUTDATED=$(pnpm outdated $RECURSIVE_FLAG --json 2>/dev/null || true)
-if [[ -z "$OUTDATED" || "$OUTDATED" == "{}" ]]; then
+[[ -z "$OUTDATED" ]] && OUTDATED="{}"
+
+# ── Augment via npm when pnpm outdated may be incomplete ─────────────────────
+# pnpm applies minimumReleaseAge to `pnpm outdated`. When the script's effective
+# cooldown is lower than that value, pnpm suppresses packages the script should
+# surface. --force checks all exact pins directly via npm, bypassing pnpm's output.
+SHOULD_AUGMENT=false
+if $FORCE_CHECK; then
+  SHOULD_AUGMENT=true
+elif [[ -n "$CONFIG_RELEASE_AGE" && "$CONFIG_RELEASE_AGE" -gt 0 ]]; then
+  effective=${COOLDOWN_MINUTES:-$CONFIG_RELEASE_AGE}
+  [[ "$effective" -lt "$CONFIG_RELEASE_AGE" ]] && SHOULD_AUGMENT=true
+fi
+
+if $SHOULD_AUGMENT; then
+  declare -a _aug_pkg=() _aug_pin=()
+  declare -A _aug_seen=() _aug_in_outdated=()
+
+_aug_add() {
+  local pkg="$1" pin="$2"
+  [[ -z "$pkg" || -z "$pin" ]] && return
+  pin="${pin#v}"                                 # strip leading v (e.g. v1.4.9 → 1.4.9)
+  [[ ! "$pin" =~ ^[0-9] ]] && return        # skip ranges (^, ~, >=, *) and workspace:/catalog:
+  [[ -n "${_aug_seen[$pkg]:-}" ]] && return  # already queued
+  # Track packages already in pnpm outdated — we'll verify npm agrees on the target
+  echo "$OUTDATED" | jq -e ".\"${pkg}\"" &>/dev/null && _aug_in_outdated["$pkg"]=1
+  _aug_pkg+=("$pkg"); _aug_pin+=("$pin")
+  _aug_seen["$pkg"]=1
+}
+
+# Catalog entries from pnpm-workspace.yaml
+if [[ -f "$ROOT/pnpm-workspace.yaml" ]]; then
+  while IFS= read -r line; do
+    pkg=$(echo "$line" | sed "s/^[[:space:]]*//;s/['\"]//g;s/[[:space:]]*:[[:space:]]*.*//" )
+    pin=$(echo "$line" | sed "s/.*:[[:space:]]*//" | tr -d "'\"\r" | xargs)
+    _aug_add "$pkg" "$pin"
+  done < <(awk '/^catalog:/{f=1;next} /^[a-zA-Z]/{f=0} f' "$ROOT/pnpm-workspace.yaml")
+fi
+
+# Direct exact pins in workspace package.json files
+declare -a _pkgjsons=("$ROOT/package.json")
+if [[ -f "$ROOT/pnpm-workspace.yaml" ]]; then
+  while IFS= read -r pattern; do
+    [[ -z "$pattern" ]] && continue
+    for _wd in $ROOT/$pattern; do
+      [[ -f "$_wd/package.json" ]] && _pkgjsons+=("$_wd/package.json")
+    done
+  done < <(awk '/^packages:/{f=1;next} /^[a-zA-Z]/{f=0} f && /^\s+-/' "$ROOT/pnpm-workspace.yaml" \
+           | sed "s/^[[:space:]]*-[[:space:]]*//;s/['\"]//g;s/[[:space:]]*$//")
+fi
+for _pj in "${_pkgjsons[@]}"; do
+  while IFS=$'\t' read -r pkg pin; do
+    # catalog: and workspace: are not direct pins
+    [[ "$pin" == catalog* || "$pin" == workspace* ]] && continue
+    _aug_add "$pkg" "$pin"
+  done < <(jq -r '
+    ["dependencies","devDependencies","peerDependencies","optionalDependencies"] as $t |
+    $t[] as $dt | (.[$dt] // {}) | to_entries[] | "\(.key)\t\(.value)"
+  ' "$_pj" 2>/dev/null)
+done
+
+# Parallel npm view + inject
+if [[ ${#_aug_pkg[@]} -gt 0 ]]; then
+  echo -ne "  ${DIM}Checking ${#_aug_pkg[@]} exact-pinned packages...${RESET}\r" >&2
+  _aug_tmp=$(mktemp -d)
+  for i in "${!_aug_pkg[@]}"; do
+    npm view "${_aug_pkg[$i]}" version 2>/dev/null > "$_aug_tmp/$i" &
+  done
+  wait
+  echo -ne "\033[2K" >&2
+  for i in "${!_aug_pkg[@]}"; do
+    pkg="${_aug_pkg[$i]}"; pin="${_aug_pin[$i]}"
+    latest=$(tr -d '"' < "$_aug_tmp/$i" 2>/dev/null | xargs) || continue
+    [[ -z "$latest" ]] && continue
+    # Skip if latest is not newer than pinned (handles stable behind a beta pin)
+    semver_newer "$latest" "$pin" || continue
+    if [[ -n "${_aug_in_outdated[$pkg]:-}" ]]; then
+      # Package already in pnpm outdated — check if npm has a newer target than pnpm reported
+      pnpm_target=$(echo "$OUTDATED" | jq -r ".\"${pkg}\".latest" | tr -d '"'"'")
+      [[ "$latest" == "$pnpm_target" ]] && continue
+      semver_newer "$latest" "$pnpm_target" || continue
+      # npm has a newer version — update the target; cooldown logic in main loop handles the rest
+      OUTDATED=$(echo "$OUTDATED" | jq \
+        --arg pkg "$pkg" --arg latest "$latest" \
+        '.[$pkg].latest = $latest | .[$pkg].wanted = $latest')
+    else
+      # Package missing from pnpm outdated — inject if newer than pinned
+      [[ "$latest" == "$pin" ]] && continue
+      OUTDATED=$(echo "$OUTDATED" | jq \
+        --arg pkg "$pkg" --arg current "$pin" --arg latest "$latest" \
+        '. + {($pkg): {"current": $current, "latest": $latest, "wanted": $latest}}')
+    fi
+  done
+  rm -rf "$_aug_tmp"
+  fi  # ${#_aug_pkg[@]} -gt 0
+fi  # SHOULD_AUGMENT
+
+if [[ "$OUTDATED" == "{}" ]]; then
   echo -e "${GREEN}✓ All packages are up to date!${RESET}"; exit 0
 fi
 
+# ── Filter to single package if requested ─────────────────────────────────────
+if [[ -n "$FILTER_PKG" ]]; then
+  OUTDATED=$(echo "$OUTDATED" | jq --arg pkg "$FILTER_PKG" '{($pkg): .[$pkg]} | with_entries(select(.value != null))')
+  if [[ "$OUTDATED" == "{}" ]]; then
+    echo -e "${GREEN}✓ ${FILTER_PKG} is up to date!${RESET}"; exit 0
+  fi
+fi
+
 # ── Build update plan ─────────────────────────────────────────────────────────
-declare -a P_PKG=() P_FROM=() P_TO=() P_NOTE=() P_NOTE2=() P_LOC=()   # to update
+declare -a P_PKG=() P_FROM=() P_TO=() P_NOTE=() P_NOTE2=() P_LOC=() P_MAJOR=()   # to update
 declare -a S_PKG=() S_FROM=() S_TO=() S_LOC=()                # skipped (major-only)
 declare -a R_PKG=() R_FROM=() R_TO=() R_AGE=()              # too recent
 
 COOLDOWN_ACTIVE=false
 [[ -n "$COOLDOWN_MINUTES" && "$COOLDOWN_MINUTES" -gt 0 ]] && COOLDOWN_ACTIVE=true
 
+# ── Pre-fetch npm time data for cooldown checks (parallel) ───────────────────
+declare -A _PKG_TIMES=()
+if $COOLDOWN_ACTIVE; then
+  declare -a _time_pkgs=()
+  while IFS= read -r pkg; do
+    is_cooldown_excluded "$pkg" && continue
+    _time_pkgs+=("$pkg")
+  done < <(echo "$OUTDATED" | jq -r 'keys[]')
+  if [[ ${#_time_pkgs[@]} -gt 0 ]]; then
+    echo -ne "  ${DIM}Fetching version history for ${#_time_pkgs[@]} packages...${RESET}\r" >&2
+    _times_tmp=$(mktemp -d)
+    for i in "${!_time_pkgs[@]}"; do
+      npm view "${_time_pkgs[$i]}" time --json 2>/dev/null > "$_times_tmp/$i" &
+    done
+    wait
+    echo -ne "\033[2K" >&2
+    for i in "${!_time_pkgs[@]}"; do
+      _PKG_TIMES["${_time_pkgs[$i]}"]=$(cat "$_times_tmp/$i" 2>/dev/null || echo "")
+    done
+    rm -rf "$_times_tmp"
+  fi
+fi
+
 while IFS= read -r pkg; do
-  current=$(echo "$OUTDATED" | jq -r ".\"${pkg}\".current")
-  latest=$(echo "$OUTDATED"  | jq -r ".\"${pkg}\".latest")
+  current=$(echo "$OUTDATED" | jq -r ".\"${pkg}\".current" | tr -d '"'"'")
+  latest=$(echo "$OUTDATED"  | jq -r ".\"${pkg}\".latest"  | tr -d '"'"'")
   [[ "$current" == "null" || "$latest" == "null" ]] && continue
 
   current_prefix=$(breaking_prefix "$current")
@@ -293,29 +444,38 @@ while IFS= read -r pkg; do
   fi
 
   # Determine target version
-  tgt="" note="" note2=""
+  tgt="" note="" note2="" is_major=false
   if [[ "$current" == *-* ]]; then
-    # Current is a prerelease — find latest prerelease within same major
+    # Current is a prerelease — check for a stable release in same major first
     current_major=$(echo "$current" | cut -d. -f1)
-    safe=$(latest_prerelease_in_major "$pkg" "$current_major")
-    if [[ -n "$safe" && "$safe" != "$current" && \
-          "$(printf '%s\n%s' "$current" "$safe" | sort -V | tail -1)" == "$safe" ]]; then
-      tgt="$safe"; note="prerelease"
+    safe_stable=$(latest_in_prefix "$pkg" "$current_major")
+    if [[ -n "$safe_stable" && "$safe_stable" != "$current" ]] && semver_newer "$safe_stable" "$current"; then
+      tgt="$safe_stable"; note="was prerelease"
     else
-      continue  # already on latest prerelease, nothing to do
+      # No newer stable — look for latest prerelease in same major
+      safe=$(latest_prerelease_in_major "$pkg" "$current_major")
+      if [[ -n "$safe" && "$safe" != "$current" ]] && semver_newer "$safe" "$current"; then
+        tgt="$safe"; note="prerelease"
+      else
+        continue  # already on latest prerelease, nothing to do
+      fi
     fi
   elif [[ "$latest_prefix" != "$current_prefix" ]]; then
-    safe=$(latest_in_prefix "$pkg" "$current_prefix")
-    if [[ -n "$safe" && "$safe" != "$current" ]]; then
-      # Guard against npm returning an older version than what's installed
-      if [[ "$(printf '%s\n%s' "$current" "$safe" | sort -V | tail -1)" != "$safe" ]]; then
+    if $ALLOW_MAJOR; then
+      tgt="$latest"; is_major=true
+    else
+      safe=$(latest_in_prefix "$pkg" "$current_prefix")
+      if [[ -n "$safe" && "$safe" != "$current" ]]; then
+        # Guard against npm returning an older version than what's installed
+        if [[ "$(printf '%s\n%s' "$current" "$safe" | sort -V | tail -1)" != "$safe" ]]; then
+          S_PKG+=("$pkg"); S_FROM+=("$current"); S_TO+=("$latest"); S_LOC+=("$loc")
+          continue
+        fi
+        tgt="$safe"; note="${latest} latest"
+      else
         S_PKG+=("$pkg"); S_FROM+=("$current"); S_TO+=("$latest"); S_LOC+=("$loc")
         continue
       fi
-      tgt="$safe"; note="${latest} latest"
-    else
-      S_PKG+=("$pkg"); S_FROM+=("$current"); S_TO+=("$latest"); S_LOC+=("$loc")
-      continue
     fi
   else
     [[ "$latest" == "$current" ]] && continue   # already up to date
@@ -324,10 +484,8 @@ while IFS= read -r pkg; do
 
   # Cooldown age check (skip if package is in exclude list)
   if $COOLDOWN_ACTIVE && ! is_cooldown_excluded "$pkg"; then
-    echo -ne "  ${DIM}Checking age of ${pkg}@${tgt}...${RESET}\r" >&2
-    pkg_times=$(npm view "$pkg" time --json 2>/dev/null) || pkg_times=""
+    pkg_times="${_PKG_TIMES[$pkg]:-}"
     age=$(version_age_minutes "$pkg" "$tgt" "$pkg_times") || age=""
-    echo -ne "\033[2K"
     if [[ -n "$age" && "$age" -lt "$COOLDOWN_MINUTES" ]]; then
       # Target too recent — walk back through versions (newest first) to find one that passes cooldown
       fallback_tgt=""
@@ -357,7 +515,7 @@ while IFS= read -r pkg; do
     fi
   fi
 
-  P_PKG+=("$pkg"); P_FROM+=("$current"); P_TO+=("$tgt"); P_NOTE+=("${note2:-}"); P_NOTE2+=("$note"); P_LOC+=("$loc")
+  P_PKG+=("$pkg"); P_FROM+=("$current"); P_TO+=("$tgt"); P_NOTE+=("$note"); P_NOTE2+=("${note2:-}"); P_LOC+=("$loc"); P_MAJOR+=("$is_major")
 done < <(echo "$OUTDATED" | jq -r 'keys[]')
 
 # ── Display ───────────────────────────────────────────────────────────────────
@@ -387,7 +545,8 @@ fi
 
 # Clean updates (no notes) — no section title, directly under header
 for i in "${C_IDX[@]}"; do
-  printf "  ${GREEN}%-38s${RESET}  %-14s  %-14s  ${DIM}%s${RESET}\n" \
+  clr=$GREEN; ${P_MAJOR[$i]} && clr=$YELLOW
+  printf "  ${clr}%-38s${RESET}  %-14s  %-14s  ${DIM}%s${RESET}\n" \
     "${P_PKG[$i]}" "${P_FROM[$i]}" "${P_TO[$i]}" "$(_fmt_loc "${P_LOC[$i]}")"
 done
 
@@ -448,15 +607,15 @@ for i in "${!P_PKG[@]}"; do
   pkg="${P_PKG[$i]}"; ver="${P_TO[$i]}"; loc="${P_LOC[$i]}"
 
   if [[ "$loc" == "catalog" ]]; then
-    # Use env vars so perl sees single-quoted regex — avoids @scope being interpolated as a perl array
-    PKG="$pkg" VER="$ver" perl -i -pe "s|^(\s+['\"]?\Q\$ENV{PKG}\E['\"]?\s*:\s*).*|\${1}\$ENV{VER}|" "$ROOT/pnpm-workspace.yaml"
+    # Capture quote style (", ', or none) around the version and replay it
+    PKG="$pkg" VER="$ver" perl -i -pe "s|^(\s+['\"]?\Q\$ENV{PKG}\E['\"]?\s*:\s*)(['\"]?)v?[^'\"\\r\\n]*\\2|\${1}\${2}\$ENV{VER}\${2}|" "$ROOT/pnpm-workspace.yaml"
     echo -e "  ${CYAN}catalog${RESET}              ${pkg}  →  ${ver}"
   elif [[ "$loc" != "unknown" ]]; then
     pkgjson="${loc%%:*}"; deptype="${loc##*:}"
     # Read current prefix (^, ~ or empty) via env var to avoid quoting issues
-    prefix=$(PKG="$pkg" perl -ne 'if (m|^\s+"\Q$ENV{PKG}\E"\s*:\s*"([^0-9"]*)|) { print $1; exit }' "$pkgjson")
-    # Replace the version value in-place, preserving all surrounding formatting
-    PKG="$pkg" PREFIX="$prefix" VER="$ver" perl -i -pe 's|^(\s+"\Q$ENV{PKG}\E"\s*:\s*")[^"]*"|${1}$ENV{PREFIX}$ENV{VER}"|' "$pkgjson"
+    prefix=$(PKG="$pkg" perl -ne 'if (m|^\s+"\Q$ENV{PKG}\E"\s*:\s*"([^0-9v"]*)|) { print $1; exit }' "$pkgjson")
+    # Replace the version value in-place, preserving all surrounding formatting (strips leading v)
+    PKG="$pkg" PREFIX="$prefix" VER="$ver" perl -i -pe 's|^(\s+"\Q$ENV{PKG}\E"\s*:\s*")v?[^"]*"|${1}$ENV{PREFIX}$ENV{VER}"|' "$pkgjson"
     echo -e "  ${CYAN}${pkgjson#$ROOT/}${RESET}  ${pkg}  →  ${prefix}${ver}"
   else
     echo -e "  ${YELLOW}⚠ Could not locate ${pkg} — skipped${RESET}"
