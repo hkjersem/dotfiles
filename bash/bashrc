@@ -18,8 +18,7 @@ export HISTFILESIZE="${HISTSIZE}";
 # Omit duplicates and commands that begin with a space from history.
 export HISTCONTROL='ignoreboth';
 
-# set your terminal to be the color variant of xterm, turn on colors in grep, etc
-export TERM=xterm-color
+# set your terminal to use colors in grep etc
 export CLICOLOR=1
 
 # Case-insensitive globbing (used in pathname expansion)
@@ -61,7 +60,7 @@ fi;
 complete -W "NSGlobalDomain" defaults;
 
 # Add `killall` tab completion for common apps
-complete -o "nospace" -W "Contacts Calendar Dock Finder Mail Safari iTunes SystemUIServer Terminal Twitter" killall;
+complete -o "nospace" -W "Contacts Calendar Dock Finder Mail Safari SystemUIServer Terminal" killall;
 
 ###############################################################################
 # Prompt                                                                      #

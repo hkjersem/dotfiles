@@ -13,6 +13,28 @@ ENABLE_CORRECTION="true"
 # Display red dots whilst waiting for completion.
 COMPLETION_WAITING_DOTS="true"
 
+# Load plugins
+plugins=(git zsh-syntax-highlighting zsh-autosuggestions history-substring-search)
+
+export ZSH_COMPDUMP="$HOME/.zcompdump"
+export ZSH_DISABLE_COMPFIX=true
+
+# Intercept omz's compinit call: use -C (skip compaudit) if dump is from today.
+# This ensures fpath is complete (omz adds plugins before calling compinit)
+# and avoids a redundant second compinit call.
+autoload -Uz compinit
+function compinit() {
+    unfunction compinit
+    autoload -Uz compinit
+    if [[ $(date +'%j') == $(stat -f '%Sm' -t '%j' "${ZSH_COMPDUMP}" 2>/dev/null) ]]; then
+        compinit -C -d "${ZSH_COMPDUMP}"
+    else
+        compinit -d "${ZSH_COMPDUMP}"
+    fi
+}
+
+source $ZSH/oh-my-zsh.sh
+
 # Fix history
 HISTFILE="$HOME/.zsh_history"
 HIST_STAMPS="dd.mm.yyyy"
@@ -27,9 +49,6 @@ setopt HIST_IGNORE_SPACE
 setopt HIST_REDUCE_BLANKS
 setopt INC_APPEND_HISTORY
 setopt SHARE_HISTORY
-
-# Load plugins
-plugins=(git zsh-syntax-highlighting zsh-autosuggestions history-substring-search)
 
 # User configuration
 export PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
@@ -50,38 +69,16 @@ export TIMEFMT='
   | Disk:   [38;5;159m%F[0m major page faults (pages loaded from disk)
   | System: [38;5;159m%P[0m CPU used, [38;5;159m%M[0m KB max memory used'
 
-autoload -U colors && colors
-
 # Disable Autocorrect for Specific Commands
 alias bun='nocorrect bun'
 alias yarn='nocorrect corepack yarn'
 alias npm='nocorrect corepack npm'
 alias pnpm='nocorrect corepack pnpm'
 alias pn=pnpm
-alias pnpx='pnpm dlx'
-# alias npx='pnpm dlx'
+alias pnx='pnpm dlx'
 
 # Set personal aliases, overriding those provided by oh-my-zsh libs, plugins, and themes.
 source ~/.aliases
-
-export ZSH_COMPDUMP="$HOME/.zcompdump"
-export ZSH_DISABLE_COMPFIX=true
-
-# Intercept omz's compinit call: use -C (skip compaudit) if dump is from today.
-# This ensures fpath is complete (omz adds plugins before calling compinit)
-# and avoids a redundant second compinit call.
-autoload -Uz compinit
-function compinit() {
-    unfunction compinit
-    autoload -Uz compinit
-    if [[ $(date +'%j') == $(stat -f '%Sm' -t '%j' "${ZSH_COMPDUMP}" 2>/dev/null) ]]; then
-        compinit -C -d "${ZSH_COMPDUMP}"
-    else
-        compinit -d "${ZSH_COMPDUMP}"
-    fi
-}
-
-source $ZSH/oh-my-zsh.sh
 
 eval "$(fnm env --use-on-cd --shell zsh)"
 
