@@ -1,131 +1,26 @@
-# Path to your oh-my-zsh installation.
-export ZSH=$HOME/.oh-my-zsh
+###############################################################################
+# Configuration modules                                                       #
+###############################################################################
 
-# Set the theme.
-ZSH_THEME="agnoster"
+source ~/.zsh_conf.d/omz.zsh
+source ~/.zsh_conf.d/plugins.zsh
+source ~/.zsh_conf.d/history.zsh
+source ~/.zsh_conf.d/env.zsh
+source ~/.zsh_conf.d/aliases.zsh
+source ~/.zsh_conf.d/prompt.zsh
+source ~/.zsh_conf.d/fnm.zsh
+source ~/.zsh_conf.d/fzf.zsh
 
-# Change how often to auto-update (in days).
-export UPDATE_ZSH_DAYS=100
+###############################################################################
+# Tool-managed blocks — updated automatically by installers                   #
+###############################################################################
 
-# Enable command auto-correction.
-ENABLE_CORRECTION="true"
 
-# Display red dots whilst waiting for completion.
-COMPLETION_WAITING_DOTS="true"
 
-# Load plugins
-plugins=(git zsh-syntax-highlighting zsh-autosuggestions history-substring-search)
+###############################################################################
+# Local overrides                                                              #
+###############################################################################
 
-export ZSH_COMPDUMP="$HOME/.zcompdump"
-export ZSH_DISABLE_COMPFIX=true
-
-# Intercept omz's compinit call: use -C (skip compaudit) if dump is from today.
-# This ensures fpath is complete (omz adds plugins before calling compinit)
-# and avoids a redundant second compinit call.
-autoload -Uz compinit
-function compinit() {
-    unfunction compinit
-    autoload -Uz compinit
-    if [[ $(date +'%j') == $(stat -f '%Sm' -t '%j' "${ZSH_COMPDUMP}" 2>/dev/null) ]]; then
-        compinit -C -d "${ZSH_COMPDUMP}"
-    else
-        compinit -d "${ZSH_COMPDUMP}"
-    fi
-}
-
-source $ZSH/oh-my-zsh.sh
-
-# Fix history
-HISTFILE="$HOME/.zsh_history"
-HIST_STAMPS="dd.mm.yyyy"
-HISTSIZE=100000
-SAVEHIST=$HISTSIZE
-setopt HIST_IGNORE_DUPS
-setopt HIST_IGNORE_ALL_DUPS
-setopt HIST_EXPIRE_DUPS_FIRST
-setopt HIST_SAVE_NO_DUPS
-setopt HIST_FIND_NO_DUPS
-setopt HIST_IGNORE_SPACE
-setopt HIST_REDUCE_BLANKS
-setopt INC_APPEND_HISTORY
-setopt SHARE_HISTORY
-
-# User configuration
-export PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-
-# Homebrew
-export PATH=/opt/homebrew/bin:$PATH
-
-# Set language environment
-export LANG=en_US.UTF-8
-export LC_ALL=en_US.utf-8
-
-# Give detailed report for all commands taking more than 5 seconds
-export REPORTTIME=5
-export TIMEFMT='
-> %J
-
-  | Time:   [38;5;159m%*E[0m total time, %U user time, %S kernel time
-  | Disk:   [38;5;159m%F[0m major page faults (pages loaded from disk)
-  | System: [38;5;159m%P[0m CPU used, [38;5;159m%M[0m KB max memory used'
-
-# Disable Autocorrect for Specific Commands
-alias bun='nocorrect bun'
-alias yarn='nocorrect corepack yarn'
-alias npm='nocorrect corepack npm'
-alias pnpm='nocorrect corepack pnpm'
-alias pn=pnpm
-alias pnx='pnpm dlx'
-
-# Set personal aliases, overriding those provided by oh-my-zsh libs, plugins, and themes.
-source ~/.aliases
-
-eval "$(fnm env --use-on-cd --shell zsh)"
-
-prompt_context() {
-  if [[ "$USER" != "$DEFAULT_USER" || -n "$SSH_CLIENT" ]]; then
-    prompt_segment black default "%(!.%{%F{yellow}%}.)%T"
-  fi
-}
-
-# Local overriding
 if [ -f ~/.zshrc_local ]; then
-	source ~/.zshrc_local
+  source ~/.zshrc_local
 fi
-
-# Set up fzf key bindings and fuzzy completion
-source <(fzf --zsh)
-# Customize fzf appearance and options
-export FZF_DEFAULT_OPTS='--no-height --no-reverse --inline-info'
-export FZF_DEFAULT_OPTS=$FZF_DEFAULT_OPTS'
-  --color=fg:-1,fg+:#d0d0d0,bg:-1,bg+:-1,gutter:-1
-  --color=hl:#63b05f,hl+:#5dc258,info:#afaf87,marker:#87ff00
-  --color=prompt:#afaf87,spinner:#af5fff,pointer:#af5fff,header:#87afaf
-  --color=border:#262626,label:#aeaeae,query:#d9d9d9
-  --color hl:underline,hl+:underline
-  --color=fg+:bold,hl+:bold
-  --color=fg:regular,hl:regular
-  --border="none" --border-label="" --preview-window="border-none"
-   --prompt="" --marker="" --pointer="" --separator="" --scrollbar=""'
-export FZF_CTRL_T_OPTS="
-  --walker-skip .git,node_modules,target
-  --select-1 --exit-0
-  --preview 'bat -n --color=always {}'
-  --bind 'ctrl-/:change-preview-window(down|right|)'
-  --bind '?:toggle-preview'"
-export FZF_ALT_C_OPTS="
-  --walker-skip .git,node_modules,target
-  --select-1 --exit-0
-  --preview 'tree -C {}'
-  --preview-window hidden
-  --bind 'ctrl-/:change-preview-window(down|right|)'
-  --bind '?:toggle-preview'"
-# Fix ALT-C command for listing dirs (or just use CTRL-T to list files and dirs)
-bindkey "ç" fzf-cd-widget
-
-# fzf-tab
-source ~/.oh-my-zsh/custom/plugins/fzf-tab/fzf-tab.plugin.zsh
-# fzf-tab inherits fzf options by default, but ensure consistency
-zstyle ':fzf-tab:*' use-fzf-default-opts yes
-zstyle ':fzf-tab:*' fzf-flags --layout=default --height=100%
-

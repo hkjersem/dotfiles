@@ -10,8 +10,9 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 |------|---------|
 | `install` | Dotbot entry point — run this to apply the dotfiles |
 | `install.conf.yaml` | Dotbot symlink map |
-| `zsh/zshrc` | Main zsh config |
-| `zsh/zlogin` | Login shell config (runs after zshrc) |
+| `zsh/zshrc` | Main zsh config — bootstrap only, sources conf.d modules |
+| `zsh/conf.d/` | Zsh config modules (sourced in order by zshrc): `omz.zsh`, `plugins.zsh`, `history.zsh`, `env.zsh`, `aliases.zsh`, `prompt.zsh`, `fnm.zsh`, `fzf.zsh` |
+| `zsh/zlogin` | Login shell config (runs after zshrc) — compiles compdump, propagates PATH to launchd |
 | `bash/aliases` | Shell aliases (sourced by zshrc) |
 | `bash/bashrc` | Bash config |
 | `bash/inputrc` | Readline config |
@@ -43,6 +44,7 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 - **Never hardcode paths** — always use `$HOME` or `~`, never `/Users/<username>/...`
 - **Never commit generated or cache files** — `.zcompdump`, `.zwc` and similar are machine-specific and gitignored
 - **All changes must be portable** — must work on any macOS machine, not just the current one
+- **When adding a new zsh config** — add it to a file in `zsh/conf.d/` and add a `source` line in `zsh/zshrc`
 - **When adding a new tool**: update `applications.sh` (install command), `install.conf.yaml` (symlink if needed), and add an update command to `macos/update.sh` if the tool can be updated
 - **Local machine overrides** belong in `~/.zshrc_local` — this file is intentionally untracked and should not be created or modified
 - **After making changes** that affect symlinks, brew formulae, plugins, or npm globals — run `bash scripts/audit.sh` to verify the repo and installed state are consistent

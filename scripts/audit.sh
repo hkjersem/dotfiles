@@ -82,6 +82,8 @@ while IFS= read -r line; do
             fail "$symlink → not found (run ./install)"
         elif [ -L "$symlink_path" ] && [ ! -e "$symlink_path" ]; then
             fail "$symlink → broken symlink"
+        elif [ ! -L "$symlink_path" ]; then
+            fail "$symlink → exists but is not a symlink (run ./install to replace)"
         else
             ok "$symlink"
         fi
@@ -145,7 +147,7 @@ section_start "Oh-my-zsh Plugins"
 if [ ! -d "$HOME/.oh-my-zsh" ]; then
     fail "oh-my-zsh is not installed"
 else
-    PLUGINS=$(grep -E '^plugins=\(' "$DOTFILES/zsh/zshrc" | sed 's/plugins=(\(.*\))/\1/' | tr ' ' '\n' | grep -v '^$')
+    PLUGINS=$(grep -E '^plugins=\(' "$DOTFILES/zsh/conf.d/omz.zsh" | sed 's/plugins=(\(.*\))/\1/' | tr ' ' '\n' | grep -v '^$')
     BUILTIN_PLUGINS=$(ls "$HOME/.oh-my-zsh/plugins/" 2>/dev/null)
 
     # Check each loaded plugin is actually installed
@@ -161,7 +163,7 @@ else
     done < <(echo "$PLUGINS")
 
     # Check for plugins sourced directly (e.g. fzf-tab which must load after compinit)
-    SOURCED_PLUGINS=$(grep -E "source.*oh-my-zsh/custom/plugins" "$DOTFILES/zsh/zshrc" \
+    SOURCED_PLUGINS=$(grep -rE "source.*oh-my-zsh/custom/plugins" "$DOTFILES/zsh/" \
         | sed 's|.*custom/plugins/\([^/]*\)/.*|\1|')
     while IFS= read -r plugin; do
         [[ -z "$plugin" ]] && continue
