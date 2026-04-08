@@ -37,7 +37,6 @@ alias nun="npm uninstall"
 alias nup="npm update && npm out"
 alias nrr="find . -name 'node_modules' -type d -prune -exec rm -rf '{}' +"
 alias pn=pnpm
-alias pnx='pnpm dlx'
 
 # Network
 alias ip="dig +short myip.opendns.com @resolver1.opendns.com"
@@ -108,9 +107,47 @@ npm_globals_diff() { bash "$HOME/.dotfiles/scripts/npm-globals-diff.sh" "$@"; }
 #   e.g. npm_release_age react, npm_release_age react@19 --all, npm_release_age react@19.1.1
 npm_release_age() { bash "$HOME/.dotfiles/scripts/npm-release-age.sh" "$@"; }
 
-# Updates minor/patch only, skips major version bumps by default
-# Usage: pn_update [--dry-run] [--yes] [--force] [--major] [--cooldown <days>] [<package>]
-pn_update() { bash "$HOME/.dotfiles/scripts/pnpm-update.sh" "$@"; }
+# Detects bun, pnpm or npm for the current project (packageManager field → lockfile)
+_detect_pm() { bash "$HOME/.dotfiles/scripts/package-manager/_detect-pm.sh"; }
+
+# Run any package manager command, e.g. pm run dev
+# Usage: pm <command> [args...]
+pm()  { local _p; _p="$(_detect_pm)" || return 1; "$_p" "$@"; }
+
+# Updates minor/patch by default, auto-detects bun, pnpm or npm (bun not supported — prints error)
+# Usage: pmu [--dry-run] [--yes] [--force] [--major] [--cooldown <days>] [<package>]
+pmu() { bash "$HOME/.dotfiles/scripts/package-manager/run.sh" "$@"; }
+
+# Execute a package without installing — pnpm dlx / npx / bunx
+# Usage: pmx <package> [args...]
+pmx() {
+  local _p; _p="$(_detect_pm)" || return 1
+  case "$_p" in
+    pnpm) pnpm dlx "$@" ;;
+    npm)  npx "$@" ;;
+    bun)  bunx "$@" ;;
+  esac
+}
+
+# Install packages, or install all deps when called with no args
+# Usage: pmi [<package...>] [-D] [-E] [-g]
+pmi() {
+  local _p; _p="$(_detect_pm)" || return 1
+  case "$_p" in
+    pnpm|bun) [[ $# -eq 0 ]] && "$_p" install || "$_p" add "$@" ;;
+    npm)      npm install "$@" ;;
+  esac
+}
+
+# Remove packages
+# Usage: pmr <package...>
+pmr() {
+  local _p; _p="$(_detect_pm)" || return 1
+  case "$_p" in
+    pnpm|bun) "$_p" remove "$@" ;;
+    npm)      npm uninstall "$@" ;;
+  esac
+}
 
 # Create a directory and cd into it
 mkd() { mkdir -p "$@" && cd "$_"; }
