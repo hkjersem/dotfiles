@@ -33,4 +33,9 @@ function compinit() {
     fi
 }
 
+# Prompt segment text colors — ANSI palette (values differ per light/dark profile)
+AGNOSTER_DIR_FG=7     # Ansi 7: #f6f8fa light / #24292e dark — adapts automatically
+AGNOSTER_GIT_CLEAN_FG=0   # Ansi 0:  #444d56 light / #586069 dark — dark
+AGNOSTER_GIT_DIRTY_FG=0   # Ansi 0:  same
+
 source $ZSH/oh-my-zsh.sh

@@ -1,5 +1,5 @@
 # zsh-autosuggestions — appearance and completion strategy
-ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=214'
+ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=11'
 ZSH_AUTOSUGGEST_STRATEGY=(history completion)
 
 # Clear autosuggestions when pasting to avoid confusion
