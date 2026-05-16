@@ -35,7 +35,7 @@ alias cpwd="pwd|tr -d '\n'|pbcopy" # Copies current path to clipboard
 alias ni="npm install"
 alias nun="npm uninstall"
 alias nup="npm update && npm out"
-alias nrr="find . -name 'node_modules' -type d -prune -exec rm -rf '{}' +"
+alias nrr="wipe node_modules"
 alias pn=pnpm
 
 # Network
@@ -189,3 +189,20 @@ nosync() {
         xattr -w 'com.apple.fileprovider.ignore#P' 1 "$arg"
     done
 }
+
+# Recursively delete all files/folders matching a name pattern from current dir
+# Usage: wipe <name> [--file|-f|--dir|-d]  (type auto-detected: --file if name has extension, --dir otherwise)
+wipe() {
+    local name="$1" flag="$2"
+    [[ -z "$name" ]] && { echo "Usage: wipe <name> [--file|-f|--dir|-d]"; return 1; }
+    local type
+    case "$flag" in
+        --file|-f) type=f ;;
+        --dir|-d)  type=d ;;
+        *)         [[ "$name" == *.* ]] && type=f || type=d ;;
+    esac
+    find . -not -path "*/node_modules/*" -not -path "*/.git/*" -name "$name" -type "$type" -prune -exec rm -rf '{}' \;
+}
+
+# Delete all known build artifacts and dependency folders from the current directory.
+alias wipe_clean='bash $HOME/.dotfiles/scripts/wipe-clean.sh'
