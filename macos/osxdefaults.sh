@@ -156,6 +156,14 @@ defaults write com.apple.terminal SecureKeyboardEntry -bool true
 # Don’t display the annoying prompt when quitting iTerm
 defaults write com.googlecode.iterm2 PromptOnQuit -bool false
 
+# Enable Touch ID for sudo (via sudo_local - survives macOS system updates)
+if [ ! -f /etc/pam.d/sudo_local ]; then
+    sudo cp /etc/pam.d/sudo_local.template /etc/pam.d/sudo_local
+fi
+if ! grep -q '^auth[[:space:]].*pam_tid\.so' /etc/pam.d/sudo_local; then
+    sudo sed -i '' 's/^#auth[[:space:]].*pam_tid\.so/auth       sufficient     pam_tid.so/' /etc/pam.d/sudo_local
+fi
+
 ###############################################################################
 # Activity Monitor                                                            #
 ###############################################################################
