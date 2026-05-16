@@ -2,7 +2,8 @@
 # Sourced by run.sh, or executed directly to print the detected package manager.
 #
 # Detects the package manager (bun, pnpm or npm) for the current project by walking
-# up from $PWD. Checks packageManager field in package.json first, then lockfile.
+# up from $PWD. Checks packageManager field in package.json first, then lockfile,
+# plus pnpm-workspace.yaml for fresh pnpm workspaces without a lockfile yet.
 
 _detect_pm() {
   local d="$PWD" pm=""
@@ -14,6 +15,7 @@ _detect_pm() {
     [[ -f "$d/bun.lock"          ]] && { pm="bun";  break; }
     [[ -f "$d/bun.lockb"         ]] && { pm="bun";  break; }
     [[ -f "$d/pnpm-lock.yaml"    ]] && { pm="pnpm"; break; }
+    [[ -f "$d/pnpm-workspace.yaml" ]] && { pm="pnpm"; break; }
     [[ -f "$d/package-lock.json" ]] && { pm="npm";  break; }
     d="$(dirname "$d")"
   done

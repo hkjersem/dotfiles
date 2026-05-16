@@ -83,7 +83,7 @@ _show_help() {
 
 # ── Root finder ───────────────────────────────────────────────────────────────
 # Walk up from $PWD; check packageManager field first, then lockfile.
-# Sets $ROOT and cd's into it.
+# Sets $ROOT without changing the working directory.
 _find_root() {
   local lockfile="$1"
   ROOT="$PWD"
@@ -95,10 +95,10 @@ _find_root() {
       if [[ -n "$_pm_field" ]]; then ROOT="$_d"; break; fi
     fi
     if [[ -f "$_d/$lockfile" ]]; then ROOT="$_d"; break; fi
+    if [[ "$lockfile" == "pnpm-lock.yaml" && -f "$_d/pnpm-workspace.yaml" ]]; then ROOT="$_d"; break; fi
     _d="$(dirname "$_d")"
   done
-  cd "$ROOT"
-  [[ -f "package.json" ]] || { echo -e "${RED}No package.json found in $ROOT${RESET}" >&2; exit 1; }
+  [[ -f "$ROOT/package.json" ]] || { echo -e "${RED}No package.json found in $ROOT${RESET}" >&2; exit 1; }
 }
 
 # ── YAML helper ───────────────────────────────────────────────────────────────
@@ -195,6 +195,299 @@ _collect_workspace_pkgjsons() {
       [[ -f "$_wd/package.json" ]] && echo "$_wd/package.json"
     done
   done < <(_workspace_patterns)
+}
+
+find_nearest_package_dir() {
+  local d="${1:-$PWD}"
+  while [[ "$d" != "/" ]]; do
+    [[ -f "$d/package.json" ]] && { echo "$d"; return 0; }
+    d="$(dirname "$d")"
+  done
+  return 1
+}
+
+pnpm_catalog_contains_package() {
+  local pkg="$1"
+  pnpm_catalog_keys | grep -Fxq "$pkg"
+}
+
+pnpm_catalog_keys() {
+  [[ -f "$ROOT/pnpm-workspace.yaml" ]] || return 0
+  awk '/^catalog:/{f=1;next} /^[a-zA-Z]/{f=0} f' "$ROOT/pnpm-workspace.yaml" \
+    | sed -nE "s/^[[:space:]]*['\"]?([^'\":]+)['\"]?[[:space:]]*:.*/\1/p"
+}
+
+pnpm_has_named_catalogs() {
+  [[ -f "$ROOT/pnpm-workspace.yaml" ]] || return 1
+  grep -qE '^catalogs:[[:space:]]*$' "$ROOT/pnpm-workspace.yaml"
+}
+
+pnpm_apply_catalog_version() {
+  local pkg="$1" ver="$2"
+  PKG="$pkg" VER="$ver" node - "$ROOT/pnpm-workspace.yaml" <<'EOF'
+const fs = require('fs');
+const file = process.argv[2];
+const pkg = process.env.PKG;
+const ver = process.env.VER;
+const source = fs.readFileSync(file, 'utf8');
+const hasFinalNewline = source.endsWith('\n');
+const lines = source.replace(/\n$/, '').split('\n');
+const out = [];
+let inCatalog = false;
+let changed = false;
+
+for (const line of lines) {
+  if (!inCatalog) {
+    if (/^catalog:\s*$/.test(line)) {
+      inCatalog = true;
+      out.push(line);
+      continue;
+    }
+    out.push(line);
+    continue;
+  }
+
+  if (/^[A-Za-z]/.test(line)) {
+    inCatalog = false;
+    out.push(line);
+    continue;
+  }
+
+  const match = line.match(/^(\s+['"]?)([^'":]+)(['"]?\s*:\s*)(['"]?)[^'"\r\n]*(\4\s*)$/);
+  if (match && match[2] === pkg) {
+    out.push(`${match[1]}${match[2]}${match[3]}${match[4]}${ver}${match[5]}`);
+    changed = true;
+  } else {
+    out.push(line);
+  }
+}
+
+if (changed) {
+  fs.writeFileSync(file, out.join('\n') + (hasFinalNewline ? '\n' : ''));
+}
+EOF
+}
+
+pnpm_remove_catalog_keys() {
+  [[ $# -gt 0 ]] || return 0
+  local remove_json
+  remove_json=$(printf '%s\n' "$@" | jq -R . | jq -s .)
+  REMOVE_PKGS_JSON="$remove_json" node - "$ROOT/pnpm-workspace.yaml" <<'EOF'
+const fs = require('fs');
+const file = process.argv[2];
+const remove = new Set(JSON.parse(process.env.REMOVE_PKGS_JSON || '[]'));
+const source = fs.readFileSync(file, 'utf8');
+const hasFinalNewline = source.endsWith('\n');
+const lines = source.replace(/\n$/, '').split('\n');
+const out = [];
+let inCatalog = false;
+let block = [];
+let changed = false;
+
+function flushCatalog() {
+  if (!inCatalog) return;
+  const kept = [block[0]];
+  let meaningful = 0;
+  for (const line of block.slice(1)) {
+    const match = line.match(/^\s+['"]?([^'":]+)['"]?\s*:/);
+    if (match && remove.has(match[1])) {
+      changed = true;
+      continue;
+    }
+    kept.push(line);
+    const trimmed = line.trim();
+    if (trimmed !== '' && !trimmed.startsWith('#')) meaningful += 1;
+  }
+  if (meaningful > 0) {
+    out.push(...kept);
+  } else {
+    changed = true;
+  }
+  inCatalog = false;
+  block = [];
+}
+
+for (const line of lines) {
+  if (!inCatalog) {
+    if (/^catalog:\s*$/.test(line)) {
+      inCatalog = true;
+      block = [line];
+    } else {
+      out.push(line);
+    }
+    continue;
+  }
+
+  if (/^[A-Za-z]/.test(line)) {
+    flushCatalog();
+    out.push(line);
+    continue;
+  }
+
+  block.push(line);
+}
+flushCatalog();
+
+if (changed) {
+  const next = out.join('\n') + (hasFinalNewline ? '\n' : '');
+  fs.writeFileSync(file, next);
+}
+EOF
+}
+
+pkg_name_from_spec() {
+  local spec="$1"
+  case "$spec" in
+    ./*|../*|/*|file:*|link:*|workspace:*|catalog:*|git:*|git+*|http:*|https:*|github:*|gitlab:*|bitbucket:*|jsr:*|npm:*)
+      return 1
+      ;;
+  esac
+
+  if [[ "$spec" == @* ]]; then
+    [[ "$spec" =~ ^(@[^/]+/[^@]+) ]] || return 1
+    echo "${BASH_REMATCH[1]}"
+    return 0
+  fi
+
+  local name="${spec%%@*}"
+  [[ -n "$name" && "$name" != *"/"* ]] || return 1
+  echo "$name"
+}
+
+find_all_declared_locations() {
+  local pkg="$1"
+  local pkgjsons=()
+  while IFS= read -r _pj; do pkgjsons+=("$_pj"); done < <(_collect_workspace_pkgjsons)
+
+  local found=0 pkgjson deptype val
+  for pkgjson in "${pkgjsons[@]}"; do
+    for deptype in dependencies devDependencies peerDependencies optionalDependencies; do
+      val=$(jq -r ".${deptype}[\"${pkg}\"] // empty" "$pkgjson" 2>/dev/null) || continue
+      [[ -z "$val" ]] && continue
+      echo "$pkgjson:$deptype"; found=1
+    done
+  done
+  [[ $found -eq 0 ]] && echo "unknown"
+}
+
+location_to_target() {
+  local loc="$1"
+  if [[ "$loc" == "catalog" || "$loc" == "unknown" ]]; then
+    echo "$loc"
+    return
+  fi
+
+  local pkgjson="${loc%%:*}"
+  if [[ "$pkgjson" == "$ROOT/package.json" ]]; then
+    echo "root"
+    return
+  fi
+
+  local workspace_name
+  workspace_name=$(jq -r '.name // empty' "$pkgjson" 2>/dev/null || true)
+  if [[ -n "$workspace_name" ]]; then
+    echo "workspace:$workspace_name"
+  else
+    echo "workspace-dir:${pkgjson%/package.json}"
+  fi
+}
+
+resolve_existing_target() {
+  local pkg="$1"
+  local finder="${2:-find_all_locations}"
+  local -a locations=() targets=()
+  local -A seen=()
+  mapfile -t locations < <("$finder" "$pkg")
+
+  local loc target
+  for loc in "${locations[@]}"; do
+    target="$(location_to_target "$loc")"
+    [[ -n "$target" ]] || continue
+    [[ -n "${seen[$target]:-}" ]] && continue
+    seen["$target"]=1
+    targets+=("$target")
+  done
+
+  if [[ ${#targets[@]} -eq 1 ]]; then
+    echo "${targets[0]}"
+  else
+    echo "ambiguous"
+  fi
+}
+
+resolve_registry_version() {
+  local spec="$1"
+  local resolved
+  resolved=$(npm view "$spec" version --json 2>/dev/null | jq -r 'if type == "array" then last else . end' 2>/dev/null || true)
+  [[ -n "$resolved" && "$resolved" != "null" ]] || {
+    echo "Could not resolve version for $spec" >&2
+    exit 1
+  }
+  echo "$resolved"
+}
+
+join_lines() {
+  local sep="$1"
+  shift
+  local first=true item
+  for item in "$@"; do
+    [[ -z "$item" ]] && continue
+    if $first; then
+      printf "%s" "$item"
+      first=false
+    else
+      printf "%s%s" "$sep" "$item"
+    fi
+  done
+}
+
+confirm_apply() {
+  local prompt="$1"
+  local auto_yes="${2:-false}"
+  local default_yes="${3:-true}"
+  if [[ "$auto_yes" == "true" ]]; then
+    return 0
+  fi
+
+  if [[ "$default_yes" == "true" ]]; then
+    printf "%s [y/n] " "$prompt"
+  else
+    printf "%s [y/N] " "$prompt"
+  fi
+  local confirm=""
+  IFS= read -r -s -n1 confirm
+  echo ""
+  if [[ "$default_yes" == "true" ]]; then
+    case "$confirm" in
+      ""|[Yy])
+        echo ""
+        return 0
+        ;;
+      $'\e'|[Nn])
+        echo "Aborted."
+        return 1
+        ;;
+      *)
+        echo "Aborted."
+        return 1
+        ;;
+    esac
+  else
+    case "$confirm" in
+      [Yy])
+        echo ""
+        return 0
+        ;;
+      ""|$'\e'|[Nn])
+        echo "Aborted."
+        return 1
+        ;;
+      *)
+        echo "Aborted."
+        return 1
+        ;;
+    esac
+  fi
 }
 
 # ── Location detection ────────────────────────────────────────────────────────
@@ -561,15 +854,7 @@ run_plan() {
   $DRY_RUN && { echo -e "${CYAN}Dry run — no changes made.${RESET}"; exit 0; }
 
   # ── Confirm ─────────────────────────────────────────────────────────────────
-  if ! $AUTO_YES; then
-    printf "Apply ${#P_PKG[@]} update(s)? [y/n] "
-    IFS= read -r -s -n1 confirm
-    echo ""
-    if [[ "$confirm" == $'\e' || "$confirm" =~ ^[Nn]$ ]]; then
-      echo "Aborted."; exit 0
-    fi
-    echo ""
-  fi
+  confirm_apply "Apply ${#P_PKG[@]} update(s)?" "$AUTO_YES" || exit 0
 
   # ── Apply ────────────────────────────────────────────────────────────────────
   echo -e "${BOLD}Updating...${RESET}"

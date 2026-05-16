@@ -130,44 +130,20 @@ pmx() {
 }
 
 # Install packages, or install all deps when called with no args
-# Usage: pmi [<package...>] [-D] [-E] [-g]
-pmi() {
-  local _p; _p="$(_detect_pm)" || return 1
-  case "$_p" in
-    pnpm|bun) [[ $# -eq 0 ]] && "$_p" install || "$_p" add "$@" ;;
-    npm)      npm install "$@" ;;
-  esac
-}
+# Usage: pmi [<package...>] [-D] [-E] [-g] [--root]
+pmi() { bash "$HOME/.dotfiles/scripts/package-manager/install.sh" "$@"; }
 
 # Remove packages
-# Usage: pmr <package...>
-pmr() {
-  local _p; _p="$(_detect_pm)" || return 1
-  case "$_p" in
-    pnpm|bun) "$_p" remove "$@" ;;
-    npm)      npm uninstall "$@" ;;
-  esac
-}
+# Usage: pmr <package...> [--root]
+pmr() { bash "$HOME/.dotfiles/scripts/package-manager/remove.sh" "$@"; }
+
+# Clean package-manager metadata. Removes safe manifest clutter and reports pnpm catalog suggestions.
+# Usage: pmc [--dry-run] [--yes]
+pmc() { bash "$HOME/.dotfiles/scripts/package-manager/clean.sh" "$@"; }
 
 # Audit and fix vulnerabilities (bun: reports only — no auto-fix available)
-# Usage: pma
-pma() {
-  local _p; _p="$(_detect_pm)" || return 1
-  case "$_p" in
-    pnpm) 
-      # Try depth-based update first, fall back to audit --fix if no changes
-      if [[ -f pnpm-workspace.yaml ]]; then
-        pnpm -r --include-workspace-root update --depth Infinity --lockfile-only 2>/dev/null || true
-      else
-        pnpm update --depth Infinity --lockfile-only 2>/dev/null || true
-      fi
-      pnpm audit --fix && pnpm install --lockfile-only
-      ;;
-    npm) npm audit fix --package-lock-only --ignore-scripts ;;
-    bun) bun audit ;;
-    yarn) yarn npm audit --fix --mode update-lockfile ;;
-  esac
-}
+# Usage: pma [--deep]
+pma() { bash "$HOME/.dotfiles/scripts/package-manager/audit.sh" "$@"; }
 
 # Create a directory and cd into it
 mkd() { mkdir -p "$@" && cd "$_"; }

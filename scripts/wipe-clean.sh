@@ -5,6 +5,10 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=package-manager/_update-lib.sh
+source "$SCRIPT_DIR/package-manager/_update-lib.sh"
+
 targets=(
     node_modules dist .dist build .build out .out coverage .coverage
     .next .nuxt .turbo .cache .parcel-cache .vite .svelte-kit
@@ -36,15 +40,7 @@ fi
 echo "Will delete:"
 echo "$found" | sed 's/^/  /'
 echo
-printf "Proceed? [y/N] "
-read -r -n 1 confirm
-echo
-case "$confirm" in
-    $'\e')          echo "Aborted."; exit 0 ;;
-    [Nn])           echo "Aborted."; exit 0 ;;
-    [Yy]|"")        ;;
-    *)              echo "Aborted."; exit 0 ;;
-esac
+confirm_apply "Proceed?" false false || exit 0
 
 while IFS= read -r dir; do
     rm -rf "$dir"

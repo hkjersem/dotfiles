@@ -33,9 +33,11 @@ COOLDOWN_EXCLUDE=()
 CONFIG_RELEASE_AGE=""
 
 _find_root "bun.lockb"
+cd "$ROOT"
 # bun 1.7+ may use bun.lock (text format) instead — retry if root not resolved
 if [[ ! -f "$ROOT/bun.lockb" && ! -f "$ROOT/bun.lock" ]]; then
   _find_root "bun.lock"
+  cd "$ROOT"
 fi
 
 # ── Cooldown config: bunfig.toml (project) → ~/.bunfig.toml (global) ─────────

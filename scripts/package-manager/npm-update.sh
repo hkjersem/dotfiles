@@ -35,6 +35,7 @@ COOLDOWN_EXCLUDE=()
 CONFIG_RELEASE_AGE=""
 
 _find_root "package-lock.json"
+cd "$ROOT"
 
 # ── Cooldown config: project .npmrc → global ~/.npmrc (days → minutes) ─────────
 # Supports both "min-release-age" (set by ensure-pm-config.sh) and "minimum-release-age"

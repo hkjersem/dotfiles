@@ -35,6 +35,7 @@ COOLDOWN_EXCLUDE=()
 CONFIG_RELEASE_AGE=""
 
 _find_root "pnpm-lock.yaml"
+cd "$ROOT"
 
 # ── Cooldown config: pnpm-workspace.yaml (minutes) > .npmrc (minutes) ────────
 if [[ -f "$ROOT/pnpm-workspace.yaml" ]]; then
@@ -65,20 +66,13 @@ fi
 # ── pnpm hooks ────────────────────────────────────────────────────────────────
 _find_location_extra() {
   local pkg="$1"
-  if [[ -f "$ROOT/pnpm-workspace.yaml" ]]; then
-    if awk '/^catalog:/{f=1;next} /^[a-zA-Z]/{f=0} f' "$ROOT/pnpm-workspace.yaml" \
-        | grep -qE "^\s+['\"]?$(echo "$pkg" | sed 's/[.+*?[\^${}|()]/\\&/g')['\"]?\s*:"; then
-      echo "catalog"; return
-    fi
-  fi
+  pnpm_catalog_contains_package "$pkg" && { echo "catalog"; return; }
   echo ""
 }
 
 _apply_catalog() {
   local pkg="$1" ver="$2"
-  PKG="$pkg" VER="$ver" perl -i -pe \
-    's|^(\s+['"'"'"]?\Q$ENV{PKG}\E['"'"'"]?\s*:\s*)(['"'"'"]?)v?[^'"'"'"\r\n]*\2|${1}${2}$ENV{VER}${2}|' \
-    "$ROOT/pnpm-workspace.yaml"
+  pnpm_apply_catalog_version "$pkg" "$ver"
   echo -e "  ${CYAN}catalog${RESET}              ${pkg}  ->  ${ver}"
 }
 
@@ -93,6 +87,21 @@ RECURSIVE_FLAG=""
 
 OUTDATED=$(pnpm outdated $RECURSIVE_FLAG --json 2>/dev/null || true)
 [[ -z "$OUTDATED" ]] && OUTDATED="{}"
+# pnpm outdated reports "wanted" and "latest" but not "current".
+# For this wrapper, "wanted" is the relevant baseline for update planning.
+OUTDATED=$(echo "$OUTDATED" | jq '
+  if type == "object" then
+    with_entries(
+      .value |= if ((.current // "") == "") then
+        . + { current: (.wanted // .latest // "") }
+      else
+        .
+      end
+    )
+  else
+    .
+  end
+' 2>/dev/null || echo "{}")
 
 _augment_outdated
 

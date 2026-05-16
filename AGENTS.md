@@ -25,8 +25,12 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 | `scripts/install-node.sh` | Install a Node version via fnm, migrate globals, clean up old same-major versions |
 | `scripts/npm-globals-diff.sh` | Diff global npm packages between two node versions |
 | `scripts/npm-release-age.sh` | Check days since release for an npm package or version |
-| `scripts/package-manager/` | Package manager scripts — invoked via `pm`, `pmx`, `pmu`, `pmi`, `pmr` aliases |
+| `scripts/package-manager/` | Package manager scripts — invoked via `pm`, `pmx`, `pmu`, `pmi`, `pmr`, `pma` aliases |
 | `scripts/package-manager/_detect-pm.sh` | Sourced by `run.sh` and `bash/aliases` — detects bun, pnpm or npm for the current project |
+| `scripts/package-manager/audit.sh` | Audit/fix wrapper — `pma`; pnpm uses `--fix` on v10 and `--fix=update` on v11+, and only does a deep lockfile refresh with `--deep` |
+| `scripts/package-manager/clean.sh` | Cleanup wrapper — removes unused default pnpm catalog entries when no named catalogs exist, removes empty manifest sections, and reports pnpm catalog suggestions |
+| `scripts/package-manager/install.sh` | Install wrapper — runs npm/bun installs directly and makes `pmi` workspace-aware for pnpm roots; unknown packages fall back to root add and catalog rewrites only happen on explicit versions |
+| `scripts/package-manager/remove.sh` | Remove wrapper — runs npm/bun removals directly and makes `pmr` workspace-aware for pnpm roots, erroring on ambiguous declarations instead of guessing |
 | `scripts/package-manager/run.sh` | Entry point — auto-detects bun, pnpm or npm from `packageManager` field / lockfile; dispatches to the appropriate update script |
 | `scripts/package-manager/_update-lib.sh` | Shared logic: semver, cooldown, display, write-back, workspace scanning |
 | `scripts/package-manager/pnpm-update.sh` | pnpm wrapper — catalog read/write, `pnpm outdated`, augmentation |
