@@ -58,28 +58,8 @@ if [[ -f "$ROOT/pnpm-workspace.yaml" ]]; then
 fi
 
 if [[ -f "$ROOT/.npmrc" ]]; then
-  if [[ -z "$COOLDOWN_MINUTES" ]]; then
-    npmrc_age=$(grep -E '^minimum-release-age[[:space:]]*=' "$ROOT/.npmrc" \
-                | grep -oE '[0-9]+' | head -1 || true)
-    if [[ -n "$npmrc_age" ]]; then
-      COOLDOWN_MINUTES="$npmrc_age"
-      COOLDOWN_SOURCE=".npmrc"
-    fi
-  fi
-  [[ -z "$CONFIG_RELEASE_AGE" ]] && CONFIG_RELEASE_AGE=$(grep -E '^minimum-release-age[[:space:]]*=' \
-    "$ROOT/.npmrc" | grep -oE '[0-9]+' | head -1 || true)
-  if [[ -z "$CLI_COOLDOWN" ]]; then
-    while IFS= read -r _line; do
-      _val=$(echo "$_line" | sed 's/^minimum-release-age-exclude\[\][[:space:]]*=[[:space:]]*//')
-      [[ -n "$_val" ]] && COOLDOWN_EXCLUDE+=("$_val")
-    done < <(grep -E '^minimum-release-age-exclude\[\]' "$ROOT/.npmrc" 2>/dev/null || true)
-    _inline=$(grep -E '^minimum-release-age-exclude[[:space:]]*=' "$ROOT/.npmrc" 2>/dev/null \
-              | head -1 | sed 's/^minimum-release-age-exclude[[:space:]]*=[[:space:]]*//' || true)
-    if [[ -n "$_inline" ]]; then
-      read -ra _parts <<< "$_inline"
-      COOLDOWN_EXCLUDE+=("${_parts[@]}")
-    fi
-  fi
+  read_npmrc_release_age "$ROOT/.npmrc" minutes minimum-release-age
+  [[ -z "$CLI_COOLDOWN" ]] && read_npmrc_exclude "$ROOT/.npmrc" minimum-release-age-exclude
 fi
 
 # ── pnpm hooks ────────────────────────────────────────────────────────────────

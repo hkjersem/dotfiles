@@ -17,6 +17,9 @@
 #   _apply_catalog "$pkg" "$ver" — write catalog entry (default: warn + skip)
 #   _pm_install                  — run the package manager install command
 
+# shellcheck source=../lib/pm-utils.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/pm-utils.sh"
+
 # ── Colors ────────────────────────────────────────────────────────────────────
 if [[ -t 1 ]]; then
   RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
@@ -137,15 +140,6 @@ latest_prerelease_in_major() {
 }
 
 # ── Cooldown helpers ──────────────────────────────────────────────────────────
-format_duration() {
-  local mins="$1"
-  local days=$(( mins / 1440 )) hours=$(( (mins % 1440) / 60 )) rem=$(( mins % 60 ))
-  local out=""
-  [[ $days  -gt 0 ]] && out="${days}d"
-  [[ $hours -gt 0 ]] && out="${out:+$out }${hours}h"
-  [[ $days -eq 0 && $rem -gt 0 ]] && out="${out:+$out }${rem}m"
-  echo "${out:-0m}"
-}
 
 version_age_minutes() {
   local pkg="$1" ver="$2" times="${3:-}" published epoch now

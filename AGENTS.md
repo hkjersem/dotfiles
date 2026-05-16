@@ -26,10 +26,11 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 | `scripts/npm-release-age.sh` | Check days since release for an npm package or version |
 | `scripts/package-manager/` | Package manager scripts — invoked via `pm`, `pmx`, `pmu`, `pmi`, `pmr` aliases |
 | `scripts/package-manager/_detect-pm.sh` | Sourced by `run.sh` and `bash/aliases` — detects bun, pnpm or npm for the current project |
-| `scripts/package-manager/run.sh` | Entry point — auto-detects bun, pnpm or npm from `packageManager` field / lockfile; bun prints an error (update not supported) |
+| `scripts/package-manager/run.sh` | Entry point — auto-detects bun, pnpm or npm from `packageManager` field / lockfile; dispatches to the appropriate update script |
 | `scripts/package-manager/_update-lib.sh` | Shared logic: semver, cooldown, display, write-back, workspace scanning |
 | `scripts/package-manager/pnpm-update.sh` | pnpm wrapper — catalog read/write, `pnpm outdated`, augmentation |
 | `scripts/package-manager/npm-update.sh` | npm wrapper — workspace detection, `npm outdated`, augmentation, reads cooldown from project and global `~/.npmrc` |
+| `scripts/package-manager/bun-update.sh` | bun wrapper — `bun outdated`, augmentation, reads cooldown from `bunfig.toml` or `~/.bunfig.toml` |
 | `macos/applications.sh` | Bootstrap script — installs brew formulae and tools |
 | `macos/install.sh` | Full machine setup entry point (calls applications.sh etc.) |
 | `macos/update.sh` | Update installed tools |

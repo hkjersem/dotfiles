@@ -114,7 +114,7 @@ _detect_pm() { bash "$HOME/.dotfiles/scripts/package-manager/_detect-pm.sh"; }
 # Usage: pm <command> [args...]
 pm()  { local _p; _p="$(_detect_pm)" || return 1; "$_p" "$@"; }
 
-# Updates minor/patch by default, auto-detects bun, pnpm or npm (bun not supported — prints error)
+# Updates packages — minor/patch by default, auto-detects bun, pnpm or npm
 # Usage: pmu [--dry-run] [--yes] [--force] [--major] [--cooldown <days>] [<package>]
 pmu() { bash "$HOME/.dotfiles/scripts/package-manager/run.sh" "$@"; }
 
@@ -146,6 +146,26 @@ pmr() {
   case "$_p" in
     pnpm|bun) "$_p" remove "$@" ;;
     npm)      npm uninstall "$@" ;;
+  esac
+}
+
+# Audit and fix vulnerabilities (bun: reports only — no auto-fix available)
+# Usage: pma
+pma() {
+  local _p; _p="$(_detect_pm)" || return 1
+  case "$_p" in
+    pnpm) 
+      # Try depth-based update first, fall back to audit --fix if no changes
+      if [[ -f pnpm-workspace.yaml ]]; then
+        pnpm -r --include-workspace-root update --depth Infinity --lockfile-only 2>/dev/null || true
+      else
+        pnpm update --depth Infinity --lockfile-only 2>/dev/null || true
+      fi
+      pnpm audit --fix && pnpm install --lockfile-only
+      ;;
+    npm) npm audit fix --package-lock-only --ignore-scripts ;;
+    bun) bun audit ;;
+    yarn) yarn npm audit --fix --mode update-lockfile ;;
   esac
 }
 

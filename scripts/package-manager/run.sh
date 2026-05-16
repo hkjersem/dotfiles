@@ -9,5 +9,5 @@ source "$SCRIPTS_DIR/_detect-pm.sh"
 case "$(_detect_pm)" in
   pnpm) exec bash "$SCRIPTS_DIR/pnpm-update.sh" "$@" ;;
   npm)  exec bash "$SCRIPTS_DIR/npm-update.sh"  "$@" ;;
-  bun)  echo "pmu does not support bun — use 'bun update' directly." >&2; exit 1 ;;
+  bun)  exec bash "$SCRIPTS_DIR/bun-update.sh" "$@" ;;
 esac

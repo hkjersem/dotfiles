@@ -37,34 +37,14 @@ CONFIG_RELEASE_AGE=""
 _find_root "package-lock.json"
 
 # ── Cooldown config: project .npmrc → global ~/.npmrc (days → minutes) ─────────
-# Supports both "min-release-age" (set by ensure-npmrc.sh) and "minimum-release-age"
+# Supports both "min-release-age" (set by ensure-pm-config.sh) and "minimum-release-age"
 for _npmrc_file in "$ROOT/.npmrc" "$HOME/.npmrc"; do
   [[ -f "$_npmrc_file" ]] || continue
-  npmrc_age=$(grep -E '^(minimum-release-age|min-release-age)[[:space:]]*=' "$_npmrc_file" \
-              | grep -oE '[0-9]+' | head -1 || true)
-  if [[ -n "$npmrc_age" ]]; then
-    local_age=$(( npmrc_age * 1440 ))
-    [[ -z "$CONFIG_RELEASE_AGE" ]] && CONFIG_RELEASE_AGE="$local_age"
-    if [[ -z "$COOLDOWN_MINUTES" ]]; then
-      COOLDOWN_MINUTES="$local_age"
-      COOLDOWN_SOURCE="$_npmrc_file"
-    fi
-  fi
-  if [[ -z "$CLI_COOLDOWN" ]]; then
-    while IFS= read -r _line; do
-      _val=$(echo "$_line" | sed 's/^\(minimum-release-age-exclude\|min-release-age-exclude\)\[\][[:space:]]*=[[:space:]]*//')
-      [[ -n "$_val" ]] && COOLDOWN_EXCLUDE+=("$_val")
-    done < <(grep -E '^(minimum-release-age-exclude|min-release-age-exclude)\[\]' "$_npmrc_file" 2>/dev/null || true)
-    _inline=$(grep -E '^(minimum-release-age-exclude|min-release-age-exclude)[[:space:]]*=' "$_npmrc_file" 2>/dev/null \
-              | head -1 | sed 's/^[^=]*=[[:space:]]*//' || true)
-    if [[ -n "$_inline" ]]; then
-      read -ra _parts <<< "$_inline"
-      COOLDOWN_EXCLUDE+=("${_parts[@]}")
-    fi
-  fi
+  read_npmrc_release_age "$_npmrc_file" days
+  [[ -z "$CLI_COOLDOWN" ]] && read_npmrc_exclude "$_npmrc_file"
   [[ -n "$COOLDOWN_MINUTES" ]] && break  # project takes precedence over global
 done
-unset _npmrc_file local_age npmrc_age
+unset _npmrc_file
 
 # ── npm hooks ─────────────────────────────────────────────────────────────────
 _pm_install() {
