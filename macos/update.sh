@@ -23,6 +23,7 @@ command -v mas &>/dev/null && mas upgrade
 bash ~/.dotfiles/scripts/install-node.sh lts
 
 # Update npm & packages
+bash ~/.dotfiles/scripts/ensure-pm-config.sh
 npm cache verify -g
 npm install npm -g
 npm update -g

@@ -23,6 +23,7 @@ if ! fnm list 2>/dev/null | grep -q 'lts'; then
 fi
 
 # NPM Essentials
+bash ~/.dotfiles/scripts/ensure-pm-config.sh
 npm i -g diff-so-fancy@latest
 
 # Homebrew packages

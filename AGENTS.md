@@ -21,6 +21,7 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 | `ssh/config` | SSH host config |
 | `scripts/audit.sh` | Read-only drift detection — compares repo declarations vs installed state |
 | `audit.ignore` | Machine-local audit suppressions (gitignored) — silence known-safe warnings per machine |
+| `scripts/ensure-pm-config.sh` | Ensures package manager release-age cooldowns are set globally — `min-release-age` in `~/.npmrc`, pnpm `minimumReleaseAge` (if pnpm installed), and `minimumReleaseAge` in `~/.bunfig.toml [install]` (if bun installed) |
 | `scripts/install-node.sh` | Install a Node version via fnm, migrate globals, clean up old same-major versions |
 | `scripts/npm-globals-diff.sh` | Diff global npm packages between two node versions |
 | `scripts/npm-release-age.sh` | Check days since release for an npm package or version |
@@ -31,6 +32,7 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 | `scripts/package-manager/pnpm-update.sh` | pnpm wrapper — catalog read/write, `pnpm outdated`, augmentation |
 | `scripts/package-manager/npm-update.sh` | npm wrapper — workspace detection, `npm outdated`, augmentation, reads cooldown from project and global `~/.npmrc` |
 | `scripts/package-manager/bun-update.sh` | bun wrapper — `bun outdated`, augmentation, reads cooldown from `bunfig.toml` or `~/.bunfig.toml` |
+| `scripts/lib/pm-utils.sh` | Shared library — sourced by `audit-repo.sh`, `_update-lib.sh`, and `bun-update.sh`; provides `parse_duration_minutes`, `read_bunfig_mra`, `read_npmrc_release_age` |
 | `macos/applications.sh` | Bootstrap script — installs brew formulae and tools |
 | `macos/install.sh` | Full machine setup entry point (calls applications.sh etc.) |
 | `macos/update.sh` | Update installed tools |
