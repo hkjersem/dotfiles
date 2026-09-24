@@ -13,12 +13,14 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 | `zsh/zshrc` | Main zsh config — bootstrap only, sources conf.d modules |
 | `zsh/conf.d/` | Zsh config modules (sourced in order by zshrc): `omz.zsh`, `plugins.zsh`, `history.zsh`, `env.zsh`, `aliases.zsh`, `prompt.zsh`, `fnm.zsh`, `fzf.zsh` |
 | `zsh/zlogin` | Login shell config (runs after zshrc) — compiles compdump, propagates PATH to launchd |
+| `Brewfile` | Homebrew formulae declarations — source of truth for brew packages; used by `applications.sh` and `update.sh` via `brew bundle --file` |
 | `bash/aliases` | Shell aliases (sourced by zshrc) |
 | `bash/bashrc` | Bash config |
 | `bash/inputrc` | Readline config |
 | `git/gitconfig` | Git aliases, settings, user config |
 | `git/gitignore_global` | Global gitignore |
 | `ssh/config` | SSH host config |
+| `scripts/install-zsh-plugins.sh` | Clone or pull oh-my-zsh and custom plugins — called by both `applications.sh` and `update.sh` |
 | `scripts/audit.sh` | Read-only drift detection — compares repo declarations vs installed state |
 | `audit.ignore` | Machine-local audit suppressions (gitignored) — silence known-safe warnings per machine |
 | `scripts/ensure-pm-config.sh` | Ensures package manager release-age cooldowns are set globally — `min-release-age` in `~/.npmrc`, pnpm `minimumReleaseAge` (if pnpm installed), and `minimumReleaseAge` in `~/.bunfig.toml [install]` (if bun installed) |
@@ -59,6 +61,6 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 - **Never commit generated or cache files** — `.zcompdump`, `.zwc` and similar are machine-specific and gitignored
 - **All changes must be portable** — must work on any macOS machine, not just the current one
 - **When adding a new zsh config** — add it to a file in `zsh/conf.d/` and add a `source` line in `zsh/zshrc`
-- **When adding a new tool**: update `applications.sh` (install command), `install.conf.yaml` (symlink if needed), and add an update command to `macos/update.sh` if the tool can be updated
+- **When adding a new brew tool**: add it to `Brewfile` — this is the single source of truth for brew packages. `applications.sh` and `update.sh` both use `brew bundle` to install from it
 - **Local machine overrides** belong in `~/.zshrc_local` — this file is intentionally untracked and should not be created or modified
 - **After making changes** that affect symlinks, brew formulae, plugins, or npm globals — run `bash scripts/audit.sh` to verify the repo and installed state are consistent

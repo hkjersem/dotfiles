@@ -115,7 +115,7 @@ if ! command -v brew &>/dev/null; then
 else
     BREW_INSTALLED=$(brew list --formula 2>/dev/null)
     BREW_LEAVES=$(brew leaves 2>/dev/null)
-    DECLARED=$(grep -E '^\s*brew install ' "$DOTFILES/macos/applications.sh" | awk '{print $3}' | sed 's/--[a-z-]*//g' | xargs)
+    DECLARED=$(grep -E '^\s*brew\s+"' "$DOTFILES/Brewfile" | sed 's/.*brew "\([^"]*\)".*/\1/' | xargs)
 
     # Declared but not installed
     while IFS= read -r formula; do
@@ -123,7 +123,7 @@ else
         if echo "$BREW_INSTALLED" | grep -qx "$formula"; then
             ok "$formula"
         else
-            fail "$formula (in applications.sh but not installed)"
+            fail "$formula (in Brewfile but not installed)"
         fi
     done < <(echo "$DECLARED" | tr ' ' '\n')
 
@@ -132,7 +132,7 @@ else
         [[ -z "$installed" ]] && continue
         if ! echo "$DECLARED" | grep -qw "$installed"; then
             is_ignored "brew:$installed" && continue
-            warn "$installed (installed but not in applications.sh)"
+            warn "$installed (installed but not in Brewfile)"
         fi
     done < <(echo "$BREW_LEAVES")
 fi
