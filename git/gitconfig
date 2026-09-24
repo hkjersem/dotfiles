@@ -1,19 +1,34 @@
 [alias]
     co = checkout
     br = branch
+    # commit with full diff in editor
     ci = commit -v
+    # short status with branch line
     st = status -sb
+    # unstage a file: git unstage <file>
     unstage = reset HEAD --
+    # show last commit
     last = log -1 HEAD
-    hist = log --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %C(bold blue)<%an>%Creset' --abbrev-commit --date=relative
+    # graph log with author and relative date
+    hist = log --graph --pretty=compact --abbrev-commit
+    # delete all merged local branches
     prune-local = !git branch --merged | grep -v \"^\\*\" | xargs git branch -d
-    stats = shortlog -sne
+    # commit count per author (no merges); optional args e.g. --since="6 months ago"
+    stats = "!f() { git --no-pager shortlog -sne --no-merges \"$@\" HEAD; }; f"
+    # what changed since last pull
     whatsnew = log HEAD@{1}..
-    incoming = "!git remote update -p; git log ..@{u}"
+    # commits on remote not yet pulled
+    incoming = "!git remote update -p; git log --graph --pretty=compact --abbrev-commit ..@{u}"
+    # local commits not yet pushed
     outgoing = log @{u}..
-    new = log --color --pretty=format:'%C(cyan)%h%C(reset) ➜  %C(yellow)%s%C(reset) %C(white)(%cr)%C(reset) %an' -10
-    newlog = log --color --pretty=format:'%C(green)-%C(reset) %C(white)%s%C(reset)' -10
+    # last 10 commits, compact with relative time
+    new = log --color --pretty=compact --abbrev-commit -10
+    # last 10 commit messages only
+    newlog = log --color --pretty=format:'%C(green)-%C(reset) %C(default)%s%C(reset)' -10
     amend-date = "!f() { GIT_COMMITTER_DATE=\"$1\" git commit --amend --no-edit --date \"$1\"; }; f"
+
+[pretty]
+    compact = format:%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)%an%Creset %C(dim)%ae%Creset
 
 [branch]
     autosetuprebase = always
@@ -61,3 +76,5 @@
 
 [init]
 	defaultBranch = main
+[credential]
+	helper = osxkeychain
