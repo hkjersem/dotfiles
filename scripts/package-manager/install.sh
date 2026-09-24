@@ -28,8 +28,15 @@ EOF
 }
 
 find_pnpm_root() {
-  _find_root "pnpm-lock.yaml"
+  _find_pnpm_workspace_root
   cd "$ROOT"
+}
+
+run_root_add() {
+  if [[ -f "$ROOT/pnpm-workspace.yaml" ]]; then
+    exec pnpm --workspace-root add "$@"
+  fi
+  exec pnpm add "$@"
 }
 
 spec_has_explicit_version() {
@@ -70,6 +77,7 @@ if [[ "$pm" != "pnpm" ]]; then
   run_default_install "$pm" "$@"
 fi
 
+CURRENT_DIR="$PWD"
 CURRENT_PACKAGE_DIR="$(find_nearest_package_dir || true)"
 find_pnpm_root
 
@@ -129,8 +137,22 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if $force_root; then
+  [[ ${#args[@]} -gt 0 ]] || exec pnpm install
+  run_root_add "${args[@]}"
+fi
+
+if $explicit_target; then
+  cd "$CURRENT_DIR"
+  exec pnpm add "${args[@]}"
+fi
+
 if [[ -n "$CURRENT_PACKAGE_DIR" && "$CURRENT_PACKAGE_DIR" != "$ROOT" ]]; then
   exec pnpm --dir "$CURRENT_PACKAGE_DIR" add "${args[@]}"
+fi
+
+if [[ ! -f "$ROOT/pnpm-workspace.yaml" ]]; then
+  exec pnpm add "${args[@]}"
 fi
 
 if $unknown_option; then
@@ -138,13 +160,8 @@ if $unknown_option; then
   exit 1
 fi
 
-if $force_root || $explicit_target || [[ ! -f "$ROOT/pnpm-workspace.yaml" ]]; then
-  exec pnpm add "${args[@]}"
-fi
-
 [[ ${#pkg_specs[@]} -gt 0 ]] || exec pnpm add "${args[@]}"
 
-declare -A target_seen=()
 resolved_target=""
 
 for spec in "${pkg_specs[@]}"; do
@@ -165,7 +182,6 @@ for spec in "${pkg_specs[@]}"; do
     exit 1
   fi
 
-  [[ -n "${target_seen[$target]:-}" ]] || target_seen["$target"]=1
   if [[ -z "$resolved_target" ]]; then
     resolved_target="$target"
   elif [[ "$resolved_target" != "$target" ]]; then
@@ -185,7 +201,7 @@ case "$resolved_target" in
     exec pnpm install
     ;;
   root)
-    exec pnpm add "${args[@]}"
+    run_root_add "${args[@]}"
     ;;
   workspace:*)
     exec pnpm --filter "${resolved_target#workspace:}" add "${args[@]}"

@@ -101,6 +101,20 @@ _find_root() {
   [[ -f "$ROOT/package.json" ]] || { echo -e "${RED}No package.json found in $ROOT${RESET}" >&2; exit 1; }
 }
 
+# Members may have their own packageManager field or lockfile.
+_find_pnpm_workspace_root() {
+  local d="$PWD"
+  while [[ "$d" != "/" ]]; do
+    if [[ -f "$d/pnpm-workspace.yaml" ]]; then
+      ROOT="$d"
+      [[ -f "$ROOT/package.json" ]] || { echo -e "${RED}No package.json found in $ROOT${RESET}" >&2; exit 1; }
+      return
+    fi
+    d="$(dirname "$d")"
+  done
+  _find_root "pnpm-lock.yaml"
+}
+
 # ── YAML helper ───────────────────────────────────────────────────────────────
 _yaml_strip() { echo "$1" | sed "s/^[[:space:]]*-[[:space:]]*//;s/^['\"]//;s/['\"]$//;s/[[:space:]]*$//"; }
 
@@ -395,24 +409,20 @@ location_to_target() {
 resolve_existing_target() {
   local pkg="$1"
   local finder="${2:-find_all_locations}"
-  local -a locations=() targets=()
-  local -A seen=()
-  mapfile -t locations < <("$finder" "$pkg")
+  local resolved_target="" loc target
 
-  local loc target
-  for loc in "${locations[@]}"; do
+  while IFS= read -r loc; do
     target="$(location_to_target "$loc")"
     [[ -n "$target" ]] || continue
-    [[ -n "${seen[$target]:-}" ]] && continue
-    seen["$target"]=1
-    targets+=("$target")
-  done
+    if [[ -z "$resolved_target" ]]; then
+      resolved_target="$target"
+    elif [[ "$resolved_target" != "$target" ]]; then
+      echo "ambiguous"
+      return
+    fi
+  done < <("$finder" "$pkg")
 
-  if [[ ${#targets[@]} -eq 1 ]]; then
-    echo "${targets[0]}"
-  else
-    echo "ambiguous"
-  fi
+  echo "${resolved_target:-ambiguous}"
 }
 
 resolve_registry_version() {
@@ -543,6 +553,7 @@ find_all_locations() {
     done
   done
   [[ $found -eq 0 ]] && { [[ -n "$fallback" ]] && echo "$fallback" || echo "unknown"; }
+  return 0
 }
 
 # Default hooks — wrappers override as needed

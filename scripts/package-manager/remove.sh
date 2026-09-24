@@ -41,8 +41,9 @@ if [[ "$pm" != "pnpm" ]]; then
   run_default_remove "$pm" "$@"
 fi
 
+CURRENT_DIR="$PWD"
 CURRENT_PACKAGE_DIR="$(find_nearest_package_dir || true)"
-_find_root "pnpm-lock.yaml"
+_find_pnpm_workspace_root
 cd "$ROOT"
 
 force_root=false
@@ -99,8 +100,21 @@ if [[ ${#pkg_specs[@]} -eq 0 ]]; then
   exit 1
 fi
 
+if $force_root; then
+  exec pnpm remove "${args[@]}"
+fi
+
+if $explicit_target; then
+  cd "$CURRENT_DIR"
+  exec pnpm remove "${args[@]}"
+fi
+
 if [[ -n "$CURRENT_PACKAGE_DIR" && "$CURRENT_PACKAGE_DIR" != "$ROOT" ]]; then
   exec pnpm --dir "$CURRENT_PACKAGE_DIR" remove "${args[@]}"
+fi
+
+if [[ ! -f "$ROOT/pnpm-workspace.yaml" ]]; then
+  exec pnpm remove "${args[@]}"
 fi
 
 if $unknown_option; then
@@ -108,11 +122,6 @@ if $unknown_option; then
   exit 1
 fi
 
-if $force_root || $explicit_target || [[ ! -f "$ROOT/pnpm-workspace.yaml" ]]; then
-  exec pnpm remove "${args[@]}"
-fi
-
-declare -A target_seen=()
 resolved_target=""
 
 for spec in "${pkg_specs[@]}"; do
@@ -132,7 +141,6 @@ for spec in "${pkg_specs[@]}"; do
     exit 1
   fi
 
-  [[ -n "${target_seen[$target]:-}" ]] || target_seen["$target"]=1
   if [[ -z "$resolved_target" ]]; then
     resolved_target="$target"
   elif [[ "$resolved_target" != "$target" ]]; then
