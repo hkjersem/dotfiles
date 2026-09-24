@@ -32,10 +32,14 @@
 	<false/>
 	<key>AlternateMouseScroll</key>
 	<true/>
+	<key>AlwaysOpenWindowAtStartup</key>
+	<true/>
 	<key>AnimateDimming</key>
 	<false/>
 	<key>CheckTestRelease</key>
 	<false/>
+	<key>ClaudeCodeWorkgroupUpsellSuppressed</key>
+	<true/>
 	<key>ClosingHotkeySwitchesSpaces</key>
 	<true/>
 	<key>CommandSelection</key>

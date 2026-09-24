@@ -1,11 +1,11 @@
-# Node
+# npm crash/debug output
 npm-debug.log
+npm-debug.log.*
 
-# Mac
+# macOS Finder metadata, volume trash, and AppleDouble sidecar files
 .DS_Store
-.DS_Store?
 .Trashes
+._*
 
-# General
-log/
-*.log
+# Claude Code machine-local settings and permission overrides
+**/.claude/settings.local.json

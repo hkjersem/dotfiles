@@ -9,6 +9,7 @@ export UPDATE_ZSH_DAYS=100
 
 # Enable command auto-correction.
 ENABLE_CORRECTION="true"
+CORRECT_IGNORE_FILE='.*'
 
 # Display red dots whilst waiting for completion.
 COMPLETION_WAITING_DOTS="true"

@@ -1,2 +1,6 @@
 .DS_Store
 audit.ignore
+
+# Zsh completion and compiled caches
+.zcompdump*
+*.zwc

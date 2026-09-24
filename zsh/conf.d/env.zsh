@@ -2,7 +2,7 @@
 export PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 # Homebrew
-export PATH=/opt/homebrew/bin:$PATH
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:$PATH"
 
 # Set language environment
 export LANG=en_US.UTF-8

@@ -1,6 +1,12 @@
 # Set up fzf key bindings and fuzzy completion
 source <(fzf --zsh)
 
+# Use rg for fzf file listing — respects .gitignore, skips hidden files by default
+if command -v rg &>/dev/null; then
+  export FZF_DEFAULT_COMMAND='rg --files --hidden --glob "!.git"'
+  export FZF_CTRL_T_COMMAND="$FZF_DEFAULT_COMMAND"
+fi
+
 export FZF_DEFAULT_OPTS='--no-height --no-reverse --inline-info'
 export FZF_DEFAULT_OPTS=$FZF_DEFAULT_OPTS'
   --color=fg:-1,fg+:#d0d0d0,bg:-1,bg+:-1,gutter:-1
@@ -14,7 +20,6 @@ export FZF_DEFAULT_OPTS=$FZF_DEFAULT_OPTS'
    --prompt="" --marker="" --pointer="" --separator="" --scrollbar=""'
 
 export FZF_CTRL_T_OPTS="
-  --walker-skip .git,node_modules,target
   --select-1 --exit-0
   --preview 'bat -n --color=always {}'
   --bind 'ctrl-/:change-preview-window(down|right|)'
