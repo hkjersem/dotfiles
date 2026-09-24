@@ -38,6 +38,7 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 | `scripts/package-manager/pnpm-update.sh` | pnpm wrapper — catalog read/write, `pnpm outdated`, augmentation |
 | `scripts/package-manager/npm-update.sh` | npm wrapper — workspace detection, `npm outdated`, augmentation, reads cooldown from project and global `~/.npmrc` |
 | `scripts/package-manager/bun-update.sh` | bun wrapper — `bun outdated`, augmentation, reads cooldown from `bunfig.toml` or `~/.bunfig.toml` |
+| `scripts/tests/` | Isolated shell-script regression tests — run with `python3 -B -m unittest discover -s scripts/tests` |
 | `scripts/wipe-clean.sh` | Delete all known build artifacts and dependency folders from the current directory. Aliased as `wipe_clean` |
 | `scripts/lib/pm-utils.sh` | Shared library — sourced by `audit-repo.sh`, `_update-lib.sh`, and `bun-update.sh`; provides `parse_duration_minutes`, `read_bunfig_mra`, `read_npmrc_release_age` |
 | `macos/applications.sh` | Bootstrap script — installs brew formulae and tools |

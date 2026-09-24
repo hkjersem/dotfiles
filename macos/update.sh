@@ -21,7 +21,10 @@ command -v mas &>/dev/null && mas upgrade
 
 # Update node — install latest LTS, migrate globals if version changed
 bash ~/.dotfiles/scripts/install-node.sh lts
-
+# install-node.sh may uninstall the version this shell's fnm symlink still
+# points at, leaving node/npm/npx/pnpm unresolved until the next `cd`.
+# Re-point this shell to the (possibly new) default now.
+command -v fnm &>/dev/null && fnm use --install-if-missing lts-latest >/dev/null
 # Update npm & packages
 bash ~/.dotfiles/scripts/ensure-pm-config.sh
 npm cache verify -g

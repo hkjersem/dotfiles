@@ -5,96 +5,109 @@
 # Usage: install-node.sh <version>
 #   version: any fnm-accepted version — e.g. 20, lts, v22.1.0 (default: lts)
 
+set -euo pipefail
+
 VERSION="${1:-lts}"
 
-fnm_versions() {
-    fnm list 2>/dev/null | awk '{print $2}' | grep '^v[0-9]'
+fail() {
+    echo "Error: $*" >&2
+    exit 1
 }
 
-# Snapshot installed versions before we do anything
-PRE_INSTALL=$(fnm_versions)
+fnm_versions() {
+    awk '$2 ~ /^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)*$/ {print $2}'
+}
+
+PRE_LIST=$(fnm list) || fail "could not list installed Node versions."
+PRE_INSTALL=$(printf '%s\n' "$PRE_LIST" | fnm_versions)
+PRE_DEFAULT=$(printf '%s\n' "$PRE_LIST" | awk \
+    '$2 ~ /^v[0-9]/ && /(^|[[:space:],])default([[:space:],]|$)/ {print $2}')
+RESOLVE_VERSION="$VERSION"
+
+run_fnm_install() {
+    # fnm prints a benign "already installed" notice on stderr when re-running
+    # on an already-up-to-date version; pass through anything else.
+    local out
+    if ! out=$(fnm --corepack-enabled install "$@" 2>&1 >/dev/null); then
+        printf '%s\n' "$out" >&2
+        return 1
+    fi
+    printf '%s\n' "$out" | grep -v -E '^warning: Version already installed at' >&2 || true
+}
 
 if [[ "$VERSION" == "lts" ]]; then
-    fnm --corepack-enabled install --lts >/dev/null 2>&1
-    fnm default lts-latest >/dev/null 2>&1
+    run_fnm_install --lts || fail "could not install the latest LTS."
+    RESOLVE_VERSION="lts-latest"
 else
-    fnm --corepack-enabled install "$VERSION" >/dev/null 2>&1
+    run_fnm_install "$VERSION" || fail "could not install $VERSION."
 fi
 
-# Resolve the actual installed version by diffing before/after,
-# or by finding the best match in the current list
-POST_INSTALL=$(fnm_versions)
-NEW_NODE=$(comm -13 <(echo "$PRE_INSTALL" | sort) <(echo "$POST_INSTALL" | sort) | head -1)
+# Let fnm resolve exact versions, partial versions, and aliases, even on reruns.
+NEW_NODE=$(fnm exec --using="$RESOLVE_VERSION" node --version) \
+    || fail "could not resolve $VERSION to a working Node installation."
+[[ "$NEW_NODE" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)*$ ]] \
+    || fail "invalid resolved Node version: $NEW_NODE"
+POST_INSTALL=$(fnm list | fnm_versions) \
+    || fail "could not list installed Node versions after installation."
+printf '%s\n' "$POST_INSTALL" | grep -qFx "$NEW_NODE" \
+    || fail "resolved version $NEW_NODE is not in fnm's installed versions."
 
-if [ -z "$NEW_NODE" ]; then
-    # Nothing newly installed — find best match from existing versions
-    if [[ "$VERSION" == "lts" ]]; then
-        NEW_NODE=$(fnm_versions | sort -V | tail -1)
-    else
-        MAJOR_REQ=$(echo "$VERSION" | sed 's/v//' | cut -d. -f1)
-        NEW_NODE=$(echo "$POST_INSTALL" | grep "^v${MAJOR_REQ}\." | sort -V | tail -1)
+MAJOR="${NEW_NODE#v}"
+MAJOR="${MAJOR%%.*}"
+OLD_VERSIONS=$(printf '%s\n' "$POST_INSTALL" | awk -v major="$MAJOR" -v target="$NEW_NODE" \
+    'index($0, "v" major ".") == 1 && $0 != target')
+MIGRATE_FROM=""
+
+if [[ -n "$OLD_VERSIONS" ]]; then
+    MIGRATE_FROM=$(printf '%s\n' "$OLD_VERSIONS" | sort -V | tail -1)
+elif ! printf '%s\n' "$PRE_INSTALL" | grep -qFx "$NEW_NODE"; then
+    # For a new major, keep the source installation and copy from the highest previous version.
+    MIGRATE_FROM=$(printf '%s\n' "$PRE_INSTALL" | sort -V | tail -1)
+fi
+
+if [[ -n "$MIGRATE_FROM" ]]; then
+    command -v jq >/dev/null || fail "jq is required to migrate global packages; old versions were kept."
+    echo "Migrating globals from $MIGRATE_FROM to $NEW_NODE..."
+    GLOBALS_JSON=$(fnm exec --using="$MIGRATE_FROM" npm list -g --depth 0 --json) \
+        || fail "could not list globals for $MIGRATE_FROM; old versions were kept."
+    GLOBALS=$(printf '%s\n' "$GLOBALS_JSON" | jq -ser '
+        if length != 1 or (.[0] | type) != "object" then
+            error("expected one npm listing")
+        else .[0] end
+        | if has("error") then error("npm reported an error") else . end
+        | if has("dependencies") then .dependencies else {} end
+        | if type != "object" then error("invalid npm dependencies") else . end
+        | to_entries
+        | map(select(.key != "npm")
+            | if (.key | test("^(@[A-Za-z0-9][A-Za-z0-9._-]*/)?[A-Za-z0-9][A-Za-z0-9._-]*$"))
+                and (.value.version | type) == "string"
+                and (.value.version | test("^[0-9]+\\.[0-9]+\\.[0-9]+([-+][0-9A-Za-z.-]+)*$"))
+              then "\(.key)@\(.value.version)"
+              else error("invalid global package metadata for \(.key)") end)
+        | join("\n")
+    ') || fail "could not parse globals for $MIGRATE_FROM; old versions were kept."
+
+    if [[ -n "$GLOBALS" ]]; then
+        packages=()
+        while IFS= read -r package; do
+            packages+=("$package")
+        done <<< "$GLOBALS"
+        printf '  Reinstalling: %s\n' "${packages[*]}"
+        fnm exec --using="$NEW_NODE" npm install -g -- "${packages[@]}" \
+            || fail "global migration to $NEW_NODE failed; old versions were kept."
     fi
 fi
 
-if [ -z "$NEW_NODE" ]; then
-    echo "Error: could not resolve installed version." >&2
-    exit 1
-fi
-
-MAJOR=$(echo "$NEW_NODE" | sed 's/v//' | cut -d. -f1)
-
-# If already had this version, just clean up old same-major versions
-if echo "$PRE_INSTALL" | grep -qFx "$NEW_NODE"; then
-    OLD_VERSIONS=$(fnm_versions | grep "^v${MAJOR}\." | grep -vFx "$NEW_NODE")
-    if [ -z "$OLD_VERSIONS" ]; then
-        echo "Already on $NEW_NODE — nothing to do."
-        exit 0
-    fi
-    echo "Cleaning up old v${MAJOR}.x versions..."
-    while IFS= read -r old; do
-        [[ -z "$old" ]] && continue
-        echo "  Removing $old"
-        fnm uninstall "$old"
-    done < <(echo "$OLD_VERSIONS")
-    exit 0
-fi
-
-# Find other installed versions of this same major (to migrate from and clean up)
-OLD_VERSIONS=$(fnm_versions | grep "^v${MAJOR}\." | grep -vFx "$NEW_NODE")
-
-if [ -z "$OLD_VERSIONS" ]; then
-    # No same-major version — migrate from whichever version was default before install
-    MIGRATE_FROM=$(echo "$PRE_INSTALL" | sort -V | tail -1)
-    if [ -n "$MIGRATE_FROM" ] && [ "$MIGRATE_FROM" != "$NEW_NODE" ]; then
-        echo "Installed $NEW_NODE — migrating globals from $MIGRATE_FROM..."
-        GLOBALS=$(fnm exec --using="$MIGRATE_FROM" npm list -g --depth 0 2>/dev/null \
-            | grep -E '├──|└──' | sed 's/.*── //' | grep -v '^npm@')
-        if [ -n "$GLOBALS" ]; then
-            echo "  Reinstalling: $(echo "$GLOBALS" | tr '\n' ' ')"
-            echo "$GLOBALS" | xargs fnm exec --using="$NEW_NODE" npm install -g
-        fi
-    else
-        echo "Installed $NEW_NODE."
-    fi
-    exit 0
-fi
-
-# Upgrade: migrate from highest old same-major version, then remove old
-MIGRATE_FROM=$(echo "$OLD_VERSIONS" | sort -V | tail -1)
-echo "Upgraded $MIGRATE_FROM → $NEW_NODE"
-
-GLOBALS=$(fnm exec --using="$MIGRATE_FROM" npm list -g --depth 0 2>/dev/null \
-    | grep -E '├──|└──' | sed 's/.*── //' | grep -v '^npm@')
-
-if [ -n "$GLOBALS" ]; then
-    echo "  Reinstalling globals: $(echo "$GLOBALS" | tr '\n' ' ')"
-    echo "$GLOBALS" | xargs fnm exec --using="$NEW_NODE" npm install -g
+# Keep an existing default usable when its installation is about to be removed.
+# Default changes and cleanup happen only after successful migration.
+if [[ "$VERSION" == "lts" ]] || { [[ -n "$PRE_DEFAULT" ]] && printf '%s\n' "$OLD_VERSIONS" | grep -qFx "$PRE_DEFAULT"; }; then
+    fnm default "$NEW_NODE" || fail "could not set the default to $NEW_NODE; old versions were kept."
 fi
 
 while IFS= read -r old; do
     [[ -z "$old" ]] && continue
     echo "  Removing $old"
-    fnm uninstall "$old"
-done < <(echo "$OLD_VERSIONS")
+    fnm uninstall "$old" || fail "could not remove $old; cleanup stopped."
+done <<< "$OLD_VERSIONS"
 
-echo "Done."
+echo "Done: $NEW_NODE is ready."
