@@ -47,7 +47,7 @@ class AgentSkillsTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix="agent-skills-test-")
         self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name)
+        self.root = Path(temporary.name).resolve()
         self.home = self.root / "home"
         self.dotfiles = self.home / ".dotfiles"
         self.authored = self.dotfiles / "agents/skills"

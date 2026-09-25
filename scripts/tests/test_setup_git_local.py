@@ -16,7 +16,7 @@ class GitLocalSetupTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix="git-identity-test-")
         self.addCleanup(temporary.cleanup)
-        self.home = Path(temporary.name) / "home with spaces"
+        self.home = Path(temporary.name).resolve() / "home with spaces"
         self.home.mkdir()
         self.env = dict(os.environ)
         for key in list(self.env):
