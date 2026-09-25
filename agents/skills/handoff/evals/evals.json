@@ -1,0 +1,73 @@
+{
+  "skill_name": "handoff",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Simulate writing a handoff from these session facts only. Return the proposed filename, complete handoff content, and resume instruction; do not inspect the real checkout or create an actual handoff file.\n\nProject: Papertrail, a documentation repository. Working directory and repository root: ./papertrail. Branch: docs/setup-typo. Commit: 1111111111111111111111111111111111111111. Generation time: 2026-09-08T12:30:00+02:00. Goal: fix one typo in docs/setup.md. Visible agent edit activity confirms that file was changed from 'instal' to 'install'. The agent reviewed the resulting diff; no other file changes or remaining tasks exist. No build or test commands were run. No handoff file exists at the intended destination. The requested work is finished, and the user has not requested a commit or further improvements.",
+      "expected_output": "A compact, complete handoff with confirmed attribution for the documentation edit, an accurate record of the observed diff review and absent runtime verification, and disposition complete. It does not invent a next implementation, test, or commit task, or pad the document to reach a numerical length target. The resume instruction checks recorded checkout state, treats time as age information, and stops when complete.",
+      "files": [],
+      "assertions": [
+        "Uses a descriptive handoff-*.md filename at the supplied repository root without inventing a different target.",
+        "Preserves the goal, confirmed file change, actual evidence, and supplied checkout identity.",
+        "Uses disposition complete and does not invent follow-up work, testing, or a commit.",
+        "Does not pad the handoff with empty sections or repeated facts to meet a length target.",
+        "The resume instruction does not require timestamp equality and honors the complete disposition."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Simulate preparing a handoff from these facts. Return the chosen filename, complete content, and resume instruction only; do not inspect or modify the actual filesystem.\n\nProject: Cachegate, a Go service. Repository root and working directory: ./cachegate. Branch: fix/tenant-cache-key. Commit: 2222222222222222222222222222222222222222. Generation time: 2026-09-08T12:35:00+02:00. Goal: include the tenant identifier in cache keys. Work remains: change the key builder in cache/key.go and rerun the relevant local unit tests, which the user has authorized. Visible agent tool activity confirms adding a failing regression test in cache/key_test.go. Git status shows cache/key.go modified, but the agent has not edited it and its author is unknown; these existing edits must be reconciled before changing the same key builder. Git status also shows api/handler.go modified by an unknown author for unrelated API work that does not affect this fix. The agent previously edited docs/cli-help.md for a separate completed request, also unrelated to the tenant-key task.\n\nAn existing untracked handoff-tenant-cache-key.md in the repository root was written by someone else for a different, completed cache migration. Replacement was not requested. Do not treat the shared filename as proof of ownership.\n\nThe current session observed 'go test ./cache -run TestTenantIsolation' fail with 'same key for tenants alpha and beta'. The log was stored in an expired temporary file and is no longer retrievable. The failure text and command above remain visible in the session. docs/cache-contract.md is an accessible authoritative reference requiring tenant isolation. The user wants the next agent to continue implementation, not repeat the initial investigation.",
+      "expected_output": "Chooses a distinct handoff filename, preserving the unrelated existing handoff. The main change list contains only the confirmed regression-test edit. The unknown-owned edits in cache/key.go are recorded separately because they overlap the next implementation target. Unrelated api/handler.go and docs/cli-help.md edits are omitted entirely, even though the model made the latter. Includes the observed test command and failure text rather than relying on the expired log, while linking the available contract. Uses disposition continue with the concrete key-builder change and authorized targeted follow-through.",
+      "files": [],
+      "assertions": [
+        "Selects a distinct filename instead of replacing the unrelated existing handoff.",
+        "The main change list contains only the confirmed task edit in cache/key_test.go.",
+        "Records the unknown-owned cache/key.go edits separately as external changes, explaining the need to reconcile them before the next edit.",
+        "Omits unrelated api/handler.go and docs/cli-help.md changes entirely, including the unrelated change made by the same model.",
+        "Includes the observed test command and failure text with the expired-log limitation rather than making the unavailable log the sole reference.",
+        "References the available cache contract without inventing inaccessible evidence or fresh execution results.",
+        "Uses disposition continue with the tenant-key implementation as the next action, preserving the authorized scope."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Simulate a handoff for this blocked task. Return the proposed filename, complete content, and resume instruction; do not inspect the actual checkout or execute any commands.\n\nProject: Queueboard. Repository root and working directory: ./queueboard. Branch: feature/retry-policy. Current commit: 3333333333333333333333333333333333333333. Generation time: 2026-09-08T12:40:00+02:00. An earlier session began at a different commit on this same branch, so the next agent must not assume matching branch names imply unchanged code.\n\nGoal: make delivery retry timing configurable. Confirmed edits: config/retry.yaml adds a draft retry.delay_seconds field without selecting a default; docs/retry-policy.md records the unresolved default. A user edit in worker/delivery.py happened during this session, but the agent has not edited that file. No verification was executed. The user must choose a 30-second or 60-second default before implementation continues. Production runs and deployment are not authorized. There is no independent implementation work to continue until that choice is made. After the user decides, the next action is to update the draft configuration and implement the chosen default in the delivery worker, preserving its existing idempotency behavior. No authoritative external artifact resolves the decision. No existing handoff file needs replacement.",
+      "expected_output": "A blocked handoff retaining the unresolved choice, who must decide, the production/deployment boundary, confirmed versus user-owned changes, and unverified status. It identifies the conditional next work without selecting a default or authorizing blocked actions. Resume guidance checks repository, branch, commit and relevant working-tree state, reconciles differences rather than rejecting solely by timestamp or automatically resetting the checkout, and seeks the named decision.",
+      "files": [],
+      "assertions": [
+        "Uses disposition blocked, names the user decision and both options, and does not choose a default or invent independent work.",
+        "Preserves the production/deployment restriction and the conditional post-decision next action.",
+        "Lists only the confirmed config/retry.yaml and docs/retry-policy.md edits as model changes; puts the relevant user-owned worker edit in a separate external-changes section with its continuation impact, and states that verification was not executed.",
+        "The resume instruction compares revision and relevant working-tree state, uses timestamp as age information, and does not switch or reset the checkout to match.",
+        "Preserves the decision context and idempotency constraint rather than dropping them for brevity."
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "Simulate a handoff from these session facts only. Return its proposed filename, complete content, and resume instruction; do not inspect or modify the actual filesystem.\n\nProject: Eventdock, a Go service. Repository root and working directory: ./eventdock. Branch: fix/tenant-cache. Commit: 4444444444444444444444444444444444444444. Generation time: 2026-09-09T12:00:00+02:00. Goal: fix tenant isolation in cache keys. Visible parent-agent patch activity updated the behavioral explanation in docs/cache.md.\n\nThe parent delegated implementation of this same task to subagent cache-impl. Its completed, task-specific report states: 'Changed cache/key.go to include the tenant identifier; added regression cases in cache/key_test.go; added a configuration example to docs/cache.md. Attempted go test ./cache, but execution was denied with exit 126. No passing test result, deployment, or commit.' This report is available in the conversation, but individual subagent patch calls are not visible in the parent session. The parent reviewed the resulting implementation and documentation; it did not independently execute tests.\n\nAn unknown author also modified cache/store.go. Those changes affect the cache-key integration and must be reconciled before further edits. An unrelated completed subagent changed docs/branding.md for a different task. The user explicitly chose to leave validation pending until execution permission is restored and they authorize resuming. No independent task work remains and no agent is still running. No handoff file exists at the proposed destination.",
+      "expected_output": "The main task-change list includes the parent documentation edit and the explicitly reported same-task subagent edits, labeled with provenance. docs/cache.md is described as co-edited by parent and cache-impl with their respective contributions. Delegated implementation is not classified as external or unknown merely because individual patch calls are unavailable. The relevant unknown-owned cache/store.go edit is separate; unrelated docs/branding.md is omitted. Test execution is accurately reported as subagent-reported failure, not independently verified success. The full blocker is explained once, with concise status/disposition references rather than repeated warnings. Overall disposition is blocked.",
+      "files": [],
+      "assertions": [
+        "Includes cache/key.go and cache/key_test.go in the main task-change list as delegated work, with cache-impl and its report as provenance.",
+        "Does not label the reported implementation external, unknown, or unconfirmed merely because parent-visible patch calls are absent.",
+        "Identifies docs/cache.md as co-edited and distinguishes the parent explanation from the subagent configuration example.",
+        "Separately records the unknown-owned cache/store.go edit and its concrete integration impact; omits unrelated docs/branding.md.",
+        "Distinguishes the subagent-reported denied test command from independently observed results and does not claim tests passed.",
+        "Uses disposition blocked, preserves the user's resume/permission boundary, and explains the full blocker without unnecessarily repeating it throughout the handoff.",
+        "Keeps necessary continuation context without imposing a word or line target."
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "Simulate a handoff from the supplied facts only; return the filename, complete content, and resume instruction without inspecting or changing real files.\n\nProject: Driftlog. Repository root and working directory: ./driftlog. Branch: fix/retry-delay. Commit: 5555555555555555555555555555555555555555. Generation time: 2026-09-09T12:05:00+02:00. Goal: repair delivery retry timing. Visible parent patch activity added a reproducible example to docs/retry.md.\n\nSubagent retry-impl was assigned worker/retry.go and worker/retry_test.go, but its only returned message is 'done'. It supplied no changed-file list, implementation description, artifact, or verification result. Git status shows both assigned paths modified; it cannot establish who changed them or whether the requested fix was implemented. A different agent's progress message merely says it plans to update worker/config.go; no edit has been reported or observed there. The next authorized work is to inspect the existing retry implementation and establish what actually changed before continuing. No tests, production operations, or commits are authorized by this handoff request. No destination collision exists.",
+      "expected_output": "Only the directly evidenced docs/retry.md edit is presented as attributable completed work. The assigned-but-unsubstantiated worker edits are treated as uncertain and described separately because they affect the next review. The planned config edit is not listed as completed. The handoff continues with evidence-gathering/reconciliation, without inventing implementation details, test results, or expanded execution permission.",
+      "files": [],
+      "assertions": [
+        "Does not infer completed subagent edits from task assignment, a vague 'done' message, or Git status alone.",
+        "Keeps docs/retry.md as the attributable completed edit and distinguishes uncertain worker edits with their review impact.",
+        "Does not list the merely planned worker/config.go edit as completed.",
+        "Uses disposition continue for the authorized inspection/reconciliation and invents no test or production execution permission."
+      ]
+    }
+  ]
+}

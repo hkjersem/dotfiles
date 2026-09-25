@@ -1,0 +1,70 @@
+{
+  "skill_name": "agents-md-repair",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Refactor these pasted agent instructions using progressive disclosure. This is a proposal only; do not inspect or change the current repository. AGENTS.md:\n# Project\nA command-line tool for converting exported reports.\n## Rules\n- Use pnpm for all package operations in this repository.\n- Use npm for all package operations in this repository.\n- Never edit generated files under generated/.\n- Prefer single quotes in application TypeScript, except fixtures/ where exported text must be preserved byte-for-byte.\n- Write clean code.\n\nfixtures/AGENTS.md:\n- Preserve exported text byte-for-byte, including its original quote style.\n\nIf a decision from me is needed, provide the specific questions and stop. I have not authorized you to choose between conflicting rules.",
+      "expected_output": "A blocking conflict report quoting the pnpm and npm rules and their source, asking which to retain or how to clarify scope. No refactored files and no repository writes. The explicit fixtures quote-style exception is not treated as a conflict.",
+      "files": [],
+      "assertions": [
+        "Identifies the same-scope pnpm/npm contradiction and asks the user which rule to keep without choosing a winner.",
+        "Stops at the conflict report and does not output a completed refactor or modify repository files.",
+        "Does not treat the explicit fixtures quote-style exception as a contradiction."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Clean up this bloated AGENTS.md into a minimal root and linked topic guides. Return a complete proposal from the pasted files only; do not inspect or modify your current repository. There are no additional files available to inspect. Flag deletion candidates, but do not delete unique rules without my approval. Existing documentation already lives in docs/agents/.\n\nAGENTS.md:\n# Relay\nRelay is a pnpm workspace for processing event deliveries.\n## General\n- Use pnpm 10, not npm.\n- Never modify generated/ or commit credentials.\n- Build from the repository root with pnpm run compile:all, not pnpm build.\n- Typecheck from the repository root with pnpm run check:types, not tsc directly.\n## TypeScript\n- Use strict mode and avoid any in TypeScript.\n- Prefer named exports for application TypeScript modules.\n- Use strict mode and avoid any in TypeScript.\n## Tests\n- Put unit tests beside the source as *.test.ts.\n- Use a fixed clock when testing retry delays.\n- Follow [test fixtures](docs/testing/fixtures.md) when adding fixtures.\n## API\n- Changing HTTP handlers requires the [API guide](docs/agents/api.md).\n## Workflow\n- Start branch names with feat/, fix/, or chore/.\n- Write clean code.\n- Be careful.\n\npackages/worker/AGENTS.md:\n# Worker\n- These rules apply only within packages/worker/.\n- Use CommonJS exports in worker scripts, not the named exports preferred elsewhere.\n- Preserve retry idempotency keys when changing delivery logic.\n\ndocs/agents/api.md:\n# API\nWhen changing HTTP handlers, use RFC 7807 error responses and preserve the existing error codes.\n\ndocs/testing/fixtures.md:\n# Fixtures\nWhen adding test fixtures, use synthetic data rather than production payloads.",
+      "expected_output": "Complete proposed root and topic file contents with a clear proposed file structure, reusing docs/agents/api.md. The root retains the project description, pnpm version, special build/typecheck commands with working directory, and repository-wide safety rule. Conditional links direct agents to each relevant guide before work. TypeScript duplication is consolidated. Worker rules remain scoped and the nested entry point is preserved. The fixtures link is rebased if moved. Vague and obvious statements are flagged with source and reason but retained pending approval. Commands are attributed to pasted instructions, not claimed as verified against unseen manifests.",
+      "files": [],
+      "assertions": [
+        "Retains the project description, pnpm 10, both exact non-standard commands and their repository-root working directory, and the repository-wide generated-files/credentials boundary in the root.",
+        "Moves TypeScript, testing, and branch-naming instructions into conditionally linked guides rather than merely rewording them in the root, and provides complete new or changed file contents with clear paths and a proposed file structure.",
+        "Reuses the existing API guide without duplicating its rules into a competing new guide.",
+        "Preserves the packages/worker/AGENTS.md entry point and the worker-only scope of CommonJS exports and retry idempotency rules.",
+        "Keeps strict mode and avoidance of any applicable to all TypeScript, including worker TypeScript; the module-export exception does not exempt the worker from unrelated repository-wide rules.",
+        "Rebases the fixtures link relative to its new containing file if the test instructions move.",
+        "Consolidates the repeated strict-mode rule and explicitly flags the vague and obvious statements without silently deleting them.",
+        "Labels command verification as unavailable from the pasted-only evidence and does not invent project tooling or inspect the unrelated current checkout."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Review this AGENTS.md for progressive disclosure. This is a shell-only repository. Use this pasted snapshot only and return a proposal if needed; do not inspect the live filesystem. AGENTS.md:\n# Archive tools\nPortable shell utilities for validating archival exports.\n- All tracked scripts must run with the system Bash 3.2 on supported macOS machines.\n- Validate an export from the repository root with ./check-export --read-only PATH; this command never modifies the export.\n- Never run ./restore-export against the original export; it is only for disposable copies.\n\nThere are no other instruction files. The command definitions are not included. Is restructuring actually worthwhile here?",
+      "expected_output": "A justified no-change recommendation: the short root already contains purpose, a non-obvious compatibility constraint, an unusual command with working directory, a safe permission, and a destructive-operation boundary. No invented JavaScript tools, forced topic files, assumptions from an unrelated repository, or claims that unseen command implementations were verified.",
+      "files": [],
+      "assertions": [
+        "Recommends retaining the already-compact root without creating unnecessary topic files.",
+        "Preserves both the known-safe read-only command permission and the restore restriction.",
+        "Does not assume a JavaScript stack, inspect an unrelated repository as the target, or execute the supplied commands.",
+        "Notes that command behavior is stated by the supplied instructions rather than verified from unseen command definitions."
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "Review these repository instructions and propose the cleanup needed. Use only this supplied snapshot; do not inspect or modify the actual filesystem.\n\nProject: Parcel, a Go event-delivery service. The intended agent's documented loader automatically reads the root AGENTS.md with that exact casing. Git currently tracks the root file as agents.md, and the development filesystem is case-insensitive. No root AGENTS.md is separately tracked. The supplied files are:\n\nagents.md:\n# Parcel\nGo event-delivery service.\n- Never edit generated/.\n- Production releases require explicit approval.\n\nCLAUDE.md:\nRead [repository instructions](agents.md).\n\nREADME.md:\nSee [contributor instructions](agents.md).\n\ndocs/index.md:\nSee [repository instructions](../agents.md) and [historical design notes](agents.md).\n\ndocs/agents.md:\n# Historical agent design notes\nThis is an intentionally named reference document, not an instruction entry point. Its filename is part of published documentation links.",
+      "expected_output": "A concise proposal identifying the discovery defect and proposing the root agents.md to AGENTS.md rename, with Git-aware case-only handling and updates to CLAUDE.md, README.md, and the root-directed link in docs/index.md. The intentionally named docs/agents.md and its local reference remain unchanged. Existing rules are preserved; full replacement documents are not printed by default, and no files are changed.",
+      "files": [],
+      "assertions": [
+        "Identifies the root filename/casing as a discovery defect instead of preserving it merely because it already exists.",
+        "Proposes the canonical AGENTS.md filename and ensures the case-only rename would be recorded by Git without discarding existing changes.",
+        "Updates references resolving to the root instruction file while preserving docs/agents.md and its intentionally distinct reference.",
+        "Preserves both the generated-files restriction and the production-approval boundary.",
+        "Defaults to a concise proposed-change summary rather than complete replacement file contents.",
+        "Does not inspect or modify the real filesystem or claim the proposed rename has already been applied."
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "Assess whether the instruction filenames in this snapshot need repair. Return a proposal only; do not inspect or modify your current repository.\n\nThis checkout is case-sensitive. Both AGENTS.md and agents.md are tracked, distinct files. The primary agent automatically loads AGENTS.md. A separate assistant explicitly loads agents.md through its CLAUDE.md entry point; both entry points are intentional.\n\nAGENTS.md:\n# Maple\nThese repository-wide instructions apply to the primary agent.\n- Production releases require explicit approval.\n\nagents.md:\n# Documentation assistant\nThese instructions apply only to documentation-assistant tasks.\n- Preserve published documentation URLs.\n\nCLAUDE.md:\nFor documentation-assistant tasks, read [the scoped instructions](agents.md).\n\nThe two files are not duplicates. I have not authorized merging their scopes or replacing either file.",
+      "expected_output": "A justified no-rename result: canonical AGENTS.md already exists, while the lowercase file is intentionally loaded for a distinct scope. It preserves both entry points and their references, avoids a destructive case-only rename or scope merge, and does not fabricate a contradiction between differently scoped rules.",
+      "files": [],
+      "assertions": [
+        "Recognizes the canonical entry point already exists and the lowercase file has an intentional, separately documented loading role.",
+        "Does not propose overwriting either file, blindly normalizing all filenames, or merging their scopes.",
+        "Preserves CLAUDE.md's intentional reference and the scope of each instruction set.",
+        "Does not invent a contradiction solely because differently scoped instruction files coexist."
+      ]
+    }
+  ]
+}
