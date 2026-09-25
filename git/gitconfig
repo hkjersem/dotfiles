@@ -29,7 +29,8 @@
     new = log --color --pretty=compact --abbrev-commit -10
     # last 10 commit messages only
     newlog = log --color --pretty=format:'%C(green)-%C(reset) %C(default)%s%C(reset)' -10
-    amend-date = "!f() { GIT_COMMITTER_DATE=\"$1\" git commit --amend --no-edit --date \"$1\"; }; f"
+    # fix commit date: git amend-date "Mon Jan 1 12:00:00 2024 +0100"
+    amend-date = "!f() { GIT_COMMITTER_DATE=\"$1\" git commit --amend --no-edit --date \"$1\" --no-verify; }; f"
     # show current git identity and which config file the email comes from
     whoami = "!f() { name=$(git config user.name); email=$(git config user.email); src=$(git config --show-origin user.email | awk -F'\\t' '{sub(/file:/,\"\",$1); sub(ENVIRON[\"HOME\"],\"~\",$1); print $1}'); echo \"$name <$email>  ($src)\"; }; f"
     # files with most changes in the last year (churn)
