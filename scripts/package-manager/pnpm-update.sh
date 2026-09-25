@@ -70,10 +70,22 @@ _find_location_extra() {
   echo ""
 }
 
+_find_additional_update_locations() {
+  local pkg="$1"
+  pnpm_override_contains_package "$pkg" && echo "override"
+}
+
 _apply_catalog() {
   local pkg="$1" ver="$2"
   pnpm_apply_catalog_version "$pkg" "$ver"
   echo -e "  ${CYAN}catalog${RESET}              ${pkg}  ->  ${ver}"
+}
+
+_apply_extra_update_location() {
+  local loc="$1" pkg="$2" ver="$3"
+  [[ "$loc" == "override" ]] || return 1
+  pnpm_apply_override_version "$pkg" "$ver"
+  echo -e "  ${CYAN}overrides${RESET}            ${pkg}  ->  ${ver}"
 }
 
 _pm_install() {

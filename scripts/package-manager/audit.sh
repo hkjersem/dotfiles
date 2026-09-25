@@ -26,7 +26,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-case "$(_detect_pm)" in
+pm="$(_detect_pm)"
+if $deep && [[ "$pm" != "pnpm" ]]; then
+  echo "Warning: --deep only applies to pnpm; ignoring for $pm." >&2
+fi
+
+case "$pm" in
   pnpm)
     audit_fix=(--fix)
     pnpm_major="$(pnpm --version 2>/dev/null | cut -d. -f1)"
@@ -35,6 +40,7 @@ case "$(_detect_pm)" in
     fi
 
     if $deep; then
+      echo "Running deep pnpm lockfile refresh..."
       if [[ -f pnpm-workspace.yaml ]]; then
         pnpm -r --include-workspace-root update --depth Infinity --lockfile-only 2>/dev/null || true
       else

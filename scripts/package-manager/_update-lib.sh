@@ -146,11 +146,19 @@ latest_in_prefix() {
   echo "$result" | jq -r 'if type == "array" then last else . end' 2>/dev/null || echo ""
 }
 
-latest_prerelease_in_major() {
-  local pkg="$1" major="$2"
-  npm view "$pkg" versions --json 2>/dev/null | \
-    jq -r ".[] | select(startswith(\"${major}.\") and contains(\"-\"))" 2>/dev/null | \
-    sort -V | tail -1
+latest_stable() {
+  local pkg="$1" result
+  result=$(npm view "$pkg" versions --json 2>/dev/null) || true
+  [[ -z "$result" || "$result" == "null" ]] && echo "" && return
+  echo "$result" | jq -r '
+    if type == "array" then
+      map(select(contains("-") | not)) | last // empty
+    elif contains("-") then
+      empty
+    else
+      .
+    end
+  ' 2>/dev/null || echo ""
 }
 
 # ── Cooldown helpers ──────────────────────────────────────────────────────────
@@ -225,6 +233,14 @@ pnpm_catalog_contains_package() {
   pnpm_catalog_keys | grep -Fxq "$pkg"
 }
 
+pnpm_override_contains_package() {
+  local pkg="$1"
+  [[ -f "$ROOT/pnpm-workspace.yaml" ]] || return 1
+  awk '/^overrides:/{f=1;next} /^[a-zA-Z]/{f=0} f' "$ROOT/pnpm-workspace.yaml" \
+    | sed -nE "s/^[[:space:]]*['\"]?([^'\":]+)['\"]?[[:space:]]*:.*/\1/p" \
+    | grep -Fxq "$pkg"
+}
+
 pnpm_catalog_keys() {
   [[ -f "$ROOT/pnpm-workspace.yaml" ]] || return 0
   awk '/^catalog:/{f=1;next} /^[a-zA-Z]/{f=0} f' "$ROOT/pnpm-workspace.yaml" \
@@ -236,24 +252,25 @@ pnpm_has_named_catalogs() {
   grep -qE '^catalogs:[[:space:]]*$' "$ROOT/pnpm-workspace.yaml"
 }
 
-pnpm_apply_catalog_version() {
-  local pkg="$1" ver="$2"
-  PKG="$pkg" VER="$ver" node - "$ROOT/pnpm-workspace.yaml" <<'EOF'
+pnpm_apply_workspace_section_version() {
+  local section="$1" pkg="$2" ver="$3"
+  SECTION="$section" PKG="$pkg" VER="$ver" node - "$ROOT/pnpm-workspace.yaml" <<'EOF'
 const fs = require('fs');
 const file = process.argv[2];
+const section = process.env.SECTION;
 const pkg = process.env.PKG;
 const ver = process.env.VER;
 const source = fs.readFileSync(file, 'utf8');
 const hasFinalNewline = source.endsWith('\n');
 const lines = source.replace(/\n$/, '').split('\n');
 const out = [];
-let inCatalog = false;
+let inSection = false;
 let changed = false;
 
 for (const line of lines) {
-  if (!inCatalog) {
-    if (/^catalog:\s*$/.test(line)) {
-      inCatalog = true;
+  if (!inSection) {
+    if (line.trimEnd() === `${section}:`) {
+      inSection = true;
       out.push(line);
       continue;
     }
@@ -262,7 +279,7 @@ for (const line of lines) {
   }
 
   if (/^[A-Za-z]/.test(line)) {
-    inCatalog = false;
+    inSection = false;
     out.push(line);
     continue;
   }
@@ -280,6 +297,14 @@ if (changed) {
   fs.writeFileSync(file, out.join('\n') + (hasFinalNewline ? '\n' : ''));
 }
 EOF
+}
+
+pnpm_apply_catalog_version() {
+  pnpm_apply_workspace_section_version "catalog" "$1" "$2"
+}
+
+pnpm_apply_override_version() {
+  pnpm_apply_workspace_section_version "overrides" "$1" "$2"
 }
 
 pnpm_remove_catalog_keys() {
@@ -556,9 +581,52 @@ find_all_locations() {
   return 0
 }
 
+# Returns all concrete write-back locations for a package.
+# Unlike find_all_locations, this includes catalog and direct pins together so
+# pmu can keep mixed catalog/direct declarations in sync.
+find_all_update_locations() {
+  local pkg="$1"
+  local found=0
+
+  local extra; extra=$(_find_location_extra "$pkg")
+  if [[ -n "$extra" ]]; then
+    echo "$extra"
+    found=1
+  fi
+
+  while IFS= read -r extra; do
+    [[ -z "$extra" ]] && continue
+    echo "$extra"
+    found=1
+  done < <(_find_additional_update_locations "$pkg")
+
+  local pkgjsons=()
+  while IFS= read -r _pj; do pkgjsons+=("$_pj"); done < <(_collect_workspace_pkgjsons)
+
+  local fallback="" pkgjson deptype val
+  for pkgjson in "${pkgjsons[@]}"; do
+    for deptype in dependencies devDependencies peerDependencies optionalDependencies; do
+      val=$(jq -r ".${deptype}[\"${pkg}\"] // empty" "$pkgjson" 2>/dev/null) || continue
+      [[ -z "$val" ]] && continue
+      [[ "$val" == catalog* ]] && continue
+      if [[ "$val" =~ ^">" || "$val" == "*" ]]; then
+        [[ -z "$fallback" ]] && fallback="$pkgjson:$deptype"
+        continue
+      fi
+      echo "$pkgjson:$deptype"
+      found=1
+    done
+  done
+
+  [[ $found -eq 0 ]] && { [[ -n "$fallback" ]] && echo "$fallback" || echo "unknown"; }
+  return 0
+}
+
 # Default hooks — wrappers override as needed
 _find_location_extra() { echo ""; }
+_find_additional_update_locations() { return 0; }
 _apply_catalog()       { echo -e "  ${YELLOW}⚠ Catalog update not supported${RESET}"; }
+_apply_extra_update_location() { return 1; }
 _pm_install()          { echo -e "${YELLOW}⚠ _pm_install not defined${RESET}" >&2; }
 
 # ── Augmentation ──────────────────────────────────────────────────────────────
@@ -722,6 +790,12 @@ run_plan() {
     local latest;  latest=$(echo "$OUTDATED"  | jq -r ".\"${pkg}\".latest"  | tr -d '"'"'")
     [[ "$current" == "null" || "$latest" == "null" ]] && continue
 
+    if [[ "$current" != *-* && "$latest" == *-* ]]; then
+      local stable; stable=$(latest_stable "$pkg")
+      [[ -z "$stable" ]] && continue
+      latest="$stable"
+    fi
+
     local current_prefix; current_prefix=$(breaking_prefix "$current")
     local latest_prefix;  latest_prefix=$(breaking_prefix "$latest")
     local loc;            loc=$(find_location "$pkg")
@@ -735,15 +809,10 @@ run_plan() {
     if [[ "$current" == *-* ]]; then
       local current_major; current_major=$(echo "$current" | cut -d. -f1)
       local safe_stable;   safe_stable=$(latest_in_prefix "$pkg" "$current_major")
-      if [[ -n "$safe_stable" && "$safe_stable" != "$current" ]] && semver_newer "$safe_stable" "$current"; then
+      if [[ -n "$safe_stable" && "$safe_stable" != *-* && "$safe_stable" != "$current" ]] && semver_newer "$safe_stable" "$current"; then
         tgt="$safe_stable"; note="was prerelease"
       else
-        local safe; safe=$(latest_prerelease_in_major "$pkg" "$current_major")
-        if [[ -n "$safe" && "$safe" != "$current" ]] && semver_newer "$safe" "$current"; then
-          tgt="$safe"; note="prerelease"
-        else
-          continue
-        fi
+        continue
       fi
     elif [[ "$latest_prefix" != "$current_prefix" ]]; then
       if $ALLOW_MAJOR; then
@@ -873,19 +942,26 @@ run_plan() {
   for i in "${!P_PKG[@]}"; do
     local pkg="${P_PKG[$i]}"; local ver="${P_TO[$i]}"; local loc="${P_LOC[$i]}"
 
-    if [[ "$loc" == "catalog" ]]; then
-      _apply_catalog "$pkg" "$ver"
-    elif [[ "$loc" != "unknown" ]]; then
-      while IFS= read -r aloc; do
-        [[ "$aloc" == "unknown" || "$aloc" == "catalog" ]] && continue
-        local pkgjson="${aloc%%:*}"
-        local prefix; prefix=$(PKG="$pkg" perl -ne 'if (m|^\s+"\Q$ENV{PKG}\E"\s*:\s*"([^0-9v"]*)v?\d+\.|) { print $1; exit }' "$pkgjson")
-        PKG="$pkg" PREFIX="$prefix" VER="$ver" perl -i -pe 's|^(\s+"\Q$ENV{PKG}\E"\s*:\s*")[^0-9v"]*v?\d+\.[^"]*"|${1}$ENV{PREFIX}$ENV{VER}"|' "$pkgjson"
-        echo -e "  ${CYAN}${pkgjson#$ROOT/}${RESET}  ${pkg}  →  ${prefix}${ver}"
-      done < <(find_all_locations "$pkg")
-    else
+    if [[ "$loc" == "unknown" ]]; then
       echo -e "  ${YELLOW}⚠ Could not locate ${pkg} — skipped${RESET}"
+      continue
     fi
+
+    while IFS= read -r aloc; do
+      if [[ "$aloc" == "unknown" ]]; then
+        continue
+      elif [[ "$aloc" == "catalog" ]]; then
+        _apply_catalog "$pkg" "$ver"
+        continue
+      elif _apply_extra_update_location "$aloc" "$pkg" "$ver"; then
+        continue
+      fi
+
+      local pkgjson="${aloc%%:*}"
+      local prefix; prefix=$(PKG="$pkg" perl -ne 'if (m|^\s+"\Q$ENV{PKG}\E"\s*:\s*"([^0-9v"]*)v?\d+\.|) { print $1; exit }' "$pkgjson")
+      PKG="$pkg" PREFIX="$prefix" VER="$ver" perl -i -pe 's|^(\s+"\Q$ENV{PKG}\E"\s*:\s*")[^0-9v"]*v?\d+\.[^"]*"|${1}$ENV{PREFIX}$ENV{VER}"|' "$pkgjson"
+      echo -e "  ${CYAN}${pkgjson#$ROOT/}${RESET}  ${pkg}  →  ${prefix}${ver}"
+    done < <(find_all_update_locations "$pkg")
   done
 
   echo ""

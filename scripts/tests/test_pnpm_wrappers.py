@@ -248,6 +248,33 @@ class PnpmWrapperTests(unittest.TestCase):
             "catalog-dep: '^1.0.0'", "catalog-dep: '2.2.0'"
         ).replace("'@scope/catalog-dep': '1.0.0'", "'@scope/catalog-dep': '3.2.0'"))
 
+    def test_workspace_section_updates_preserve_header_whitespace(self):
+        for section in ("catalog", "overrides"):
+            for whitespace in ("", "  ", "\t", " \t"):
+                for final_newline in ("", "\n"):
+                    with self.subTest(section=section, whitespace=whitespace,
+                                      final_newline=final_newline):
+                        source = (
+                            f"catalog:{whitespace}\n  '@scope/pkg': '1.0.0'\n"
+                            f"overrides:{whitespace}\n  '@scope/pkg': '1.0.0'"
+                            + final_newline
+                        )
+                        self.workspace.write_text(source)
+                        helper = ("pnpm_apply_catalog_version" if section == "catalog"
+                                  else "pnpm_apply_override_version")
+                        result = subprocess.run(
+                            ["/bin/bash", "-c",
+                             'source "$1"; ROOT="$PWD"; "$2" @scope/pkg 2.0.0',
+                             "test", str(WRAPPERS / "_update-lib.sh"), helper],
+                            cwd=self.root, env=self.env, text=True,
+                            capture_output=True, timeout=20,
+                        )
+                        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                        self.assertEqual(self.workspace.read_text(), source.replace(
+                            f"{section}:{whitespace}\n  '@scope/pkg': '1.0.0'",
+                            f"{section}:{whitespace}\n  '@scope/pkg': '2.0.0'",
+                        ))
+
     def test_explicit_root_bypasses_catalog_rewrite(self):
         self.assert_dispatch(self.invoke("install", "catalog-dep@2", "--root", cwd=self.member),
                              ["--workspace-root", "add", "catalog-dep@2"])
