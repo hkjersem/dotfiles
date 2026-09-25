@@ -177,6 +177,7 @@ version_age_minutes() {
 
 is_cooldown_excluded() {
   local pkg="$1" entry name_part
+  [[ ${#COOLDOWN_EXCLUDE[@]} -eq 0 ]] && return 1
   for entry in "${COOLDOWN_EXCLUDE[@]}"; do
     if [[ "$entry" == @* ]]; then
       [[ "$entry" =~ ^(@[^/]+/[^@]+) ]] && name_part="${BASH_REMATCH[1]}" || name_part="$entry"
@@ -653,19 +654,20 @@ _augment_outdated() {
   fi
   { $SHOULD_AUGMENT || ${AUGMENT_ALWAYS:-false}; } || return 0
 
-  declare -a _aug_pkg=() _aug_pin=()
-  declare -A _aug_seen=() _aug_in_outdated=()
+  declare -a _aug_pkg=() _aug_pin=() _aug_in_outdated=()
 
   _aug_add() {
-    local pkg="$1" pin="$2"
+    local pkg="$1" pin="$2" index in_outdated=false
     [[ -z "$pkg" || -z "$pin" ]] && return
     pin="${pin#v}"
     pin="${pin#\^}"; pin="${pin#\~}"; pin="${pin#>=}"; pin="${pin#>}"
     [[ ! "$pin" =~ ^[0-9] ]] && return
-    [[ -n "${_aug_seen[$pkg]:-}" ]] && return
-    echo "$OUTDATED" | jq -e ".\"${pkg}\"" &>/dev/null && _aug_in_outdated["$pkg"]=1
+    for ((index=0; index<${#_aug_pkg[@]}; index++)); do
+      [[ "${_aug_pkg[$index]}" == "$pkg" ]] && return 0
+    done
+    echo "$OUTDATED" | jq -e ".\"${pkg}\"" &>/dev/null && in_outdated=true
     _aug_pkg+=("$pkg"); _aug_pin+=("$pin")
-    _aug_seen["$pkg"]=1
+    _aug_in_outdated+=("$in_outdated")
   }
 
   # pnpm catalog entries
@@ -707,7 +709,7 @@ _augment_outdated() {
     latest=$(tr -d '"' < "$_aug_tmp/$i" 2>/dev/null | xargs) || continue
     [[ -z "$latest" ]] && continue
     semver_newer "$latest" "$pin" || continue
-    if [[ -n "${_aug_in_outdated[$pkg]:-}" ]]; then
+    if [[ "${_aug_in_outdated[$i]}" == true ]]; then
       pm_target=$(echo "$OUTDATED" | jq -r ".\"${pkg}\".latest" | tr -d '"'"'")
       [[ "$latest" == "$pm_target" ]] && continue
       semver_newer "$latest" "$pm_target" || continue
@@ -763,9 +765,8 @@ run_plan() {
   [[ -n "$COOLDOWN_MINUTES" && "$COOLDOWN_MINUTES" -gt 0 ]] && COOLDOWN_ACTIVE=true
 
   # Pre-fetch npm time data (parallel)
-  declare -A _PKG_TIMES=()
+  declare -a _time_pkgs=() _pkg_times=()
   if $COOLDOWN_ACTIVE; then
-    declare -a _time_pkgs=()
     while IFS= read -r pkg; do
       is_cooldown_excluded "$pkg" && continue
       _time_pkgs+=("$pkg")
@@ -779,7 +780,7 @@ run_plan() {
       wait
       echo -ne "\033[2K" >&2
       for i in "${!_time_pkgs[@]}"; do
-        _PKG_TIMES["${_time_pkgs[$i]}"]=$(cat "$_times_tmp/$i" 2>/dev/null || echo "")
+        _pkg_times[$i]=$(cat "$_times_tmp/$i" 2>/dev/null || echo "")
       done
       rm -rf "$_times_tmp"
     fi
@@ -836,7 +837,13 @@ run_plan() {
     fi
 
     if $COOLDOWN_ACTIVE && ! is_cooldown_excluded "$pkg"; then
-      local pkg_times; pkg_times="${_PKG_TIMES[$pkg]:-}"
+      local pkg_times="" time_index
+      for ((time_index=0; time_index<${#_time_pkgs[@]}; time_index++)); do
+        if [[ "${_time_pkgs[$time_index]}" == "$pkg" ]]; then
+          pkg_times="${_pkg_times[$time_index]}"
+          break
+        fi
+      done
       local age; age=$(version_age_minutes "$pkg" "$tgt" "$pkg_times") || age=""
       if [[ -n "$age" && "$age" -lt "$COOLDOWN_MINUTES" ]]; then
         local fallback_tgt=""
@@ -879,7 +886,7 @@ run_plan() {
   }
 
   declare -a C_IDX=() N_IDX=()
-  for i in "${!P_PKG[@]}"; do
+  for ((i=0; i<${#P_PKG[@]}; i++)); do
     [[ -z "${P_NOTE[$i]}" && -z "${P_NOTE2[$i]}" ]] && C_IDX+=("$i") || N_IDX+=("$i")
   done
 
@@ -890,7 +897,9 @@ run_plan() {
     printf "  %s\n" "$(printf '%.0s─' {1..80})"
   fi
 
-  for i in "${C_IDX[@]}"; do
+  local clean_index
+  for ((clean_index=0; clean_index<${#C_IDX[@]}; clean_index++)); do
+    i="${C_IDX[$clean_index]}"
     local clr=$GREEN; ${P_MAJOR[$i]} && clr=$YELLOW
     printf "  ${clr}%-38s${RESET}  %-14s  %-14s  ${DIM}%s${RESET}\n" \
       "${P_PKG[$i]}" "${P_FROM[$i]}" "${P_TO[$i]}" "$(_fmt_loc "${P_LOC[$i]}")"
