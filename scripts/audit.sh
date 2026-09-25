@@ -285,14 +285,18 @@ KNOWN_GENERATED=(
     ".ssh"
     # Node — managed by this dotfiles setup
     ".oh-my-zsh" ".fnm" ".npm" ".npmrc" ".node_repl_history"
+    # Bun — managed by ensure-pm-config.sh
+    ".bunfig.toml" ".bun"
+    # Homebrew - managed by homebrew itself
+    .homebrew
 )
 
 for f in "$HOME"/.*; do
     name=$(basename "$f")
     [[ "$name" == "." || "$name" == ".." ]] && continue
 
-    # .local files are intentional per-machine overrides — skip
-    [[ "$name" == *.local ]] && continue
+    # .local / _local files are intentional per-machine overrides — skip
+    [[ "$name" == *.local || "$name" == *_local || "$name" == *_local_* ]] && continue
 
     # Managed by dotbot — skip
     printf '%s\n' "${DOTBOT_MANAGED[@]}" | grep -qx "$name" && continue
