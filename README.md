@@ -147,6 +147,38 @@ ZIP archives always include the source folder name; without a destination,
 the archive is created inside the source. `--ignore-git` excludes `.git`
 directories; otherwise Git metadata is copied too.
 
+## Repository triage
+
+`audit-repo` reports Git activity, ownership concentration, frequently changed
+files, source sizes, test-file conventions, and build configuration. Run it
+inside a repository or select one explicitly; a subdirectory is resolved to
+the Git root.
+
+```sh
+audit-repo
+audit-repo --dir ../project --since "6 months ago"
+audit-repo --skip-security
+```
+
+Source-file statistics use tracked files, excluding known generated artifacts,
+symlinks, and missing files. With a root `package.json`, it also checks package metadata,
+cooldowns, and JS/TS tooling; these checks require jq. npm and pnpm provide
+structured vulnerability and outdated-package results. Bun and other managers'
+audit/outdated results are not parsed by this tool.
+
+The script does not install dependencies, run project tests, apply fixes, or
+edit project files. **It is not offline:** npm/pnpm audit and outdated queries
+can contact registries and write package-manager caches. `--skip-security`
+skips only the vulnerability query, not the outdated query.
+
+Findings are triage indicators, not a security verdict or measured test
+coverage. Ownership concentration may be expected in a solo project.
+`--since` controls churn and fix/revert history; ownership uses all history,
+and velocity uses the last 12 complete calendar months, including inactive
+months. JSONC and inherited TypeScript settings are reported as unevaluated.
+Exit status is 1 for reported issues or operational failures, and 0 otherwise;
+warnings alone do not fail the command.
+
 ## Testing
 
 Run from the repository root on macOS, with Python 3, Node.js, jq, and Perl

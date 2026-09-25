@@ -25,6 +25,7 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 | `scripts/setup-git-local.sh` | Interactive setup for machine-local git identity — generates `~/.gitconfig_local`, `~/.gitconfig_local_work`, `~/.gitconfig_local_personal` (all untracked). Called by `applications.sh` during install. |
 | `scripts/install-zsh-plugins.sh` | Clone or pull oh-my-zsh and custom plugins — called by both `applications.sh` and `update.sh` |
 | `scripts/audit.sh` | Read-only drift detection — compares repo declarations vs installed state |
+| `scripts/audit-repo.sh` | Repository triage — Git, file, test, and build indicators; extra checks for a root `package.json`. Aliased as `audit-repo`. npm/pnpm audit and outdated queries can use the network; `--skip-security` skips only audit. See [README](README.md#repository-triage). |
 | `audit.ignore` | Machine-local audit suppressions (gitignored) — silence known-safe warnings per machine |
 | `scripts/ensure-pm-config.sh` | Ensures package manager release-age cooldowns are set globally — `min-release-age` in `~/.npmrc`, pnpm `minimumReleaseAge` (if pnpm installed), and `minimumReleaseAge` in `~/.bunfig.toml [install]` (if bun installed) |
 | `scripts/install-node.sh` | Install a Node version via fnm, migrate globals, clean up old same-major versions |
@@ -42,10 +43,10 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 | `scripts/package-manager/npm-update.sh` | npm wrapper — workspace detection, `npm outdated`, augmentation, reads cooldown from project and global `~/.npmrc` |
 | `scripts/package-manager/bun-update.sh` | bun wrapper — `bun outdated`, augmentation, reads cooldown from `bunfig.toml` or `~/.bunfig.toml` |
 | `scripts/tests/` | Isolated shell-script regression tests — run with `python3 -B -m unittest discover -s scripts/tests` |
-| `scripts/lib/clean-targets.sh` | Shared generated-artifact lists and matching patterns for cleanup and clean-copy scripts |
+| `scripts/lib/clean-targets.sh` | Shared generated-artifact lists and matching patterns for cleanup, clean-copy, and repository-audit scripts |
 | `scripts/wipe-clean.sh` | Delete all known build artifacts and dependency folders from the current directory. Aliased as `wipe_clean` |
 | `scripts/copy-clean.sh` | Clone-copy or ZIP a source directory, defaulting to the current directory, excluding the same artifacts as `wipe_clean`; supports `--ignore-git` and `--keep-name`. Aliased as `copy_clean` |
-| `scripts/lib/pm-utils.sh` | Shared package-manager duration and configuration parsing helpers |
+| `scripts/lib/pm-utils.sh` | Shared package-manager duration and configuration parsing helpers, also used by repository audit |
 | `macos/applications.sh` | Bootstrap script — installs brew formulae and tools |
 | `macos/install.sh` | Full machine setup entry point (calls applications.sh etc.) |
 | `macos/update.sh` | Update installed tools |

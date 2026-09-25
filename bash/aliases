@@ -182,6 +182,10 @@ wipe() {
     find . -not -path "*/node_modules/*" -not -path "*/.git/*" -name "$name" -type "$type" -prune -exec rm -rf '{}' \;
 }
 
+# Repository triage — Git signals for all languages; extra checks for JS/TS
+# Usage: audit-repo [--dir PATH] [--since PERIOD] [--skip-security]
+audit-repo() { bash "$HOME/.dotfiles/scripts/audit-repo.sh" "$@"; }
+
 # Delete all known build artifacts and dependency folders from the current directory.
 # Usage: wipe_clean
 wipe_clean() { bash "$HOME/.dotfiles/scripts/wipe-clean.sh" "$@"; }
