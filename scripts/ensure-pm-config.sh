@@ -3,6 +3,7 @@
 # Sets min-release-age in ~/.npmrc, pnpm global minimumReleaseAge (if pnpm installed),
 # and minimumReleaseAge in ~/.bunfig.toml [install] (if bun installed).
 # Updates values in place rather than overwriting other config.
+set -e
 
 # ── npm ───────────────────────────────────────────────────────────────────────
 NPMRC="$HOME/.npmrc"
@@ -10,7 +11,7 @@ KEY="min-release-age"
 VALUE="3"
 LINE="$KEY=$VALUE"
 
-if grep -qF "$LINE" "$NPMRC" 2>/dev/null; then
+if grep -qxF "$LINE" "$NPMRC" 2>/dev/null; then
   echo "npmrc: $LINE already present"
 elif grep -qE "^$KEY=" "$NPMRC" 2>/dev/null; then
   # Key exists with a different value — update it in place
@@ -25,7 +26,7 @@ fi
 if command -v pnpm &>/dev/null; then
   PNPM_KEY="minimumReleaseAge"
   PNPM_VALUE="4320"
-  CURRENT=$(pnpm config get "$PNPM_KEY" --global 2>/dev/null)
+  CURRENT=$(pnpm config get "$PNPM_KEY" --global)
   if [ "$CURRENT" = "$PNPM_VALUE" ]; then
     echo "pnpm: $PNPM_KEY=$PNPM_VALUE already set"
   else
@@ -56,7 +57,8 @@ if command -v bun &>/dev/null; then
         print "'"$BUN_KEY"' = '"$BUN_VALUE"'"; next
       }
       1
-    ' "$BUN_BUNFIG" > "$BUN_BUNFIG.tmp" && mv "$BUN_BUNFIG.tmp" "$BUN_BUNFIG"
+    ' "$BUN_BUNFIG" > "$BUN_BUNFIG.tmp"
+    mv "$BUN_BUNFIG.tmp" "$BUN_BUNFIG"
     echo "bunfig: updated $BUN_KEY=$BUN_VALUE"
   elif [[ ! -f "$BUN_BUNFIG" ]]; then
     printf '[install]\n%s = %s\n' "$BUN_KEY" "$BUN_VALUE" > "$BUN_BUNFIG"
@@ -67,7 +69,8 @@ if command -v bun &>/dev/null; then
     awk '
       /^\[install\]/ { print; print "'"$BUN_KEY"' = '"$BUN_VALUE"'"; next }
       1
-    ' "$BUN_BUNFIG" > "$BUN_BUNFIG.tmp" && mv "$BUN_BUNFIG.tmp" "$BUN_BUNFIG"
+    ' "$BUN_BUNFIG" > "$BUN_BUNFIG.tmp"
+    mv "$BUN_BUNFIG.tmp" "$BUN_BUNFIG"
     echo "bunfig: added $BUN_KEY=$BUN_VALUE to [install]"
   else
     # Append new [install] section

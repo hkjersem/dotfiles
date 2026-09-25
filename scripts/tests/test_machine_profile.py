@@ -437,6 +437,24 @@ class MachineProfileTests(unittest.TestCase):
                 self.assertIn("mock failure", result.stderr)
                 self.assertFalse(self.calls("nav-pilot"))
 
+    def test_maintenance_failure_stops_updater_before_success(self):
+        self.set_profile("personal")
+        for script in ("ensure-pm-config.sh", "install-zsh-plugins.sh"):
+            with self.subTest(script=script):
+                if self.log.exists():
+                    self.log.unlink()
+                failure = "bash " + str(self.dotfiles / "scripts" / script)
+                result = self.run_script(
+                    "macos/update.sh", "--no-defaults",
+                    env=dict(self.env, PROFILE_TEST_FAIL=failure),
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("mock failure", result.stderr)
+                self.assertNotIn("Done. Enjoy", result.stdout)
+                self.assertEqual(self.calls()[-1][:2], ["bash", [
+                    str(self.dotfiles / "scripts" / script),
+                ]])
+
     def test_upgrade_and_sync_failures_are_reported(self):
         self.set_profile("personal")
         self.install_nav()

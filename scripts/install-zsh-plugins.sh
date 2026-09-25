@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Install or update oh-my-zsh and its custom plugins.
 # Safe to run on both fresh installs and existing setups — clones if missing, pulls if present.
+set -e
 
 clone_or_pull() {
   local repo="$1" dest="$2"

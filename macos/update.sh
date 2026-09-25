@@ -42,7 +42,7 @@ bash ~/.dotfiles/scripts/install-node.sh lts
 # Re-point this shell to the (possibly new) default now.
 command -v fnm &>/dev/null && fnm use --install-if-missing lts-latest >/dev/null
 # Update npm & packages
-bash ~/.dotfiles/scripts/ensure-pm-config.sh
+bash ~/.dotfiles/scripts/ensure-pm-config.sh || exit 1
 npm cache verify -g > /dev/null
 npm install npm -g --no-fund
 _npm_outdated=$(npm outdated -g 2>/dev/null || true)
@@ -62,7 +62,7 @@ header "Zsh"
 # Update Zsh plugins
 ZSH=~/.oh-my-zsh DISABLE_UPDATE_PROMPT=true zsh ~/.oh-my-zsh/tools/upgrade.sh 2>&1 \
     | grep -v -E "^[[:space:]]*$|______|/ __ |/ /_/ |\\____|\\.git|ohmyzsh\.com|discord|CommitGoods|follow us|@ohmyzsh"
-bash ~/.dotfiles/scripts/install-zsh-plugins.sh
+bash ~/.dotfiles/scripts/install-zsh-plugins.sh || exit 1
 
 # Run settings script (skip with --no-defaults)
 if [[ "$SKIP_DEFAULTS" == false ]]; then

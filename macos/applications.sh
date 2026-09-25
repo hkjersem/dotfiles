@@ -29,11 +29,11 @@ if ! fnm list 2>/dev/null | grep -q 'lts'; then
 fi
 
 # NPM Essentials
-bash ~/.dotfiles/scripts/ensure-pm-config.sh
+bash ~/.dotfiles/scripts/ensure-pm-config.sh || exit 1
 npm i -g diff-so-fancy@latest
 
 # ZSH
-bash ~/.dotfiles/scripts/install-zsh-plugins.sh
+bash ~/.dotfiles/scripts/install-zsh-plugins.sh || exit 1
 
 # Git local profile
 bash ~/.dotfiles/scripts/setup-git-local.sh || exit 1

@@ -121,9 +121,6 @@ For pnpm, `--root` explicitly selects the root package. Unknown installs at the
 root stay at the root; catalog entries change only with an explicit version.
 Use `pmi --help`, `pmr --help`, or `pmu --help` for details.
 
-Known limitation: `pmc` still uses `mapfile` when formatting and applying cleanup
-results, which is unavailable in macOS's bundled Bash 3.2.
-
 Related Node helpers: `install_node [version]` installs through fnm and migrates
 global packages; `npm_globals_diff <version_a> [version_b]` compares globals;
 `npm_release_age <package>[@version]` shows release ages.
@@ -166,6 +163,10 @@ Tests use disposable fixtures and mocked package-manager/network operations,
 not live installations. Shell regressions run under `/bin/bash` to exercise
 the bundled Bash 3.2. Interactive-terminal or Git-alias checks can be skipped
 when the environment blocks them; skipped checks are not verified passes.
+
+GitHub Actions runs shell syntax checks and the full regression suite on an
+Apple Silicon macOS runner for pushes and pull requests. The workflow uses the
+runner's preinstalled tools and does not run machine setup or live updates.
 
 ## iTerm2
 

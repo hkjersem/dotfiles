@@ -65,7 +65,9 @@ format_file_label() {
 }
 
 format_sections() {
-  mapfile -t _sections < <(printf '%s\n' "$1")
+  local section
+  local -a _sections=()
+  while IFS= read -r section; do _sections+=("$section"); done <<< "$1"
   join_lines ", " "${_sections[@]}"
 }
 
@@ -197,10 +199,10 @@ if [[ "$pm" == "pnpm" && -f "$ROOT/pnpm-workspace.yaml" ]]; then
 fi
 
 cleanup_count=${#UNUSED_CATALOG_PKGS[@]}
-for sections in "${CLEAN_SECTIONS[@]}"; do
+for ((i = 0; i < ${#CLEAN_SECTIONS[@]}; i++)); do
   while IFS= read -r section; do
     [[ -n "$section" ]] && cleanup_count=$((cleanup_count + 1))
-  done <<< "$sections"
+  done <<< "${CLEAN_SECTIONS[$i]}"
 done
 
 echo -e "${BOLD}Checking cleanup opportunities...${RESET}  ${DIM}(${pm})${RESET}"
@@ -259,9 +261,10 @@ if [[ ${#UNUSED_CATALOG_PKGS[@]} -gt 0 ]]; then
   done
 fi
 
-for i in "${!CLEAN_FILES[@]}"; do
+for ((i = 0; i < ${#CLEAN_FILES[@]}; i++)); do
   file="${CLEAN_FILES[$i]}"
-  mapfile -t sections < <(printf '%s\n' "${CLEAN_SECTIONS[$i]}")
+  sections=()
+  while IFS= read -r section; do sections+=("$section"); done <<< "${CLEAN_SECTIONS[$i]}"
   node - "$file" "${sections[@]}" <<'EOF'
 const fs = require('fs');
 const file = process.argv[2];
