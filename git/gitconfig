@@ -19,6 +19,10 @@
     whatsnew = log HEAD@{1}..
     # commits on remote not yet pulled
     incoming = "!git remote update -p; git log --graph --pretty=compact --abbrev-commit ..@{u}"
+    # commits on origin's default branch not in current branch
+    incoming-origin = "!f() { git remote update -p; ref=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) || { echo 'origin/HEAD is not set; run: git remote set-head origin -a' >&2; return 1; }; git log --graph --pretty=compact --abbrev-commit ..\"$ref\" \"$@\"; }; f"
+    # fetch latest origin/<branch> and merge it into the current branch
+    merge-origin = "!f() { branch=${1#origin/}; if [ -z \"$branch\" ]; then echo 'usage: git merge-origin <branch>' >&2; return 2; fi; git fetch --prune origin \"$branch\" && git merge \"origin/$branch\"; }; f"
     # local commits not yet pushed
     outgoing = log @{u}..
     # last 10 commits, compact with relative time
@@ -26,6 +30,14 @@
     # last 10 commit messages only
     newlog = log --color --pretty=format:'%C(green)-%C(reset) %C(default)%s%C(reset)' -10
     amend-date = "!f() { GIT_COMMITTER_DATE=\"$1\" git commit --amend --no-edit --date \"$1\"; }; f"
+    # files with most changes in the last year (churn)
+    churn = "!git log --format=format: --name-only --since='1 year ago' | sort | uniq -c | sort -nr | head -20"
+    # files most often touched by bug/fix commits (bug cluster hotspots)
+    bugspots = "!git log -i -E --grep='fix|bug|broken' --name-only --format='' | sort | uniq -c | sort -nr | head -20"
+    # commits per month — project velocity over time
+    pulse = "!git log --format='%ad' --date=format:'%Y-%m' | sort | uniq -c"
+    # reactive/emergency commits in the last year (firefighting frequency)
+    firefighting = "!git log --oneline --since='1 year ago' | grep -iE 'revert|hotfix|emergency|rollback'"
 
 [pretty]
     compact = format:%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)%an%Creset %C(dim)%ae%Creset
