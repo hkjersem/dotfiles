@@ -75,5 +75,27 @@ Re-running asks before replacing the managed block and preserves other settings
 in `~/.gitconfig_local`. Declining work setup removes the managed directory
 overrides, without deleting the separate identity files.
 
+## Clean and copy projects
+
+`wipe_clean` previews generated directories and cache files, then asks before
+deleting them. Git metadata and submodule directories are preserved.
+`copy_clean` copies a project without the same generated artifacts, using
+macOS clone-on-write copies where supported. Existing destinations are never
+overwritten.
+
+```sh
+wipe_clean
+copy_clean ../project-copy
+copy_clean --ignore-git --keep-name ../copies
+copy_clean --zip
+copy_clean --zip ../project ../project-clean.zip
+```
+
+A single copy argument is the destination; the source defaults to the current
+directory. `--keep-name` requires an existing destination directory.
+ZIP archives always include the source folder name; without a destination,
+the archive is created inside the source. `--ignore-git` excludes `.git`
+directories; otherwise Git metadata is copied too.
+
 #### iTerm
 To install preferences, open settings and enable "*Load preferences from a custom folder or URL*" and point it to `~/.dotfiles/iterm/com.googlecode.iterm2.plist`

@@ -6,43 +6,82 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/clean-targets.sh
+source "$SCRIPT_DIR/lib/clean-targets.sh"
 # shellcheck source=package-manager/_update-lib.sh
 source "$SCRIPT_DIR/package-manager/_update-lib.sh"
 
-targets=(
-    node_modules dist .dist build .build out .out coverage .coverage
-    .next .nuxt .turbo .cache .parcel-cache .vite .svelte-kit
-    .docusaurus storybook-static
-    __pycache__ .venv venv
-)
+temporary="$(mktemp -d "${TMPDIR:-/tmp}/wipe-clean.XXXXXX")"
+trap 'rm -f -- "$temporary/submodules" "$temporary/targets"; rmdir "$temporary"' EXIT
 
-# Build exclusions: .git and any git submodule paths
-exclude_expr=(-not -path "*/.git/*")
+prune_expr=(-type d -name .git)
+submodule_paths=()
 if [[ -f .gitmodules ]]; then
-    while IFS= read -r submodule_path; do
-        exclude_expr+=(-not -path "./$submodule_path" -not -path "./$submodule_path/*")
-    done < <(git config --file .gitmodules --get-regexp 'submodule\..*\.path' | awk '{print $2}')
+    status=0
+    git config --null --file .gitmodules --get-regexp 'submodule\..*\.path' \
+        > "$temporary/submodules" || status=$?
+    if [[ "$status" -ne 0 && "$status" -ne 1 ]]; then
+        echo "Error: could not read submodule paths; cleanup aborted." >&2
+        exit 1
+    fi
+    while IFS= read -r -d '' record; do
+        submodule_path="${record#*$'\n'}"
+        submodule_path="./${submodule_path#./}"
+        submodule_path="${submodule_path%/}"
+        submodule_paths+=("$submodule_path")
+        escaped="${submodule_path//\\/\\\\}"
+        escaped="${escaped//\*/\\*}"
+        escaped="${escaped//\?/\\?}"
+        escaped="${escaped//\[/\\[}"
+        escaped="${escaped//\]/\\]}"
+        prune_expr+=(-o -path "$escaped")
+    done < "$temporary/submodules"
 fi
 
-find_expr=()
-for t in "${targets[@]}"; do
-    [[ ${#find_expr[@]} -gt 0 ]] && find_expr+=(-o)
-    find_expr+=(-name "$t")
+dir_expr=()
+for target in "${CLEAN_DIR_TARGETS[@]}"; do
+    [[ ${#dir_expr[@]} -gt 0 ]] && dir_expr+=(-o)
+    dir_expr+=(-name "$target")
 done
 
-found=$(find . "${exclude_expr[@]}" \( "${find_expr[@]}" \) -type d -prune 2>/dev/null)
+file_expr=()
+for target in "${CLEAN_FILE_TARGETS[@]}"; do
+    [[ ${#file_expr[@]} -gt 0 ]] && file_expr+=(-o)
+    file_expr+=(-name "$target")
+done
 
-if [[ -z "$found" ]]; then
+if ! find . \( "${prune_expr[@]}" \) -prune -o \
+    \( \( -type d \( "${dir_expr[@]}" \) -prune \) \
+    -o \( -type f \( "${file_expr[@]}" \) \) \) -print0 > "$temporary/targets"; then
+    echo "Error: could not enumerate cleanup targets; nothing was deleted." >&2
+    exit 1
+fi
+
+targets=()
+while IFS= read -r -d '' target; do
+    contains_submodule=false
+    if [[ ${#submodule_paths[@]} -gt 0 ]]; then
+        for submodule_path in "${submodule_paths[@]}"; do
+            if [[ "$submodule_path" == "$target/"* ]]; then
+                contains_submodule=true
+                break
+            fi
+        done
+    fi
+    [[ "$contains_submodule" == true ]] || targets+=("$target")
+done < "$temporary/targets"
+
+if [[ ${#targets[@]} -eq 0 ]]; then
     echo "Nothing to clean."
     exit 0
 fi
 
 echo "Will delete:"
-echo "$found" | sed 's/^/  /'
+printf '  %q\n' "${targets[@]}"
 echo
 confirm_apply "Proceed?" false false || exit 0
 
-while IFS= read -r dir; do
-    rm -rf "$dir"
-done <<< "$found"
+for target in "${targets[@]}"; do
+    rm -rf -- "$target"
+done
 echo "Done."

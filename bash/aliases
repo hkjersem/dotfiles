@@ -183,4 +183,9 @@ wipe() {
 }
 
 # Delete all known build artifacts and dependency folders from the current directory.
-alias wipe_clean='bash $HOME/.dotfiles/scripts/wipe-clean.sh'
+# Usage: wipe_clean
+wipe_clean() { bash "$HOME/.dotfiles/scripts/wipe-clean.sh" "$@"; }
+
+# Clone-copy the current directory without known build artifacts.
+# Usage: copy_clean [--ignore-git] [--keep-name] [--zip] [source] [destination]
+copy_clean() { bash "$HOME/.dotfiles/scripts/copy-clean.sh" "$@"; }
