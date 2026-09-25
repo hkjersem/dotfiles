@@ -58,5 +58,22 @@ Install/update scripts export the saved choice as `DOTFILES_PROFILE` for
 conditional entries in `Brewfile`. When running `brew bundle` manually, set
 `DOTFILES_PROFILE=work` explicitly to include work-only packages.
 
+## Git identity
+
+Git uses your global personal identity by default. During installation,
+`scripts/setup-git-local.sh` can configure a work identity for a directory,
+with personal exceptions inside it. This is independent of the machine profile.
+
+```sh
+bash ~/.dotfiles/scripts/setup-git-local.sh
+git whoami
+```
+
+The setup writes `~/.gitconfig_local`, `~/.gitconfig_local_work`, and
+`~/.gitconfig_local_personal` as needed. These files stay outside the repository.
+Re-running asks before replacing the managed block and preserves other settings
+in `~/.gitconfig_local`. Declining work setup removes the managed directory
+overrides, without deleting the separate identity files.
+
 #### iTerm
 To install preferences, open settings and enable "*Load preferences from a custom folder or URL*" and point it to `~/.dotfiles/iterm/com.googlecode.iterm2.plist`

@@ -19,9 +19,10 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 | `bash/aliases` | Shell aliases (sourced by zshrc) |
 | `bash/bashrc` | Bash config |
 | `bash/inputrc` | Readline config |
-| `git/gitconfig` | Git aliases, settings, user config |
+| `git/gitconfig` | Git aliases, settings, user config — global default email is personal; machine-local overrides via `~/.gitconfig_local` |
 | `git/gitignore_global` | Global gitignore |
 | `ssh/config` | SSH host config |
+| `scripts/setup-git-local.sh` | Interactive setup for machine-local git identity — generates `~/.gitconfig_local`, `~/.gitconfig_local_work`, `~/.gitconfig_local_personal` (all untracked). Called by `applications.sh` during install. |
 | `scripts/install-zsh-plugins.sh` | Clone or pull oh-my-zsh and custom plugins — called by both `applications.sh` and `update.sh` |
 | `scripts/audit.sh` | Read-only drift detection — compares repo declarations vs installed state |
 | `audit.ignore` | Machine-local audit suppressions (gitignored) — silence known-safe warnings per machine |
@@ -66,5 +67,6 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 - **When adding a new zsh config** — add it to a file in `zsh/conf.d/` and add a `source` line in `zsh/zshrc`
 - **When adding a new brew tool**: add it to `Brewfile` — this is the single source of truth for brew packages. `applications.sh` and `update.sh` both use `brew bundle` to install from it
 - **Machine profile** lives in `~/.config/dotfiles/profile`, never in Git. Load it through `scripts/machine-profile.sh`; conditional Brewfile entries use the exported `DOTFILES_PROFILE` for automatic installation only. Update and sync installed tools on either profile, regardless of their intended profile; never uninstall them automatically.
-- **Local machine overrides** belong in `~/.zshrc_local` — this file is intentionally untracked and should not be created or modified
+- **Local machine overrides** belong in `~/.zshrc_local` (shell) and `~/.gitconfig_local` (git) — these files are intentionally untracked. Run `scripts/setup-git-local.sh` to generate the git local config interactively.
+- **Git identity is directory-based** — global default is the personal email; `~/.gitconfig_local` applies work identity under the work directory, with optional personal exceptions. Never hardcode emails in tracked files — `setup-git-local.sh` prompts for work email and reads the personal identity from the effective global Git configuration (`git config --global user.email` and `user.name`).
 - **After making changes** that affect symlinks, brew formulae, plugins, or npm globals — run `bash scripts/audit.sh` to verify the repo and installed state are consistent

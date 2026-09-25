@@ -35,5 +35,8 @@ npm i -g diff-so-fancy@latest
 # ZSH
 bash ~/.dotfiles/scripts/install-zsh-plugins.sh
 
+# Git local profile
+bash ~/.dotfiles/scripts/setup-git-local.sh || exit 1
+
 # End script
 echo "Done. Applications are installed."
