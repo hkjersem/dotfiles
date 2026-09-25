@@ -14,6 +14,8 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 | `zsh/conf.d/` | Zsh config modules (sourced in order by zshrc): `omz.zsh`, `plugins.zsh`, `history.zsh`, `env.zsh`, `aliases.zsh`, `prompt.zsh`, `fnm.zsh`, `fzf.zsh` |
 | `zsh/zlogin` | Login shell config (runs after zshrc) — compiles compdump, propagates PATH to launchd |
 | `Brewfile` | Homebrew formulae declarations — source of truth for brew packages; used by `applications.sh` and `update.sh` via `brew bundle --file` |
+| `scripts/machine-profile.sh` | Read, choose, or change the machine-local personal/work profile; also sourced by setup, updates, and audit |
+| `scripts/lib/tool-updates.sh` | Shared custom update/sync routines for installed tools on either profile; standard Homebrew tools only need a Brewfile declaration |
 | `bash/aliases` | Shell aliases (sourced by zshrc) |
 | `bash/bashrc` | Bash config |
 | `bash/inputrc` | Readline config |
@@ -63,5 +65,6 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 - **All changes must be portable** — must work on any macOS machine, not just the current one
 - **When adding a new zsh config** — add it to a file in `zsh/conf.d/` and add a `source` line in `zsh/zshrc`
 - **When adding a new brew tool**: add it to `Brewfile` — this is the single source of truth for brew packages. `applications.sh` and `update.sh` both use `brew bundle` to install from it
+- **Machine profile** lives in `~/.config/dotfiles/profile`, never in Git. Load it through `scripts/machine-profile.sh`; conditional Brewfile entries use the exported `DOTFILES_PROFILE` for automatic installation only. Update and sync installed tools on either profile, regardless of their intended profile; never uninstall them automatically.
 - **Local machine overrides** belong in `~/.zshrc_local` — this file is intentionally untracked and should not be created or modified
 - **After making changes** that affect symlinks, brew formulae, plugins, or npm globals — run `bash scripts/audit.sh` to verify the repo and installed state are consistent

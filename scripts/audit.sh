@@ -4,6 +4,7 @@
 # Compares what the repo declares against what's actually installed on this machine.
 
 DOTFILES="$HOME/.dotfiles"
+source "$DOTFILES/scripts/machine-profile.sh" || exit 1
 
 # Load local ignore list (audit.ignore is gitignored — machine-specific)
 # Format: one entry per line, prefixed by category, e.g.:
@@ -35,6 +36,7 @@ WARNINGS=0
 SECTION_OUTPUT=()
 SECTION_ISSUES=0
 SECTION_WARNINGS=0
+SECTION_INFOS=0
 CURRENT_SECTION=""
 
 section_start() {
@@ -42,12 +44,13 @@ section_start() {
     SECTION_OUTPUT=()
     SECTION_ISSUES=0
     SECTION_WARNINGS=0
+    SECTION_INFOS=0
 }
 
 section_end() {
     echo ""
     echo "${BOLD}── ${CURRENT_SECTION} ──────────────────────────────────${RESET}"
-    if [[ $SECTION_ISSUES -eq 0 && $SECTION_WARNINGS -eq 0 && ${#SECTION_OUTPUT[@]} -gt 0 ]]; then
+    if [[ $SECTION_ISSUES -eq 0 && $SECTION_WARNINGS -eq 0 && $SECTION_INFOS -eq 0 && ${#SECTION_OUTPUT[@]} -gt 0 ]]; then
         echo "  ${GREEN}✅${RESET} All checks passed"
     else
         printf '%s\n' "${SECTION_OUTPUT[@]}"
@@ -55,8 +58,33 @@ section_end() {
 }
 
 ok()   { SECTION_OUTPUT+=("  ${GREEN}✅${RESET} $1"); }
+info() { SECTION_OUTPUT+=("  $1"); SECTION_INFOS=$((SECTION_INFOS + 1)); }
 warn() { SECTION_OUTPUT+=("  ${YELLOW}🟡${RESET} $1"); ((WARNINGS++)); ((SECTION_WARNINGS++)); }
 fail() { SECTION_OUTPUT+=("  ${RED}🔴${RESET} $1"); ((ISSUES++)); ((SECTION_ISSUES++)); }
+
+section_start "Machine profile"
+if load_machine_profile; then
+    info "Profile: $DOTFILES_PROFILE"
+    for tool in nav-pilot gcloud; do
+        label="$tool"
+        [[ "$tool" == nav-pilot ]] && label="Nav Pilot"
+        if command -v "$tool" >/dev/null; then
+            if [[ "$DOTFILES_PROFILE" == personal ]]; then
+                info "$label is installed on this personal machine; it will still be updated and synced where supported."
+            fi
+        elif [[ "$DOTFILES_PROFILE" == work ]]; then
+            warn "$label is missing (run dotfiles-update to install it)"
+        fi
+    done
+else
+    profile_status=$?
+    if [[ "$profile_status" -eq 1 ]]; then
+        warn "Machine profile is not set (run dotfiles-profile personal or dotfiles-profile work)"
+    else
+        fail "Machine profile could not be loaded (run dotfiles-profile personal or dotfiles-profile work)"
+    fi
+fi
+section_end
 
 # ──────────────────────────────────────────────────────
 # 1. SYMLINKS
@@ -115,21 +143,28 @@ if ! command -v brew &>/dev/null; then
 else
     BREW_INSTALLED=$(brew list --formula 2>/dev/null)
     BREW_LEAVES=$(brew leaves 2>/dev/null)
-    DECLARED=$(grep -E '^\s*brew\s+"' "$DOTFILES/Brewfile" | sed 's/.*brew "\([^"]*\)".*/\1/' | xargs)
+    if ! DECLARED=$(HOMEBREW_NO_AUTO_UPDATE=1 brew bundle list --file="$DOTFILES/Brewfile" --formula); then
+        echo "Error: could not read the profile-aware Brewfile." >&2
+        exit 1
+    fi
+    DECLARED=$(printf '%s\n' "$DECLARED" | sed 's|.*/||')
 
     # Declared but not installed
     while IFS= read -r formula; do
         [[ -z "$formula" ]] && continue
+        [[ "$formula" == nav-pilot ]] && continue
         if echo "$BREW_INSTALLED" | grep -qx "$formula"; then
             ok "$formula"
         else
             fail "$formula (in Brewfile but not installed)"
         fi
-    done < <(echo "$DECLARED" | tr ' ' '\n')
+    done < <(printf '%s\n' "$DECLARED")
 
     # Installed but not declared — only check leaves (explicit installs, not dependencies)
     while IFS= read -r installed; do
         [[ -z "$installed" ]] && continue
+        # Nav Pilot's optional personal installation is covered by the profile section.
+        [[ "$installed" == nav-pilot ]] && command -v nav-pilot >/dev/null && continue
         if ! echo "$DECLARED" | grep -qw "$installed"; then
             is_ignored "brew:$installed" && continue
             warn "$installed (installed but not in Brewfile)"

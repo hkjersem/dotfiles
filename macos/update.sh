@@ -2,6 +2,10 @@
 # Usage: update.sh [--no-defaults]
 #   --no-defaults  Skip running osxdefaults.sh
 
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/scripts/machine-profile.sh" || exit 1
+ensure_machine_profile || exit 1
+source "$HOME/.dotfiles/scripts/lib/tool-updates.sh" || exit 1
+
 SKIP_DEFAULTS=false
 for arg in "$@"; do
   [[ "$arg" == "--no-defaults" ]] && SKIP_DEFAULTS=true
@@ -11,6 +15,9 @@ _first_header=true
 header() {
   [[ "$_first_header" == true ]] && _first_header=false || printf "\n"
   printf "\033[34m────────────────────────────────────────\033[0m\n\033[1;34m  %s\033[0m\n\033[34m────────────────────────────────────────\033[0m\n" "$1"
+}
+subheader() {
+    printf "\n\033[1;36m  ▸ %s\033[0m\n\033[2m  ────────────────────────\033[0m\n" "$1"
 }
 
 header "System & App Store"
@@ -47,8 +54,8 @@ header "Homebrew"
 # Update Homebrew (Cask) & packages
 brew analytics off
 brew update --quiet
-HOMEBREW_NO_ASK=1 brew bundle install --file="$HOME/.dotfiles/Brewfile" --quiet  # ensure any new Brewfile entries are installed
-brew upgrade --yes
+HOMEBREW_NO_ASK=1 brew bundle install --file="$HOME/.dotfiles/Brewfile" --quiet || exit 1
+brew upgrade --yes || exit 1
 brew cleanup
 
 header "Zsh"
@@ -62,6 +69,9 @@ if [[ "$SKIP_DEFAULTS" == false ]]; then
     header "macOS defaults"
     bash ~/.dotfiles/macos/osxdefaults.sh
 fi
+
+header "Tools & integrations"
+update_profile_tools subheader || exit 1
 
 header "Cleanup"
 # Cleanup

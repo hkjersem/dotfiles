@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/scripts/machine-profile.sh" || exit 1
+ensure_machine_profile || exit 1
+source "$HOME/.dotfiles/scripts/lib/tool-updates.sh" || exit 1
+
 # Ask for the administrator password upfront (if not already authenticated)
 sudo -n true 2>/dev/null || { echo "Some steps require administrator access. Please enter your password:"; sudo -v; }
 
@@ -16,7 +20,8 @@ if ! command -v brew &>/dev/null; then
 fi
 
 # Bootstrap brew packages from Brewfile
-brew bundle install --file="$HOME/.dotfiles/Brewfile"
+brew bundle install --file="$HOME/.dotfiles/Brewfile" || exit 1
+update_profile_tools || exit 1
 
 if ! fnm list 2>/dev/null | grep -q 'lts'; then
     eval "$(fnm env --shell bash)"

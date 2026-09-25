@@ -3,6 +3,8 @@
 #   --no-defaults  Skip running osxdefaults.sh
 
 DOTFILES="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$DOTFILES/scripts/machine-profile.sh" || exit 1
+ensure_machine_profile || exit 1
 
 SKIP_DEFAULTS=false
 for arg in "$@"; do

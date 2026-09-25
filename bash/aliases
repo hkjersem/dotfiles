@@ -59,9 +59,10 @@ alias sudo='sudo '
 
 # Dotfiles management
 alias dotfiles-update='bash ~/.dotfiles/macos/update.sh --no-defaults'
-alias dotfiles-install='bash ~/.dotfiles/install --no-audit; bash ~/.dotfiles/macos/install.sh --no-defaults'
+alias dotfiles-install='bash ~/.dotfiles/scripts/machine-profile.sh && bash ~/.dotfiles/install --no-audit && bash ~/.dotfiles/macos/install.sh --no-defaults'
 alias dotfiles-defaults='bash ~/.dotfiles/macos/osxdefaults.sh'
 alias dotfiles-audit='bash ~/.dotfiles/scripts/audit.sh'
+alias dotfiles-profile='bash ~/.dotfiles/scripts/machine-profile.sh'
 
 # Flush Directory Service cache
 alias flush="dscacheutil -flushcache && killall -HUP mDNSResponder"
