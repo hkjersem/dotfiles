@@ -1,36 +1,55 @@
 # Dotfiles
-Backup, restore, and sync the prefs and settings for your toolbox. Your dotfiles might be the most important files on your machine!
 
-## Install
-```
-git clone https://github.com/hkjersem/dotfiles.git && cd dotfiles && ./install
-```
+Shell, Git, development tools, and system preferences for Apple Silicon Macs,
+managed by [dotbot](https://github.com/anishathalye/dotbot).
 
-#### Dependencies
-```
-sudo easy_install pip && pip search yaml && pip install pyyaml
-```
+## Setup
 
-#### Fonts
-* vscode: SF Mono & FiraCode
-* iTerm: SourceCodePro
+Start with Xcode Command Line Tools (`xcode-select --install`) and
+[Homebrew](https://brew.sh/). Ensure `git`, `python3`, and `brew` are available
+in the current shell. Setup needs network access and may request administrator
+access. Intel Macs are not supported.
 
-## Update
-```
-git pull origin master && ./install
-```
+Review `install.conf.yaml` and back up conflicting dotfiles before applying the
+links. Dotbot includes its YAML dependency; no separate pip installation is needed.
 
-## Applications & Settings
-
-Fresh install:
-```
-source ~/.dotfiles/macos/install.sh
+```sh
+git clone https://github.com/hkjersem/dotfiles.git ~/.dotfiles
+cd ~/.dotfiles
+./install --no-audit
+bash macos/install.sh --no-defaults
+exec zsh -l
 ```
 
-Update applications and settings:
+`./install` applies symlinks; the setup script then asks for a machine
+profile and installs tools. `--no-defaults` leaves macOS preferences unchanged.
+Start a new login shell, as above, before using the commands below. Run the Bash
+setup scripts with `bash`, not `source` from zsh.
+
+Most dotfiles are symlinked into this checkout, so edits take effect without a
+commit or another install. Shell settings may require a new shell.
+
+## Daily commands
+
+| Command | What it does |
+|---|---|
+| `dotfiles-install` | Reapply links and bootstrap tools, plugins, and local Git identity; leaves macOS preferences unchanged |
+| `dotfiles-update` | Update macOS/App Store apps, Homebrew packages, Node/npm globals, Zsh plugins, and supported installed CLIs; then audit |
+| `dotfiles-defaults` | Apply macOS system preferences |
+| `dotfiles-audit` | Check for drift between repo and installed state |
+| `dotfiles-profile` | Show or choose the machine's personal/work profile |
+
+`dotfiles-update` updates installed software, not this Git checkout. To get new
+dotfiles and reapply their symlinks:
+
+```sh
+git -C ~/.dotfiles pull --ff-only
+bash ~/.dotfiles/install
 ```
-source ~/.dotfiles/macos/update.sh
-```
+
+Audit reports missing declarations, unexpected installed items, and broken
+links. Machine-local suppressions go in the gitignored `audit.ignore`, one per
+line, such as `brew:tool` or `home:.config/dir`.
 
 ## Machine profile
 
@@ -75,6 +94,40 @@ Re-running asks before replacing the managed block and preserves other settings
 in `~/.gitconfig_local`. Declining work setup removes the managed directory
 overrides, without deleting the separate identity files.
 
+## Package-manager commands
+
+These commands detect npm, pnpm, or Bun from the project's `packageManager`
+field or lockfile. The selected manager must already be installed.
+
+| Command | What it does |
+|---|---|
+| `pm <command>` | Run a command with the detected package manager |
+| `pmx <package>` | Execute a package through npx, pnpm dlx, or bunx |
+| `pmi [package...]` | Install dependencies or add packages |
+| `pmr <package...>` | Remove packages |
+| `pmu --dry-run` | Preview updates within the current compatible version range |
+| `pmu --major` | Allow breaking version updates; still asks before applying |
+| `pmc --dry-run` | Preview manifest/catalog cleanup |
+| `pma` | Audit and apply supported fixes; Bun only reports findings |
+
+`pmu` respects configured release-age cooldowns. `--cooldown <days>` overrides
+them, including `--cooldown 0` to disable the cooldown. Use `--yes` only when
+you intend to skip confirmation. `pma --deep` additionally refreshes pnpm's
+lockfile before auditing; it is not a read-only check.
+
+In pnpm workspaces, `pmi` and `pmr` use the current member or infer an existing
+dependency's target from the root. Ambiguous targets fail rather than guessing.
+For pnpm, `--root` explicitly selects the root package. Unknown installs at the
+root stay at the root; catalog entries change only with an explicit version.
+Use `pmi --help`, `pmr --help`, or `pmu --help` for details.
+
+Known limitation: `pmc` still uses `mapfile` when formatting and applying cleanup
+results, which is unavailable in macOS's bundled Bash 3.2.
+
+Related Node helpers: `install_node [version]` installs through fnm and migrates
+global packages; `npm_globals_diff <version_a> [version_b]` compares globals;
+`npm_release_age <package>[@version]` shows release ages.
+
 ## Clean and copy projects
 
 `wipe_clean` previews generated directories and cache files, then asks before
@@ -97,5 +150,23 @@ ZIP archives always include the source folder name; without a destination,
 the archive is created inside the source. `--ignore-git` excludes `.git`
 directories; otherwise Git metadata is copied too.
 
-#### iTerm
-To install preferences, open settings and enable "*Load preferences from a custom folder or URL*" and point it to `~/.dotfiles/iterm/com.googlecode.iterm2.plist`
+## Testing
+
+Run from the repository root on macOS, with Python 3, Node.js, jq, and Perl
+available. Some fixtures also use `/usr/bin/python3`, `/usr/bin/ruby`, and macOS
+copy/archive tools. No Python test packages need to be installed.
+
+```sh
+python3 -B -m unittest discover -s scripts/tests
+# One suite:
+python3 -B -m unittest discover -s scripts/tests -p 'test_package_updates.py'
+```
+
+Tests use disposable fixtures and mocked package-manager/network operations,
+not live installations. Shell regressions run under `/bin/bash` to exercise
+the bundled Bash 3.2. Interactive-terminal or Git-alias checks can be skipped
+when the environment blocks them; skipped checks are not verified passes.
+
+## iTerm2
+
+Settings → enable *Load preferences from a custom folder or URL* → `~/.dotfiles/iterm/com.googlecode.iterm2.plist`
