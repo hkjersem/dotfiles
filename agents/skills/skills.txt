@@ -1,0 +1,29 @@
+# Global third-party skills to install on every machine.
+# Format: source|skill-name
+# Disable and uninstall a managed skill with: # disabled: source|skill-name
+#
+# Machine-specific skills do not belong here. Existing skills with the same
+# name are reported as conflicts and left unchanged.
+
+anthropics/skills|frontend-design
+anthropics/skills|skill-creator
+
+# disabled: googlechrome/modern-web-guidance|modern-web-guidance
+
+mattpocock/skills|grill-me
+mattpocock/skills|prototype
+mattpocock/skills|tdd
+
+onmax/nuxt-skills|nuxt
+onmax/nuxt-skills|nuxt-content
+onmax/nuxt-skills|nuxt-modules
+onmax/nuxt-skills|nuxt-seo
+onmax/nuxt-skills|vite
+onmax/nuxt-skills|vitest
+onmax/nuxt-skills|vue
+
+vercel-labs/agent-skills|vercel-react-best-practices
+vercel-labs/agent-skills|web-design-guidelines
+# disabled: vercel-labs/skills|find-skills
+
+vueuse/skills|vueuse-functions

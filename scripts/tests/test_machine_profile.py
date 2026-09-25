@@ -455,6 +455,28 @@ class MachineProfileTests(unittest.TestCase):
                     str(self.dotfiles / "scripts" / script),
                 ]])
 
+    def test_skills_failure_stops_updater_before_success(self):
+        self.set_profile("personal")
+        (self.dotfiles / "agents/skills").mkdir(parents=True)
+        self.write_mock(self.bin / "npx")
+        for failure in (
+            f"bash {self.dotfiles}/scripts/sync-agent-skills.sh --quiet",
+            "npx -y skills update -g",
+            f"bash {self.dotfiles}/scripts/audit-skills.sh --fix-symlinks --fix-lockfile --quiet",
+        ):
+            with self.subTest(failure=failure):
+                if self.log.exists():
+                    self.log.unlink()
+                result = self.run_script(
+                    "macos/update.sh", "--no-defaults",
+                    env=dict(self.env, PROFILE_TEST_FAIL=failure),
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("mock failure", result.stderr)
+                self.assertNotIn("Done. Enjoy", result.stdout)
+                last = self.calls()[-1]
+                self.assertEqual(last[0] + " " + " ".join(last[1]), failure)
+
     def test_upgrade_and_sync_failures_are_reported(self):
         self.set_profile("personal")
         self.install_nav()

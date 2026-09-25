@@ -36,7 +36,7 @@ commit or another install. Shell settings may require a new shell.
 | `dotfiles-install` | Reapply links and bootstrap tools, plugins, and local Git identity; leaves macOS preferences unchanged |
 | `dotfiles-update` | Update macOS/App Store apps, Homebrew packages, Node/npm globals, Zsh plugins, and supported installed CLIs; then audit |
 | `dotfiles-defaults` | Apply macOS system preferences |
-| `dotfiles-audit` | Check for drift between repo and installed state |
+| `dotfiles-audit` | Check for drift between repo and installed state (includes skills) |
 | `dotfiles-profile` | Show or choose the machine's personal/work profile |
 
 `dotfiles-update` updates installed software, not this Git checkout. To get new
@@ -199,6 +199,49 @@ when the environment blocks them; skipped checks are not verified passes.
 GitHub Actions runs shell syntax checks and the full regression suite on an
 Apple Silicon macOS runner for pushes and pull requests. The workflow uses the
 runner's preinstalled tools and does not run machine setup or live updates.
+
+## Agent skills
+
+Skills authored in this repository live under `agents/skills/`.
+`scripts/sync-agent-skills.sh` links them into the runtime canonical directory
+at `~/.agents/skills/` without overwriting name collisions.
+
+`agents/skills/skills.txt` lists third-party global skills that should be
+installed on every machine. Machine-specific skills remain local and are not
+removed by the sync. Prefix a manifest entry with `# disabled:` to uninstall
+that managed skill on each machine while keeping the declaration available to
+re-enable later. Sources use GitHub `owner/repository` names. Skill names must
+start with a lowercase letter or digit and contain only lowercase letters,
+digits, dots, underscores, or hyphens; duplicate names are rejected.
+
+```text
+source/repository|enabled-skill
+# disabled: source/repository|disabled-skill
+```
+
+```sh
+bash scripts/sync-agent-skills.sh --dry-run
+bash scripts/sync-agent-skills.sh
+```
+
+Afterward, `scripts/audit-skills.sh --fix-symlinks` exposes the canonical skills
+to installed agent providers.
+
+Without repair flags, the skills audit is read-only. `--fix-symlinks` creates
+missing links and repairs links whose targets are inside the canonical store;
+real files, directories, and foreign links are reported as conflicts and
+preserved. `--fix-lockfile` removes entries for missing skill directories but
+does not replace a symlinked lockfile.
+
+`--clean-stale` only removes listed agent directories whose `skills/` subtree
+contains verified managed links and empty directories. Real content, foreign
+links, and sibling directories such as `skills-backup` are preserved.
+`--quiet` changes output only; it does not disable requested repairs or hide
+warnings as successful checks. Python 3 is required for link-target checks,
+and jq is required for manifest/lockfile verification.
+
+Setup and update stop if synchronization or repair fails. Resolve conflicts
+manually rather than deleting local skills to make the audit pass.
 
 ## iTerm2
 

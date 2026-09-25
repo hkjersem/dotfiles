@@ -74,6 +74,14 @@ header "Tools & integrations"
 update_installed_tool claude subheader || exit 1
 update_installed_tool copilot subheader || exit 1
 update_installed_tool codex subheader || exit 1
+
+if [ -d ~/.dotfiles/agents/skills ];
+then
+    subheader "Skills"
+    bash ~/.dotfiles/scripts/sync-agent-skills.sh --quiet || exit 1
+    npx -y skills update -g || exit 1
+    bash ~/.dotfiles/scripts/audit-skills.sh --fix-symlinks --fix-lockfile --quiet || exit 1
+fi
 update_profile_tools subheader || exit 1
 
 header "Cleanup"

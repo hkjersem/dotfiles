@@ -32,6 +32,10 @@ fi
 bash ~/.dotfiles/scripts/ensure-pm-config.sh || exit 1
 npm i -g diff-so-fancy@latest
 
+# Agent skills
+bash ~/.dotfiles/scripts/sync-agent-skills.sh || exit 1
+bash ~/.dotfiles/scripts/audit-skills.sh --fix-symlinks --quiet || exit 1
+
 # ZSH
 bash ~/.dotfiles/scripts/install-zsh-plugins.sh || exit 1
 

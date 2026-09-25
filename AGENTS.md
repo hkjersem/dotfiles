@@ -26,6 +26,11 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 | `scripts/install-zsh-plugins.sh` | Clone or pull oh-my-zsh and custom plugins — called by both `applications.sh` and `update.sh` |
 | `scripts/audit.sh` | Read-only drift detection — compares repo declarations vs installed state |
 | `scripts/audit-repo.sh` | Repository triage — Git, file, test, and build indicators; extra checks for a root `package.json`. Aliased as `audit-repo`. npm/pnpm audit and outdated queries can use the network; `--skip-security` skips only audit. See [README](README.md#repository-triage). |
+| `scripts/audit-skills.sh` | Skills drift detection — read-only under `audit.sh`; explicit repair flags preserve real content and foreign links. `--clean-stale` removes only verified managed links and empty skills-only agent directories. See [README](README.md#agent-skills). |
+| `agents/skills/` | Skills authored in this repository — synced into `~/.agents/skills/` and then linked to installed agent providers |
+| `agents/skills/skills.txt` | Third-party global skills installed on every machine; machine-specific skills stay local and unlisted |
+| `scripts/sync-agent-skills.sh` | Collision-safe agent skill sync — links repo-authored skills and installs missing entries from `agents/skills/skills.txt` without overwriting existing names |
+| `scripts/lib/skills-utils.sh` | Shared skills name/manifest validation and conservative link/cleanup helpers |
 | `audit.ignore` | Machine-local audit suppressions (gitignored) — silence known-safe warnings per machine |
 | `scripts/ensure-pm-config.sh` | Ensures package manager release-age cooldowns are set globally — `min-release-age` in `~/.npmrc`, pnpm `minimumReleaseAge` (if pnpm installed), and `minimumReleaseAge` in `~/.bunfig.toml [install]` (if bun installed) |
 | `scripts/install-node.sh` | Install a Node version via fnm, migrate globals, clean up old same-major versions |
@@ -74,7 +79,10 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 - **Local machine overrides** belong in `~/.zshrc_local` (shell) and `~/.gitconfig_local` (git) — these files are intentionally untracked. Run `scripts/setup-git-local.sh` to generate the git local config interactively.
 - **Git identity is directory-based** — global default is the personal email; `~/.gitconfig_local` applies work identity under the work directory, with optional personal exceptions. Never hardcode emails in tracked files — `setup-git-local.sh` prompts for work email and reads the personal identity from the effective global Git configuration (`git config --global user.email` and `user.name`).
 - **After making changes** that affect symlinks, brew formulae, plugins, or npm globals — run `bash scripts/audit.sh` to verify the repo and installed state are consistent
-- **To suppress audit warnings** — add entries to `audit.ignore` with format `category:name` (e.g. `brew:tool`, `home:.config/dir`). This file is gitignored and machine-specific.
+- **After installing or removing skills** via `npx skills` — run `bash scripts/audit-skills.sh --fix-symlinks` to sync symlinks across all preferred agent providers
+- **Repo-authored skills** belong in `agents/skills/` and are linked with `bash scripts/sync-agent-skills.sh`. Existing names are conflicts and must never be overwritten automatically.
+- **Cross-machine third-party skills** belong in `agents/skills/skills.txt`; machine-specific skills remain installed locally and must not be added to the manifest.
+- **To suppress audit warnings** — add entries to `audit.ignore` with format `category:name` (e.g. `brew:tool`, `home:.config/dir`, `skills:dirname`). This file is gitignored and machine-specific.
 
 ## Testing
 

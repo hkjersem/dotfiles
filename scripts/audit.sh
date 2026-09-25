@@ -7,9 +7,14 @@ DOTFILES="$HOME/.dotfiles"
 source "$DOTFILES/scripts/machine-profile.sh" || exit 1
 
 # Load local ignore list (audit.ignore is gitignored — machine-specific)
-# Format: one entry per line, prefixed by category, e.g.:
+# Format: one entry per line, prefixed by category:
+#   brew:<formula>       — suppress brew package warnings
+#   home:<dirname>       — suppress home directory warnings
+#   skills:<dirname>     — suppress stale agent dir warnings
+# Example:
 #   brew:fzf
 #   home:.npmrc
+#   skills:opencode
 LOCAL_IGNORE=()
 if [ -f "$DOTFILES/audit.ignore" ]; then
     while IFS= read -r line; do
@@ -26,6 +31,7 @@ is_ignored() {
 BOLD=$'\033[1m'
 RED=$'\033[0;31m'
 YELLOW=$'\033[1;33m'
+ORANGE=$'\033[0;33m'
 GREEN=$'\033[0;32m'
 RESET=$'\033[0m'
 
@@ -60,6 +66,7 @@ section_end() {
 ok()   { SECTION_OUTPUT+=("  ${GREEN}✅${RESET} $1"); }
 info() { SECTION_OUTPUT+=("  $1"); SECTION_INFOS=$((SECTION_INFOS + 1)); }
 warn() { SECTION_OUTPUT+=("  ${YELLOW}🟡${RESET} $1"); ((WARNINGS++)); ((SECTION_WARNINGS++)); }
+attn() { SECTION_OUTPUT+=("  ${ORANGE}🟠${RESET} $1"); ((WARNINGS++)); ((SECTION_WARNINGS++)); }
 fail() { SECTION_OUTPUT+=("  ${RED}🔴${RESET} $1"); ((ISSUES++)); ((SECTION_ISSUES++)); }
 
 section_start "Machine profile"
@@ -324,6 +331,8 @@ KNOWN_GENERATED=(
     ".bunfig.toml" ".bun"
     # Homebrew - managed by homebrew itself
     .homebrew
+    # npx skills (vercel-labs/skills) — canonical skills store
+    ".agents"
 )
 
 for f in "$HOME"/.*; do
@@ -352,6 +361,12 @@ for f in "$HOME"/.*; do
 done
 
 section_end
+
+# ──────────────────────────────────────────────────────
+# 6. SKILLS (npx skills — github.com/vercel-labs/skills)
+# ──────────────────────────────────────────────────────
+# shellcheck source=scripts/audit-skills.sh
+source "$DOTFILES/scripts/audit-skills.sh"
 
 # ──────────────────────────────────────────────────────
 # SUMMARY
