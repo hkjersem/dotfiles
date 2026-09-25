@@ -71,6 +71,9 @@ if [[ "$SKIP_DEFAULTS" == false ]]; then
 fi
 
 header "Tools & integrations"
+update_installed_tool claude subheader || exit 1
+update_installed_tool copilot subheader || exit 1
+update_installed_tool codex subheader || exit 1
 update_profile_tools subheader || exit 1
 
 header "Cleanup"

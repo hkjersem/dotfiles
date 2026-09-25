@@ -22,15 +22,18 @@ _update_gcloud() {
 
 update_installed_tool() {
     local tool="$1" heading="${2:-}" label executable resolved prefix
-    local brew_managed=false
+    local brew_managed=false required_on_work=false
     case "$tool" in
-        nav-pilot) label="Nav Pilot" ;;
-        gcloud) label="gcloud" ;;
+        nav-pilot) label="Nav Pilot"; required_on_work=true ;;
+        gcloud) label="gcloud"; required_on_work=true ;;
+        claude) label="Claude Code" ;;
+        copilot) label="GitHub Copilot CLI" ;;
+        codex) label="Codex" ;;
         *) echo "Error: no custom updater for $tool." >&2; return 1 ;;
     esac
 
     if ! executable=$(command -v "$tool"); then
-        if [[ "$DOTFILES_PROFILE" == work ]]; then
+        if [[ "$DOTFILES_PROFILE" == work && "$required_on_work" == true ]]; then
             echo "Error: $label is missing after work-profile setup. Check the Homebrew installation." >&2
             return 1
         fi
@@ -47,6 +50,10 @@ update_installed_tool() {
         esac
     fi
 
+    case "$tool" in
+        claude|codex) [[ "$brew_managed" == true ]] && return 0 ;;
+    esac
+
     if [[ -n "$heading" ]]; then
         "$heading" "$label" || return 1
     else
@@ -55,6 +62,9 @@ update_installed_tool() {
     case "$tool" in
         nav-pilot) _update_nav_pilot "$brew_managed" ;;
         gcloud) _update_gcloud "$brew_managed" ;;
+        claude|copilot|codex)
+            "$tool" update || { echo "Error: $label update failed." >&2; return 1; }
+            ;;
     esac
 }
 

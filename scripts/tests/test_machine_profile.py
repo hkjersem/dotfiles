@@ -1,4 +1,4 @@
-"""Offline tests for machine profiles and profile-aware setup/update/audit."""
+"""Offline tests for machine profiles, tool updates, and setup/update/audit."""
 
 import json
 import os
@@ -320,6 +320,72 @@ class MachineProfileTests(unittest.TestCase):
                 self.assertEqual([call[1] for call in self.calls("nav-pilot")],
                                  [["sync", "--apply"]] if profile == "work" else [])
                 self.assertEqual(result.stdout.count("Tools & integrations"), 1)
+
+    def test_missing_optional_clis_skip_on_both_profiles(self):
+        for profile in ("personal", "work"):
+            self.set_profile(profile)
+            for tool in ("claude", "copilot", "codex"):
+                with self.subTest(profile=profile, tool=tool):
+                    result = self.run_tool_update(tool)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.stdout, "")
+                    self.assertFalse(self.calls())
+
+    def test_native_clis_update_on_both_profiles(self):
+        tools = ("claude", "copilot", "codex")
+        for tool in tools:
+            self.write_mock(self.bin / tool)
+        for profile in ("personal", "work"):
+            with self.subTest(profile=profile):
+                self.set_profile(profile)
+                if self.log.exists():
+                    self.log.unlink()
+                result = self.run_script("macos/update.sh", "--no-defaults")
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                for tool in tools:
+                    self.assertEqual([call[1] for call in self.calls(tool)], [["update"]])
+                for label in ("Claude Code", "GitHub Copilot CLI", "Codex"):
+                    self.assertIn(label, result.stdout)
+
+    def test_brew_clis_skip_native_update_except_copilot(self):
+        for profile in ("personal", "work"):
+            self.set_profile(profile)
+            for location in ("Cellar", "Caskroom"):
+                for tool in ("claude", "copilot", "codex"):
+                    with self.subTest(profile=profile, location=location, tool=tool):
+                        target = self.root / location / tool / "1.0/bin" / tool
+                        self.write_mock(target)
+                        executable = self.bin / tool
+                        if executable.is_symlink():
+                            executable.unlink()
+                        executable.symlink_to(target)
+                        if self.log.exists():
+                            self.log.unlink()
+                        result = self.run_tool_update(tool)
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        expected = [["update"]] if tool == "copilot" else []
+                        self.assertEqual([call[1] for call in self.calls(tool)], expected)
+                        if tool != "copilot":
+                            self.assertEqual(result.stdout, "")
+
+    def test_cli_update_failure_stops_before_success_message(self):
+        self.set_profile("personal")
+        tools = ("claude", "copilot", "codex")
+        for tool in tools:
+            self.write_mock(self.bin / tool)
+        for index, tool in enumerate(tools):
+            with self.subTest(tool=tool):
+                if self.log.exists():
+                    self.log.unlink()
+                result = self.run_script(
+                    "macos/update.sh", "--no-defaults",
+                    env=dict(self.env, PROFILE_TEST_FAIL=tool + " update"),
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("update failed", result.stderr)
+                self.assertNotIn("Done. Enjoy", result.stdout)
+                for later in tools[index + 1:]:
+                    self.assertFalse(self.calls(later))
 
     def test_existing_native_nav_upgrades_and_syncs_on_both_profiles(self):
         self.install_nav()
