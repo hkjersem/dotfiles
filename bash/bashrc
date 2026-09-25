@@ -83,3 +83,11 @@ source ~/.aliases
 if [ -f ~/.bashrc_local ]; then
 	source ~/.bashrc_local
 fi
+
+# Ensure user bin directory is on PATH
+if [ -d "$HOME/.local/bin" ]; then
+  case ":$PATH:" in
+    *":$HOME/.local/bin:"*) ;;
+    *) export PATH="$HOME/.local/bin:$PATH" ;;
+  esac
+fi
