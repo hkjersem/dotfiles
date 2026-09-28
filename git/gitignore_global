@@ -9,3 +9,6 @@ npm-debug.log.*
 
 # Claude Code machine-local settings and permission overrides
 **/.claude/settings.local.json
+
+# Playwright MCP snapshots, console logs, and traces written to the working directory
+.playwright-mcp/
