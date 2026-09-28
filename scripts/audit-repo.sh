@@ -489,6 +489,38 @@ if command -v jq &>/dev/null; then
   # Dep count
   DEP_COUNT=$(jq '[(.dependencies // {}), (.devDependencies // {})] | add | length' package.json 2>/dev/null || echo "?")
   info "Total declared deps: ${DEP_COUNT}"
+
+  # Vendored Node runtime — when the active Node fails devEngines.runtime and
+  # onFail is "download", pnpm installs its own build and links it into
+  # node_modules/.bin, which it prepends to the PATH of every child process.
+  # Older pnpm links that build out of the global store; sandboxes commonly deny
+  # execute there, so anything resolving a bare `node` fails with a message that
+  # names neither the runtime nor the sandbox.
+  DEV_ENGINES_ONFAIL=$(jq -r '.devEngines.runtime.onFail // empty' package.json 2>/dev/null || true)
+  RUNTIME_ON_FAIL=$(grep -E '^runtimeOnFail[[:space:]]*:' pnpm-workspace.yaml 2>/dev/null | head -1 \
+    | sed -e 's/.*:[[:space:]]*//' -e 's/#.*//' -e 's/["'"'"']//g' -e 's/[[:space:]]*$//' || true)
+  VENDORED_NODE=""
+  for candidate in node_modules/node node_modules/.bin/node; do
+    [[ -e "$candidate" || -L "$candidate" ]] || continue
+    VENDORED_NODE=$(realpath "$candidate" 2>/dev/null) \
+      || VENDORED_NODE=$(readlink "$candidate" 2>/dev/null) \
+      || VENDORED_NODE="$candidate"
+    break
+  done
+  if [[ -n "$VENDORED_NODE" ]]; then
+    REPO_REAL=$(realpath "$GIT_ROOT" 2>/dev/null || printf '%s' "$GIT_ROOT")
+    if [[ "$VENDORED_NODE" == "$REPO_REAL"/* ]]; then
+      info "Vendored Node runtime in node_modules, kept inside the repository"
+    else
+      warn "Vendored Node runtime resolves outside the repository — sandboxes may deny executing it"
+      row "$VENDORED_NODE"
+      row "Remove with: rm -f node_modules/node node_modules/.bin/node"
+    fi
+  fi
+  if [[ "$DEV_ENGINES_ONFAIL" == "download" && "$RUNTIME_ON_FAIL" != "ignore" ]]; then
+    info "devEngines.runtime.onFail=download — pnpm installs its own Node when the active version is out of range"
+    row "Set runtimeOnFail: ignore in pnpm-workspace.yaml to keep the version manager's Node"
+  fi
 fi
 
 # Outdated

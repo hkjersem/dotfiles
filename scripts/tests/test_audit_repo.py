@@ -253,6 +253,56 @@ class AuditRepoTests(unittest.TestCase):
                 self.assertIn(expected, result.stdout)
                 self.assertIn("Summary", result.stdout)
 
+    def test_vendored_node_runtime_is_flagged_only_when_it_escapes_the_repository(self):
+        self.package("pnpm")
+        modules = self.project / "node_modules"
+        (modules / ".bin").mkdir(parents=True)
+        outside = self.root / "pnpm-store" / "node" / "bin"
+        outside.mkdir(parents=True)
+        (outside / "node").write_text("#!/bin/sh\n")
+        inside = modules / ".pnpm" / "node@runtime" / "bin"
+        inside.mkdir(parents=True)
+        (inside / "node").write_text("#!/bin/sh\n")
+
+        (modules / ".bin" / "node").symlink_to(outside / "node")
+        result = self.run_audit("--skip-security")
+        self.assertEqual(result.stderr, "")
+        self.assertIn("resolves outside the repository", result.stdout)
+        self.assertIn("rm -f node_modules/node", result.stdout)
+
+        (modules / ".bin" / "node").unlink()
+        (modules / ".bin" / "node").symlink_to(inside / "node")
+        result = self.run_audit("--skip-security")
+        self.assertEqual(result.stderr, "")
+        self.assertNotIn("resolves outside the repository", result.stdout)
+        self.assertIn("kept inside the repository", result.stdout)
+
+        (modules / ".bin" / "node").unlink()
+        result = self.run_audit("--skip-security")
+        self.assertNotIn("Vendored Node runtime", result.stdout)
+
+    def test_devengines_download_notice_respects_runtime_opt_out(self):
+        self.package("pnpm")
+        manifest = json.loads((self.project / "package.json").read_text())
+        manifest["devEngines"] = {"runtime": {"name": "node", "version": "^24.19.0",
+                                              "onFail": "download"}}
+        self.write("package.json", json.dumps(manifest))
+        result = self.run_audit("--skip-security")
+        self.assertEqual(result.stderr, "")
+        self.assertIn("onFail=download", result.stdout)
+        self.assertIn("runtimeOnFail: ignore", result.stdout)
+
+        for value in ("ignore", '"ignore"', "ignore # keep fnm's node"):
+            with self.subTest(value=value):
+                self.write("pnpm-workspace.yaml", "runtimeOnFail: " + value + "\n")
+                result = self.run_audit("--skip-security")
+                self.assertEqual(result.stderr, "")
+                self.assertNotIn("onFail=download", result.stdout)
+
+        self.write("pnpm-workspace.yaml", "runtimeOnFail: error\n")
+        result = self.run_audit("--skip-security")
+        self.assertIn("onFail=download", result.stdout)
+
     def test_jsonc_and_inherited_typescript_settings_are_not_declared_disabled(self):
         self.package()
         self.write("source.ts", "export {};\n")

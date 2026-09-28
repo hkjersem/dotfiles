@@ -182,6 +182,13 @@ cooldowns, and JS/TS tooling; these checks require jq. npm and pnpm provide
 structured vulnerability and outdated-package results. Bun and other managers'
 audit/outdated results are not parsed by this tool.
 
+It also reports a Node runtime vendored into `node_modules` by
+`devEngines.runtime.onFail: "download"`. A build linked out of the global
+package-manager store is flagged, because sandboxes commonly deny executing that
+tree and every child process resolving a bare `node` through
+`node_modules/.bin` then fails. Setting `runtimeOnFail: ignore` in
+`pnpm-workspace.yaml` keeps the version manager's Node instead.
+
 The script does not install dependencies, run project tests, apply fixes, or
 edit project files. **It is not offline:** npm/pnpm audit and outdated queries
 can contact registries and write package-manager caches. `--skip-security`
