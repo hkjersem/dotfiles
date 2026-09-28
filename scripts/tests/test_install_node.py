@@ -69,6 +69,18 @@ elif args[:1] == ["exec"] and args[1].startswith("--using="):
     elif command[:2] == ["npm", "list"] and using in state["installed"]:
         fail("enumerate")
         print(state.get("globals_raw", json.dumps(state["globals"])))
+    elif command == ["corepack", "--version"] and using in state["installed"]:
+        if not (state.get("bundled_corepack", True) or state.get("corepack_installed")):
+            sys.exit(127)
+        print("0.36.0")
+    elif command == ["corepack", "enable"] and using in state["installed"]:
+        fail("corepack_enable")
+        state["corepack_enabled"] = using
+        save()
+    elif command == ["npm", "install", "-g", "--", "corepack"] and using in state["installed"]:
+        fail("corepack_install")
+        state["corepack_installed"] = using
+        save()
     elif command[:2] == ["npm", "install"] and using in state["installed"]:
         fail("migrate")
         state["migrated_to"] = using
@@ -198,6 +210,39 @@ class InstallNodeTests(unittest.TestCase):
         self.assertIn(["exec", "--using=v22.9.0", "npm", "list",
                        "-g", "--depth", "0", "--json"], events)
 
+    def test_corepack_is_not_migrated_over_a_bundled_copy(self):
+        globals_ = {"dependencies": {
+            "corepack": {"version": "0.30.0"},
+            "example-cli": {"version": "1.2.3"},
+        }}
+        result, state, events = self.run_case(globals=globals_)
+        self.assert_success(result)
+        self.assertEqual(state["migrated_packages"], ["example-cli@1.2.3"])
+        self.assertNotIn("corepack_installed", state)
+        self.assertEqual(state["corepack_enabled"], "v22.10.0")
+
+    def test_missing_corepack_is_installed_and_enabled(self):
+        result, state, events = self.run_case(
+            request="26", target="v26.1.0", installed=["v24.1.0"],
+            bundled_corepack=False)
+        self.assert_success(result)
+        self.assertEqual(state["corepack_installed"], "v26.1.0")
+        self.assertEqual(state["corepack_enabled"], "v26.1.0")
+        install = events.index(["exec", "--using=v26.1.0", "npm", "install", "-g", "--", "corepack"])
+        enable = events.index(["exec", "--using=v26.1.0", "corepack", "enable"])
+        self.assertLess(install, enable)
+
+    def test_corepack_failures_prevent_default_and_cleanup(self):
+        for stage in ("corepack_install", "corepack_enable"):
+            with self.subTest(stage=stage):
+                result, state, events = self.run_case(
+                    request="lts", bundled_corepack=False, fail_at=stage)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("corepack", result.stderr)
+                self.assertEqual(state["default"], "v22.9.0")
+                self.assertFalse(any(e[0] == "default" for e in events))
+                self.assert_no_cleanup(events)
+
     def test_empty_globals_do_not_trigger_an_install(self):
         for listing in ({}, {"dependencies": {}},
                         {"dependencies": {"npm": {"version": "10.0.0"}}}):
@@ -207,6 +252,7 @@ class InstallNodeTests(unittest.TestCase):
                 self.assertEqual(state["installed"], ["v22.10.0"])
                 self.assertNotIn("migrated_to", state)
                 self.assertFalse(any(e[2:4] == ["npm", "install"] for e in events))
+                self.assertEqual(state["corepack_enabled"], "v22.10.0")
 
     def test_invalid_global_listings_prevent_cleanup(self):
         for raw in ("", "not-json", "null", "[]", "{}\n{}", '{"error": {}}',

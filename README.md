@@ -121,8 +121,24 @@ For pnpm, `--root` explicitly selects the root package. Unknown installs at the
 root stay at the root; catalog entries change only with an explicit version.
 Use `pmi --help`, `pmr --help`, or `pmu --help` for details.
 
-Related Node helpers: `install_node [version]` installs through fnm and migrates
-global packages; `npm_globals_diff <version_a> [version_b]` compares globals;
+In zsh, `npm` and `npx` use the npm bundled with the active fnm Node version,
+unless a parent `package.json` has a `packageManager` field; then they run
+through corepack. `pnpm` and `yarn` always run through corepack. Outside pinned
+projects, corepack uses its saved default version. `dotfiles-update` moves the
+pnpm and Yarn defaults to the newest release in their current major that is
+older than the `~/.npmrc` release-age cooldown; a default that is still inside
+the cooldown is flagged and left unchanged. These defaults are shared by every
+fnm Node version, while corepack itself and its `pnpm`/`yarn` shims are
+installed per Node version; the audit checks each corepack version. New majors
+are reported by both the update and `dotfiles-audit`, and become warnings when
+more than one major behind. To
+switch manually, run `corepack install -g pnpm@<version>`. Bun is not managed
+by corepack; every installed Bun, including one per fnm Node version, gets the
+same new-major check.
+
+Related Node helpers: `install_node [version]` installs through fnm, migrates
+global packages, and installs and enables corepack if the Node version does not
+bundle it; `npm_globals_diff <version_a> [version_b]` compares globals;
 `npm_release_age <package>[@version]` shows release ages.
 
 ## Clean and copy projects
@@ -246,3 +262,11 @@ manually rather than deleting local skills to make the audit pass.
 ## iTerm2
 
 Settings → enable *Load preferences from a custom folder or URL* → `~/.dotfiles/iterm/com.googlecode.iterm2.plist`
+
+## TODO
+- Add [`dotbot-brew`](https://github.com/wren/dotbot-brew) + [`dotbot-git`](https://github.com/DrDynamic/dotbot-git) plugins — move `brew bundle` and `install-zsh-plugins.sh` into `install.conf.yaml` so `./install` keeps brew packages and zsh plugins in sync
+- Explore [`direnv`](https://direnv.net/) — per-directory env vars for project secrets, per-project npm tokens, and extending the work/personal split beyond git identity. Would need: Brewfile entry + `eval "$(direnv hook zsh)"` in `env.zsh`
+https://medium.com/@ankitbabber/how-i-improved-my-shell-load-time-with-a-lazy-load-3acd89f8c4a3
+https://www.joshyin.cc/blog/speeding-up-zsh
+https://github.com/zimfw/zimfw
+https://github.com/omerxx/dotfiles

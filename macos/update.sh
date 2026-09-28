@@ -49,6 +49,7 @@ _npm_outdated=$(npm outdated -g 2>/dev/null || true)
 [[ -n "$_npm_outdated" ]] && echo "Outdated global npm packages:" && echo "$_npm_outdated"
 unset _npm_outdated
 npm update -g --no-fund
+bash ~/.dotfiles/scripts/corepack-defaults.sh || exit 1
 
 header "Homebrew"
 # Update Homebrew (Cask) & packages

@@ -78,7 +78,7 @@ if [[ -n "$MIGRATE_FROM" ]]; then
         | if has("dependencies") then .dependencies else {} end
         | if type != "object" then error("invalid npm dependencies") else . end
         | to_entries
-        | map(select(.key != "npm")
+        | map(select(.key != "npm" and .key != "corepack")
             | if (.key | test("^(@[A-Za-z0-9][A-Za-z0-9._-]*/)?[A-Za-z0-9][A-Za-z0-9._-]*$"))
                 and (.value.version | type) == "string"
                 and (.value.version | test("^[0-9]+\\.[0-9]+\\.[0-9]+([-+][0-9A-Za-z.-]+)*$"))
@@ -97,6 +97,16 @@ if [[ -n "$MIGRATE_FROM" ]]; then
             || fail "global migration to $NEW_NODE failed; old versions were kept."
     fi
 fi
+
+# Node 25+ no longer bundles corepack, so install it globally when missing.
+# Bundled copies are left alone rather than downgraded to the old version's.
+if ! fnm exec --using="$NEW_NODE" corepack --version >/dev/null 2>&1; then
+    echo "  Installing corepack (not bundled with $NEW_NODE)"
+    fnm exec --using="$NEW_NODE" npm install -g -- corepack \
+        || fail "could not install corepack for $NEW_NODE; old versions were kept."
+fi
+fnm exec --using="$NEW_NODE" corepack enable \
+    || fail "could not enable corepack for $NEW_NODE; old versions were kept."
 
 # Keep an existing default usable when its installation is about to be removed.
 # Default changes and cleanup happen only after successful migration.

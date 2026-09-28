@@ -275,7 +275,83 @@ fi
 section_end
 
 # ──────────────────────────────────────────────────────
-# 5. HOME DIRECTORY
+# 5. PACKAGE MANAGER VERSIONS (corepack defaults and bun; queries the npm registry)
+# ──────────────────────────────────────────────────────
+section_start "Package Manager Versions"
+
+# One major behind is informational; further behind is a warning.
+report_major() {
+    local subject="$1" major="$2" gap="$3" action="$4"
+    if [[ "$gap" -gt 1 ]]; then
+        warn "$subject is $gap majors behind $major — $action"
+    else
+        info "$subject: $major is a new major — $action"
+    fi
+}
+
+if ! command -v node &>/dev/null; then
+    warn "node is not available (fnm not loaded?)"
+else
+    # shellcheck source=scripts/lib/corepack-defaults.sh
+    source "$DOTFILES/scripts/lib/corepack-defaults.sh"
+
+    # corepack itself and its pnpm/yarn shims are per Node version
+    while IFS= read -r inst; do
+        [[ -z "$inst" ]] && continue
+        node_label=$(fnm_installation_label "$inst")
+        if [[ ! -x "$inst/bin/corepack" ]]; then
+            warn "Node $node_label: corepack missing — run: fnm exec --using=$node_label npm install -g corepack"
+        elif ! corepack_ver=$(corepack_version_for "$inst") || [[ -z "$corepack_ver" ]]; then
+            warn "Node $node_label: corepack is installed but does not run"
+        elif [[ ! -e "$inst/bin/pnpm" || ! -e "$inst/bin/yarn" ]]; then
+            warn "Node $node_label: corepack $corepack_ver is not enabled — run: fnm exec --using=$node_label corepack enable"
+        elif ! corepack_update_plan "$corepack_ver"; then
+            info "Node $node_label: corepack $corepack_ver — could not check the npm registry (offline?)"
+        elif [[ -n "$COREPACK_LATEST" ]]; then
+            warn "Node $node_label: corepack $corepack_ver is outdated; $COREPACK_LATEST is available — run: fnm exec --using=$node_label npm install -g corepack@$COREPACK_LATEST"
+        else
+            ok "Node $node_label: corepack $corepack_ver"
+        fi
+    done < <(fnm_node_installations)
+
+    # corepack defaults are shared by every Node version
+    if command -v corepack &>/dev/null; then
+        for pm in $COREPACK_DEFAULT_MANAGERS; do
+            if ! corepack_default_plan "$pm"; then
+                info "$pm — could not check the npm registry (offline?)"
+                continue
+            fi
+            if [[ -z "$CP_CURRENT" ]]; then
+                warn "$pm has no corepack default; corepack would fetch the latest release without a cooldown (run dotfiles-update)"
+            elif [[ -n "$CP_CURRENT_AGE_HOURS" ]]; then
+                warn "$pm default $CP_CURRENT was published ${CP_CURRENT_AGE_HOURS}h ago, inside the release-age cooldown"
+            elif [[ -n "$CP_TARGET" ]]; then
+                warn "$pm default $CP_CURRENT is outdated; $CP_TARGET is available (run dotfiles-update)"
+            else
+                ok "$pm $CP_CURRENT (corepack default)"
+            fi
+            if [[ -n "$CP_MAJOR" ]]; then
+                report_major "$pm $CP_CURRENT" "$CP_MAJOR" "$CP_MAJOR_GAP" "switch manually: corepack install -g $pm@$CP_MAJOR"
+            fi
+        done
+    fi
+
+    while IFS='|' read -r bun_label bun_executable; do
+        [[ -z "$bun_executable" ]] && continue
+        if ! bun_major_plan "$bun_executable"; then
+            info "bun ($bun_label) — could not check the npm registry (offline?)"
+        elif [[ -n "$BUN_MAJOR" ]]; then
+            report_major "bun $BUN_CURRENT ($bun_label)" "$BUN_MAJOR" "$BUN_MAJOR_GAP" "upgrade manually"
+        else
+            ok "bun $BUN_CURRENT ($bun_label)"
+        fi
+    done < <(bun_installations)
+fi
+
+section_end
+
+# ──────────────────────────────────────────────────────
+# 6. HOME DIRECTORY
 # ──────────────────────────────────────────────────────
 section_start "Home Directory"
 
@@ -363,7 +439,7 @@ done
 section_end
 
 # ──────────────────────────────────────────────────────
-# 6. SKILLS (npx skills — github.com/vercel-labs/skills)
+# 7. SKILLS (npx skills — github.com/vercel-labs/skills)
 # ──────────────────────────────────────────────────────
 # shellcheck source=scripts/audit-skills.sh
 source "$DOTFILES/scripts/audit-skills.sh"

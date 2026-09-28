@@ -33,7 +33,8 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 | `scripts/lib/skills-utils.sh` | Shared skills name/manifest validation and conservative link/cleanup helpers |
 | `audit.ignore` | Machine-local audit suppressions (gitignored) — silence known-safe warnings per machine |
 | `scripts/ensure-pm-config.sh` | Ensures package manager release-age cooldowns are set globally — `min-release-age` in `~/.npmrc`, pnpm `minimumReleaseAge` (if pnpm installed), and `minimumReleaseAge` in `~/.bunfig.toml [install]` (if bun installed) |
-| `scripts/install-node.sh` | Install a Node version via fnm, migrate globals, clean up old same-major versions |
+| `scripts/corepack-defaults.sh` | Updates corepack's global pnpm/Yarn defaults within their current major, honouring the `~/.npmrc` release-age cooldown; new pnpm/Yarn/Bun majors are only reported (warning when >1 major behind), and Bun is checked in every fnm Node version. Called by `update.sh`; `audit.sh` reports the same state, plus per-Node corepack presence and version, via `scripts/lib/corepack-defaults.sh` (queries the npm registry) |
+| `scripts/install-node.sh` | Install a Node version via fnm, migrate globals (except npm/corepack), install corepack when not bundled (Node 25+), enable it, clean up old same-major versions |
 | `scripts/npm-globals-diff.sh` | Diff global npm packages between two node versions |
 | `scripts/npm-release-age.sh` | Check days since release for an npm package or version |
 | `scripts/package-manager/` | Package manager scripts — invoked via `pm`, `pmx`, `pmu`, `pmi`, `pmr`, `pmc`, `pma` shell commands |
