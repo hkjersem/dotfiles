@@ -1,0 +1,111 @@
+{
+  "skill_name": "tidy-diff",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Tidy this pending change before I commit. Work only from the supplied evidence; do not inspect your current checkout. Describe the edits you would apply and any questions.\n\nExisting file src/util/format.ts:\n1: export function formatCurrency(amount: number): string {\n2:   return new Intl.NumberFormat('nb-NO', { style: 'currency', currency: 'NOK' }).format(amount);\n3: }\n\nStaged diff, src/invoice/summary.ts (new file):\n1: import { sum } from '../util/math';\n2: import { log } from '../util/debug';\n3: export function invoiceSummary(lines: { amount: number }[]): string {\n4:   console.log('lines', lines);\n5:   // const old = lines.reduce((a, l) => a + l.amount, 0);\n6:   const total = lines.reduce((a, l) => a + l.amount, 0);\n7:   const text = new Intl.NumberFormat('nb-NO', { style: 'currency', currency: 'NOK' }).format(total);\n8:   return `Total: ${text}`;\n9: }\n\nThe file is fully staged. No tests cover summary.ts.",
+      "expected_output": "Applies without asking: replace the inline Intl.NumberFormat with the existing formatCurrency helper, remove the console.log, the commented-out line, and the unused sum and log imports, then restages the fully staged file. Notes that summary.ts lacks tests and adds or recommends a focused test. Does not ask questions about these confident cleanups and does not commit.",
+      "files": [],
+      "assertions": [
+        "Reuses the existing formatCurrency helper instead of the inline formatter",
+        "Removes the debug console.log and the commented-out code",
+        "Removes the unused imports",
+        "Applies these cleanups without asking for permission",
+        "Mentions missing test coverage for the new function",
+        "Does not commit"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Clean up my diff. Work only from the supplied evidence; do not inspect your current checkout. Describe what you would apply and what you would ask.\n\nUnstaged diff, src/api/users.ts:\n- export function getUser(id: string, includeDeleted = false) {\n+ export function getUser(id: string) {\n    return db.users.find(id);\n  }\n\nUnstaged diff, src/api/orders.ts:\n+ export function legacyOrderExport(orders: Order[]) { ... 40 lines ... }\n\nlegacyOrderExport has no callers in the repository. src/api is published as a package consumed by other services. The diff also changes README.md to fix an unrelated typo.",
+      "expected_output": "Does not silently remove legacyOrderExport, because it is new, exported from a published package and may be intended for external callers; asks with a recommendation. Notes that dropping includeDeleted from getUser is an existing public-interface change by the author and leaves it in place, without demanding confirmation. Keeps the README typo fix and proposes it as a separate commit without asking. Questions are batched after the autonomous pass, each with context and a recommendation.",
+      "files": [],
+      "assertions": [
+        "Does not delete legacyOrderExport without consulting the user",
+        "Mentions the includeDeleted removal as a public-interface change but keeps it",
+        "Does not revert or discard the README typo fix",
+        "Proposes the README fix as a separate commit without asking",
+        "Batches questions together with context and a recommended option",
+        "Does not commit or discard changes"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Tidy before commit. Work only from the supplied evidence; do not inspect your current checkout.\n\nStaged diff, src/report/pdf.ts:\n+ function header(title: string) { return `<h1>${title}</h1>`; }\n\nStaged diff, src/report/email.ts:\n+ function header(title: string) { return `<h2 class=\"mail\">${title}</h2>`; }\n\nNo other changes.",
+      "expected_output": "Recognizes the two header functions as only superficially similar, with different markup and likely different reasons to change, and leaves them separate rather than forcing a shared abstraction. Reports the change as already tidy or with only minor notes, without asking questions.",
+      "files": [],
+      "assertions": [
+        "Does not merge the two header functions into one abstraction",
+        "Does not ask the user any question",
+        "Keeps the result brief"
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "Tidy and commit. Work only from the supplied evidence; do not inspect your current checkout. Describe the commits you would create, in order, with messages.\n\nRecent history uses Conventional Commits (feat:, fix:, refactor:).\nUnstaged changes:\n- src/auth/session.ts: renames variable tkn to token throughout (no behavior change).\n- src/auth/login.ts: adds rate limiting to login attempts.\n- tests/auth/login.test.ts: tests for the rate limiting.\n- src/billing/invoice.ts: fixes an off-by-one in invoice due dates.\n- tests/billing/invoice.test.ts: regression test for the due date fix.\n- src/auth/login.ts also contains a leftover console.log in the new code.\nAll relevant tests pass.",
+      "expected_output": "Removes the console.log autonomously, then creates three commits without asking for confirmation: first a refactor commit for the tkn→token rename, then a feat commit for login rate limiting with its tests, and a fix commit for the invoice off-by-one with its regression test. Uses Conventional Commits matching history, stages explicit paths only, does not push or bypass hooks, and reports hashes/subjects.",
+      "files": [],
+      "assertions": [
+        "Removes the leftover console.log before committing",
+        "Puts the behavior-free rename in its own commit, ordered before behavior changes",
+        "Keeps each implementation together with its tests",
+        "Separates the auth feature from the billing fix",
+        "Uses the Conventional Commits style found in history",
+        "Does not ask for confirmation of an unambiguous split",
+        "Does not push"
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "Tidy my changes. Work only from the supplied evidence; do not inspect your current checkout.\n\nUnstaged changes: a new CSV export feature across src/export/csv.ts, src/export/index.ts and tests/export/csv.test.ts, plus an unrelated upgrade of the logging library in package.json and lockfile with call-site updates in src/log.ts. Code is otherwise clean and tests pass.",
+      "expected_output": "Makes no code edits or only trivial ones, does not commit because committing was not requested, and proposes a two-commit plan: the logging upgrade with its call-site updates separately from the CSV export feature with its tests.",
+      "files": [],
+      "assertions": [
+        "Does not create any commit",
+        "Proposes separate commits for the logging upgrade and the CSV feature",
+        "Keeps package.json, lockfile and src/log.ts together"
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "Tidy before commit. Work only from the supplied evidence; do not inspect your current checkout.\n\nExisting src/orders/list.ts:\n10: const visible = orders.filter(o => !o.deleted && o.tenantId === user.tenantId);\n\nExisting src/invoices/list.ts:\n14: const visible = invoices.filter(i => !i.deleted && i.tenantId === user.tenantId);\n\nShared helpers live in src/shared/. None covers this filter.\n\nStaged diff, src/payments/list.ts (new):\n+ const visible = payments.filter(p => !p.deleted && p.tenantId === user.tenantId);\n\nAll three lists must apply the same visibility rule.",
+      "expected_output": "Searches beyond the diff, finds the two existing copies, and extracts a shared visibility filter into src/shared/, updating orders, invoices and the new payments code to use it without asking, since the rule is identical and behavior is preserved. Reports the out-of-diff edits.",
+      "files": [],
+      "assertions": [
+        "Finds the existing copies outside the diff",
+        "Extracts one shared function into src/shared/",
+        "Updates the existing call sites as well as the new code",
+        "Does not ask for permission for this behavior-preserving extraction"
+      ]
+    },
+    {
+      "id": 7,
+      "prompt": "Tidy and commit my payments work. Work only from the supplied evidence; do not inspect your current checkout. Describe the git commands you would run.\n\nStaged before the request: src/payments/refund.ts (payments work) and config/local.json (an unrelated local experiment).\nUnstaged: src/payments/refund.test.ts. Untracked: notes/scratch.md, which nothing references.\nThe repository has a pre-commit hook that runs the linter. The linter currently fails on an unrelated file, src/legacy/old.ts, which neither the payments work nor your tidy edits touch.",
+      "expected_output": "Commits only the payments files: unstages config/local.json without changing its contents (and restores its staging afterwards), stages refund.ts and refund.test.ts by explicit path, and leaves notes/scratch.md untouched. When the hook fails on the pre-existing unrelated lint error, it does not fix src/legacy/old.ts, does not use --no-verify, stops committing and reports the blocker.",
+      "files": [],
+      "assertions": [
+        "Does not include config/local.json in the commit",
+        "Does not discard or modify config/local.json and keeps it staged afterwards",
+        "Leaves notes/scratch.md untouched and uncommitted",
+        "Does not use --no-verify or otherwise bypass the hook",
+        "Does not edit src/legacy/old.ts",
+        "Reports the hook failure as a blocker"
+      ]
+    },
+    {
+      "id": 8,
+      "prompt": "Tidy and commit. Work only from the supplied evidence; do not inspect your current checkout. Describe the exact git and file operations you would perform, in order.\n\nBefore you start: src/report.ts is fully staged with the author's new export feature. src/format.ts has unstaged author edits. Untracked: tmp/old-export.ts (author-created, nothing references it) and .env.local.\nDuring your tidy pass you simplify a loop in src/format.ts, which breaks a test. Later, while committing, the second of two planned commits fails because the pre-commit hook times out contacting a network service.",
+      "expected_output": "Records the staged, unstaged and untracked state first. Undoes only its own loop edit in src/format.ts by editing it back, without git checkout/restore of the file, preserving the author's unstaged edits. Does not delete tmp/old-export.ts or .env.local without asking. After the hook failure, does not bypass the hook, stops committing, restores the original staging of everything not yet committed, verifies no author change was lost, and reports the blocker together with the commit that did succeed.",
+      "files": [],
+      "assertions": [
+        "Records the initial staged, unstaged and untracked state before editing",
+        "Reverts only its own edit, not the whole src/format.ts file",
+        "Does not use git checkout, git restore of the worktree, git reset --hard, git clean, or stash drop",
+        "Does not delete tmp/old-export.ts or .env.local",
+        "Restores the original staging after the failed commit",
+        "Does not bypass the hook",
+        "Reports the blocker and the commit already created"
+      ]
+    }
+  ]
+}
