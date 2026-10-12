@@ -106,6 +106,33 @@
         "Does not bypass the hook",
         "Reports the blocker and the commit already created"
       ]
+    },
+    {
+      "id": 9,
+      "prompt": "Tidy my branch. Work only from the supplied evidence; do not inspect your current checkout. Describe the git commands you would run and what you would report.\n\nThe repository has a remote, origin, whose default branch is main. You are on feature/date-labels with unstaged changes in src/ui/labels.ts, which adds a function formatRelativeDate. Local main is 40 commits behind origin/main. After fetching, origin/main has 6 commits the branch lacks; one adds src/util/dates.ts with formatRelative(date: Date): string, equivalent to the new function. Another edits src/ui/labels.ts in lines the branch also changed in a commit. Nothing similar exists in the current checkout.",
+      "expected_output": "Fetches and compares against origin/main, not the stale local main. Finds the upstream formatRelative helper, for example by searching origin/main's tree, and the overlapping upstream edit to src/ui/labels.ts, detected with a non-mutating check such as git merge-tree. Does not merge, rebase, pull, or check out anything, and does not replace the new function with a helper that does not exist locally yet. Recommends updating the branch and then reusing formatRelative, asked as a question, and reports the likely conflict in src/ui/labels.ts.",
+      "files": [],
+      "assertions": [
+        "Compares against origin/main rather than local main",
+        "Finds the equivalent upstream formatRelative helper",
+        "Reports the likely conflict in src/ui/labels.ts",
+        "Does not merge, rebase, pull, or check out anything",
+        "Does not edit the code to use a helper missing from the checkout",
+        "Asks whether to update the branch, with a recommendation"
+      ]
+    },
+    {
+      "id": 10,
+      "prompt": "Tidy my changes. Work only from the supplied evidence; do not inspect your current checkout. Describe the git commands you would run.\n\nThe repository has no remote. Its local default branch is main, which has 2 commits that the current branch, experiment/cache, lacks; they only edit docs/usage.md, which nothing in the change uses or depends on. Unstaged changes in src/cache.ts include a leftover console.log.",
+      "expected_output": "Does not try to fetch or require a remote. Compares against the local main branch, notes that its 2 newer commits do not affect the change, removes the console.log, and does not merge, rebase, or check out anything.",
+      "files": [],
+      "assertions": [
+        "Does not fetch or treat the missing remote as an error",
+        "Uses the local main branch as the comparison base",
+        "Concludes the upstream commits do not affect the change",
+        "Removes the leftover console.log",
+        "Does not merge, rebase, or check out anything"
+      ]
     }
   ]
 }

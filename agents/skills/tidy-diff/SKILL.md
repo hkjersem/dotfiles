@@ -41,7 +41,8 @@ Review the change, not the repository:
   them. Leave other untracked files untouched, and ask about them only if they
   affect completing the change.
 - On a feature branch with no pending changes, the branch's commits since it
-  diverged from the default branch. Apply tidy edits as new working-tree
+  diverged from the default branch (see
+  [Default branch](#default-branch)). Apply tidy edits as new working-tree
   changes; never regroup or rewrite the existing commits, and present any
   regrouping idea as advice.
 - An explicit path, commit range, or file list from the user takes precedence.
@@ -55,12 +56,52 @@ outside the diff when the change itself makes that edit necessary, such as
 reusing or extracting shared code the change duplicates, or removing code the
 change made obsolete.
 
+### Default branch
+
+The repository may or may not have a remote. Resolve the default branch, called
+`<base>` below, as:
+
+- **With a remote:** use the remote the current branch tracks, otherwise
+  `origin` or the only remote; if the choice is still unclear, say which one
+  you used. Find its default branch from its symbolic `HEAD`
+  (`git symbolic-ref refs/remotes/<remote>/HEAD`, or
+  `git ls-remote --symref <remote> HEAD`), fetch it, and compare against its
+  remote-tracking ref, such as `origin/main`. If the fetch fails, use the
+  existing ref and say how old it is, or that its age is unknown. If no usable
+  ref exists, report the check as unavailable. Never use a local copy of the
+  default branch instead; it can be stale, or checked out in another worktree.
+- **Without a remote:** the local default branch, such as `main`.
+- **Neither:** if the current branch is the only candidate, for example when
+  working directly on the local default branch, skip the upstream check.
+
+### Upstream changes
+
+The branch may be missing newer work on the default branch that affects the
+change or could be reused. Check this without merging, rebasing, or checking
+anything out:
+
+- If the default branch has commits the current branch lacks
+  (`git rev-list --count HEAD..<base>`), read the ones that touch the changed
+  paths or the code they depend on.
+- When searching for existing implementations, also search the default
+  branch's tree, for example with `git grep <pattern> <base>`.
+- Check for conflicts with `git merge-tree --write-tree --name-only HEAD
+  <base>` (Git 2.38 or later). If that command is unavailable, report files
+  changed on both sides since `git merge-base HEAD <base>` as possible
+  conflicts. Either way this covers committed work only, so compare
+  uncommitted changes with the upstream commits separately.
+
+Report what you find; do not act on it. Code that exists only on the default
+branch cannot be reused yet: recommend updating the branch first, as a
+question. Updating the branch is the user's decision.
+
 ## What to look for
 
 Prioritize by impact on future readers and maintainers:
 
 1. **Duplication.** Before judging new logic, search the codebase for
-   existing implementations of it, not only for named helpers. New code that
+   existing implementations of it, not only for named helpers, including on
+   the default branch (see [Upstream changes](#upstream-changes)). New code that
    reimplements an existing helper, utility, constant, or type: reuse or
    extend the existing one. Logic repeated across the change, or between the
    change and existing code: extract a shared function in the place the
@@ -185,6 +226,8 @@ Report briefly:
 - Changes applied, grouped by kind, with file references.
 - Checks run and their outcomes, including failures that already existed.
 - The commit plan, or the commits created with their hashes and subjects.
+- Relevant upstream changes the branch lacks and likely conflicts, naming the
+  base compared and, if the fetch failed, how old it was.
 - Questions needing the user's decision, each with a recommendation.
 - Notable observations deliberately left alone, and remaining uncommitted
   changes, if any.
