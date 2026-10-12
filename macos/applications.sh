@@ -32,7 +32,8 @@ fi
 bash ~/.dotfiles/scripts/ensure-pm-config.sh || exit 1
 npm i -g diff-so-fancy@latest
 
-# Agent skills
+# Agent instructions and skills
+bash ~/.dotfiles/scripts/sync-agent-instructions.sh || exit 1
 bash ~/.dotfiles/scripts/sync-agent-skills.sh || exit 1
 bash ~/.dotfiles/scripts/audit-skills.sh --fix-symlinks --quiet || exit 1
 

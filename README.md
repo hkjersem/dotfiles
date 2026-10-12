@@ -223,6 +223,32 @@ GitHub Actions runs shell syntax checks and the full regression suite on an
 Apple Silicon macOS runner for pushes and pull requests. The workflow uses the
 runner's preinstalled tools and does not run machine setup or live updates.
 
+## Global agent instructions
+
+`agents/AGENTS.md` holds personal instructions shared by every agent tool.
+`scripts/sync-agent-instructions.sh` symlinks it to each tool's global
+instruction file, but only when that tool's home directory exists:
+
+| Tool | Global file |
+|------|-------------|
+| Claude Code | `~/.claude/CLAUDE.md` |
+| Codex | `~/.codex/AGENTS.md` |
+| Copilot CLI | `~/.copilot/copilot-instructions.md` |
+
+Missing or empty files, broken links and links to old paths inside `~/.dotfiles`
+are replaced. A file with content, or a working link elsewhere, is reported as
+a conflict and left unchanged; move its rules into `agents/AGENTS.md`, delete
+it, and sync again. Setup and update run the sync; `scripts/audit.sh` reports
+the state.
+
+```sh
+bash scripts/sync-agent-instructions.sh --dry-run
+bash scripts/sync-agent-instructions.sh
+```
+
+Keep the file short; it is loaded into every session. Instructions an agent
+writes through a tool's memory command land in this tracked file.
+
 ## Agent skills
 
 Skills authored in this repository live under `agents/skills/`.

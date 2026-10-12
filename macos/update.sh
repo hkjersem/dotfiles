@@ -76,6 +76,9 @@ update_installed_tool claude subheader || exit 1
 update_installed_tool copilot subheader || exit 1
 update_installed_tool codex subheader || exit 1
 
+subheader "Agent instructions"
+bash ~/.dotfiles/scripts/sync-agent-instructions.sh --quiet || exit 1
+
 if [ -d ~/.dotfiles/agents/skills ];
 then
     subheader "Skills"

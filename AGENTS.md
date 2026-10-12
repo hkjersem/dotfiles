@@ -27,6 +27,9 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 | `scripts/audit.sh` | Read-only drift detection — compares repo declarations vs installed state |
 | `scripts/audit-repo.sh` | Repository triage — Git, file, test, and build indicators; extra checks for a root `package.json`. Aliased as `audit-repo`. npm/pnpm audit and outdated queries can use the network; `--skip-security` skips only audit. See [README](README.md#repository-triage). |
 | `scripts/audit-skills.sh` | Skills drift detection — read-only under `audit.sh`; explicit repair flags preserve real content and foreign links. `--clean-stale` removes only verified managed links and empty skills-only agent directories. See [README](README.md#agent-skills). |
+| `agents/AGENTS.md` | Personal global agent instructions — symlinked into each installed tool's global instruction file |
+| `scripts/sync-agent-instructions.sh` | Links `agents/AGENTS.md` for Claude Code, Codex and Copilot CLI when their home directory exists; existing content is a conflict and never overwritten. Run by setup and update, checked by `audit.sh` |
+| `scripts/lib/agent-instructions.sh` | Shared target list and link-state detection for the instruction sync and audit |
 | `agents/skills/` | Skills authored in this repository — synced into `~/.agents/skills/` and then linked to installed agent providers |
 | `agents/skills/skills.txt` | Third-party global skills installed on every machine; machine-specific skills stay local and unlisted |
 | `scripts/sync-agent-skills.sh` | Collision-safe agent skill sync — links repo-authored skills and installs missing entries from `agents/skills/skills.txt` without overwriting existing names |
@@ -83,6 +86,7 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 - **After installing or removing skills** via `npx skills` — run `bash scripts/audit-skills.sh --fix-symlinks` to sync symlinks across all preferred agent providers
 - **Repo-authored skills** belong in `agents/skills/` and are linked with `bash scripts/sync-agent-skills.sh`. Existing names are conflicts and must never be overwritten automatically.
 - **Repo-authored skills must support repositories with and without a remote** — where a skill compares against the default branch, use the remote-tracking ref (e.g. `origin/main`) when a remote exists, and the local default branch in local-only repositories.
+- **Global agent instructions** belong in `agents/AGENTS.md`, never in a tool-specific global file. Keep it short and free of repository-specific rules.
 - **Cross-machine third-party skills** belong in `agents/skills/skills.txt`; machine-specific skills remain installed locally and must not be added to the manifest.
 - **To suppress audit warnings** — add entries to `audit.ignore` with format `category:name` (e.g. `brew:tool`, `home:.config/dir`, `skills:dirname`). This file is gitignored and machine-specific.
 

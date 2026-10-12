@@ -439,7 +439,32 @@ done
 section_end
 
 # ──────────────────────────────────────────────────────
-# 7. SKILLS (npx skills — github.com/vercel-labs/skills)
+# 7. AGENT INSTRUCTIONS
+# ──────────────────────────────────────────────────────
+section_start "Agent instructions"
+source "$DOTFILES/scripts/lib/agent-instructions.sh"
+if [ ! -f "$AGENT_INSTRUCTIONS_SOURCE" ]; then
+    fail "agents/AGENTS.md → source missing in repo"
+else
+    for entry in "${AGENT_INSTRUCTION_TARGETS[@]}"; do
+        label="${entry%%:*}"
+        rest="${entry#*:}"
+        tool_home="${rest%:*}"
+        path="$tool_home/${rest##*:}"
+        display="${path/#$HOME/~}"
+        case "$(agent_instruction_state "$tool_home" "$path")" in
+            absent) continue ;;
+            linked) ok "$label → $display" ;;
+            missing|empty|stale) warn "$label → $display is not linked (run dotfiles-update)" ;;
+            foreign|file) warn "$label → $display exists; move its rules into agents/AGENTS.md, then remove it" ;;
+        esac
+    done
+    [ ${#SECTION_OUTPUT[@]} -gt 0 ] || info "No supported agent tools installed"
+fi
+section_end
+
+# ──────────────────────────────────────────────────────
+# 8. SKILLS (npx skills — github.com/vercel-labs/skills)
 # ──────────────────────────────────────────────────────
 # shellcheck source=scripts/audit-skills.sh
 source "$DOTFILES/scripts/audit-skills.sh"
