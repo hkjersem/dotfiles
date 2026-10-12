@@ -90,6 +90,18 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 - **Cross-machine third-party skills** belong in `agents/skills/skills.txt`; machine-specific skills remain installed locally and must not be added to the manifest.
 - **To suppress audit warnings** — add entries to `audit.ignore` with format `category:name` (e.g. `brew:tool`, `home:.config/dir`, `skills:dirname`). This file is gitignored and machine-specific.
 
+### Enforced rules
+
+These rules have been broken before and are checked by `scripts/tests/test_repo_rules.py`, which also covers new files that aren't committed yet. When a rule keeps getting broken, add a check there rather than more wording here.
+
+| Rule | Check |
+|------|-------|
+| Every script in `scripts/`, `scripts/lib/`, `scripts/package-manager/` and `macos/` is listed in the structure table | `test_every_script_is_listed_in_agents_md` |
+| Paths to `~/.dotfiles/...` in shell config point to files that exist | `test_shell_config_references_existing_repo_files` |
+| Bash files avoid Bash 4+ syntax (`bash -n` in CI does not catch it) | `test_bash_scripts_avoid_bash4_only_syntax` |
+| No hardcoded `/Users/<name>` paths | `test_no_hardcoded_home_paths` |
+| Repo-authored skills do not reference this repository | `test_repo_authored_skills_do_not_reference_this_repository` |
+
 ## Testing
 
 - See [README testing instructions](README.md#testing) for prerequisites and suite commands. Run relevant suites from the repository root; shell regression tests must exercise `/bin/bash`, not only a newer Homebrew Bash.

@@ -218,6 +218,8 @@ Tests use disposable fixtures and mocked package-manager/network operations,
 not live installations. Shell regressions run under `/bin/bash` to exercise
 the bundled Bash 3.2. Interactive-terminal or Git-alias checks can be skipped
 when the environment blocks them; skipped checks are not verified passes.
+`test_repo_rules.py` adds static checks for repository rules; see
+[AGENTS.md](AGENTS.md#enforced-rules).
 
 GitHub Actions runs shell syntax checks and the full regression suite on an
 Apple Silicon macOS runner for pushes and pull requests. The workflow uses the
