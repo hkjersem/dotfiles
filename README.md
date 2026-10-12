@@ -227,7 +227,9 @@ runner's preinstalled tools and does not run machine setup or live updates.
 
 Skills authored in this repository live under `agents/skills/`.
 `scripts/sync-agent-skills.sh` links them into the runtime canonical directory
-at `~/.agents/skills/` without overwriting name collisions.
+at `~/.agents/skills/` without overwriting name collisions. A skill that ships a
+script is tested from `scripts/tests/`, so the skill directory itself stays
+free of repository-specific tooling.
 
 `agents/skills/skills.txt` lists third-party global skills that should be
 installed on every machine. Machine-specific skills remain local and are not

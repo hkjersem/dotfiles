@@ -1,0 +1,82 @@
+{
+  "skill_name": "roadmap",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Simulate the response from these facts only; do not inspect or modify a real repository. Return the files you would create or change, with full brief content, and your reply to the user.\n\nRepository: ./mailsort, a CLI that sorts email into folders. It has ROADMAP.md and roadmap/ in the skill's layout, with a conforming, passing check. The user says: 'add a roadmap item for supporting IMAP IDLE so new mail is sorted immediately instead of every 5 minutes. no rush.' The user has not said whether they will do it. Relevant code: src/fetch/poller.py polls every 300 seconds. Nobody has decided how reconnects should work.",
+      "expected_output": "Creates roadmap/imap-idle.md (or a similar stable slug) with status idea, a summary, an Outcome and Context pointing at src/fetch/poller.py, and the reconnect behaviour as an open question rather than a decision. Runs sync. Does not mark it planned or ready, does not ask the user where it ranks, and does not start implementing.",
+      "files": [],
+      "assertions": [
+        "The brief's status is idea, because the user did not commit to it.",
+        "Front matter uses only the supported keys and restricted syntax.",
+        "Reconnect handling appears as an open question, not an agreed requirement.",
+        "The reply does not ask the user to rank or prioritise the item.",
+        "No implementation is started or proposed as the next step without a request."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Simulate the response from these facts only; do not inspect or modify a real repository. Return the brief changes, commands you would run, and your reply.\n\nRepository: ./mailsort with the skill's layout. roadmap/rule-preview.md has status active and acceptance criteria: (1) `mailsort preview` lists the folder each message would go to; (2) no message is moved during preview; (3) preview works offline from the local cache. The agent finished the implementation. Tests for (1) and (2) pass: `pytest tests/test_preview.py` (12 passed). Criterion (3) was not tested because no cached mailbox fixture exists. docs/usage.md does not yet mention preview. The user has not reviewed the work.",
+      "expected_output": "Updates docs/usage.md for the new command, sets the brief to verifying (not done), records acceptance results per criterion with the passing test evidence and criterion 3 as untested with the reason, names what the owner needs to decide or check, syncs and runs check. The reply summarises the same results so the owner need not reread the brief. It does not archive the brief.",
+      "files": [],
+      "assertions": [
+        "Status becomes verifying, not done, because acceptance is incomplete and the owner has not accepted it.",
+        "Each acceptance criterion is reported as passed, failed or untested, with criterion 3 untested and why.",
+        "Maintained documentation is updated for the shipped behaviour.",
+        "The brief is not archived.",
+        "The reply contains a concise acceptance summary and the outstanding owner decision."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Simulate the response from these facts only; do not inspect or modify a real repository. Describe what you would change directly, what you would propose, and your reply.\n\nThe user says 'cleanup my roadmap'. Repository ./notes-app has tasks/roadmap.md: one 60-row table with columns P#, Task, Status, Notes. Statuses include '✅ done' (41 rows, 12 of them with 'accepted by user 2026-08-02' in Notes), '🚧 in progress' (3 rows), 'todo' (10 rows, 4 linking a full spec in tasks/), and '⏸ parked, likely delete' (6 rows). Four links point to tasks/*.md files that were renamed to tasks/archive/*.md. Below the table, a 'Current direction' section of 40 paragraphs mixes dated changelog entries with two still-relevant architecture decisions. AGENTS.md links to tasks/roadmap.md.",
+      "expected_output": "Classifies the roadmap as foreign and drifting. Directly fixes the four broken links. Proposes, rather than applies, the rest: archiving only the 12 accepted done items, asking about the 29 done items without recorded acceptance, mapping the parked rows, extracting the two architecture decisions to a design document and removing changelog prose, and migrating to ROADMAP.md plus roadmap/ as a separate confirmed step. Proposals are grouped with a recommendation for each so the owner can answer in one reply. Nothing is deleted.",
+      "files": [],
+      "assertions": [
+        "Broken links are fixed directly.",
+        "No rows, prose or ideas are deleted without the owner's agreement.",
+        "Done items are split by whether acceptance is recorded; only accepted ones are candidates for direct archiving.",
+        "'Parked, likely delete' is treated as ambiguous and proposed, not mapped automatically.",
+        "Migration to the skill's layout is proposed as a separate step, not performed.",
+        "The architecture decisions are preserved, with a proposed destination outside the index."
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "Simulate the response from these facts only; do not inspect or modify a real repository. Return your reply.\n\nRepository ./mailsort with the skill's layout. The user asks 'what should I work on next?'. `roadmap.py ready` prints:\nIn progress (reported, not locked):\n  rule-preview: verifying\nReady to start:\n  dark-theme: Dark theme for the TUI\n  folder-stats: Per-folder statistics\nCommitted, decisions still open:\n  imap-idle: Immediate sorting with IMAP IDLE\nWaiting:\n  rule-sharing: waiting for rule-export\nroadmap/rule-export.md has status ready and `when: after the 2.0 release`, so it is parked in Later. Three committed items, including rule-sharing, depend on it. rule-preview's brief records two passing acceptance checks and one untested check.",
+      "expected_output": "Briefly lists rule-preview as verifying with an untested check outstanding, the two startable items, imap-idle with open decisions, and rule-sharing waiting on rule-export. Presents the startable items without inventing a ranking. Points out that rule-export is parked but unblocks three committed items, and asks whether the owner wants to unpark it, without changing its `when` condition. Does not start any work.",
+      "files": [],
+      "assertions": [
+        "Mentions that rule-preview is still verifying, with an outstanding check.",
+        "Presents startable items without inventing a priority order between them.",
+        "Identifies rule-export as parked and as unblocking three items, and leaves unparking to the owner.",
+        "Does not edit any brief, set any item active, or begin implementation."
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "Simulate the response from these facts only; do not inspect or modify a real repository. Return your reply and any file changes.\n\nRepository ./webshop keeps its roadmap as GitHub issues with milestones; there is no ROADMAP.md. The user says 'mark the checkout redesign as done, I've tested it'. The issue is #42, open, in milestone 'Q4'.",
+      "expected_output": "Recognises a foreign roadmap format and works within it: proposes or performs closing issue #42 according to the user's statement (with gh if available), noting the acceptance. Does not create ROADMAP.md, roadmap/ or briefs, and does not run the bundled script. May mention once that the file-based layout exists, without pushing a migration.",
+      "files": [],
+      "assertions": [
+        "Works within the existing issue-based roadmap.",
+        "Does not create ROADMAP.md, a roadmap directory or briefs.",
+        "Treats the user's statement as acceptance for this item.",
+        "Mentions migration at most once and does not perform it."
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "Simulate the response from these facts only; do not inspect or modify a real repository. Return the brief changes, commands you would run, and your reply.\n\nRepository: ./mailsort with the skill's layout and a passing check. Today is 2026-10-08. roadmap/rule-audit.md is a routine: status ready, kind routine, every 1m, last_done 2026-08-30, and its body describes reviewing sorting rules for dead folders. roadmap/rule-preview.md is ready with no dependencies. roadmap/imap-idle.md is planned with an open reconnect question. The user says: 'what should I do next? also, I did the rule audit yesterday, removed two dead rules.' The user also says: 'and let's make sure the IMAP work starts after the next audit.'",
+      "expected_output": "Records yesterday's audit in rule-audit.md: a dated Log line (2026-10-07) with the two removed rules, last_done 2026-10-07, no due left behind, then sync; next date becomes 2026-11-07. Runs ready and reports what is due before the startable items, listing rule-preview as ready to start and imap-idle as committed with its open reconnect question. Does not rank items. Does not add depends_on from imap-idle to the routine; explains that routines never finish so they cannot be dependencies, and offers a `when` condition on imap-idle tied to the next audit, or a separate finishable item to depend on, leaving the choice to the user; does not present `due` as a way to delay the start, since it is a target date, not a gate.",
+      "files": [],
+      "assertions": [
+        "rule-audit.md gets last_done: 2026-10-07 and a dated `## Log` line mentioning the two removed rules.",
+        "The routine is not set to done or verifying, and no stale `due` remains.",
+        "The reply presents due items first, then rule-preview as startable and imap-idle as having an open decision.",
+        "imap-idle does not get depends_on: [rule-audit]; the reply explains why and offers an alternative for the user to choose.",
+        "The reply does not ask the user to rank items."
+      ]
+    }
+  ]
+}

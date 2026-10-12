@@ -48,7 +48,7 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 | `scripts/package-manager/pnpm-update.sh` | pnpm wrapper — catalog read/write, `pnpm outdated`, augmentation |
 | `scripts/package-manager/npm-update.sh` | npm wrapper — workspace detection, `npm outdated`, augmentation, reads cooldown from project and global `~/.npmrc` |
 | `scripts/package-manager/bun-update.sh` | bun wrapper — `bun outdated`, augmentation, reads cooldown from `bunfig.toml` or `~/.bunfig.toml` |
-| `scripts/tests/` | Isolated shell-script regression tests — run with `python3 -B -m unittest discover -s scripts/tests` |
+| `scripts/tests/` | Isolated shell-script regression tests, plus tests for scripts shipped by repo-authored skills — run with `python3 -B -m unittest discover -s scripts/tests` |
 | `scripts/lib/clean-targets.sh` | Shared generated-artifact lists and matching patterns for cleanup, clean-copy, and repository-audit scripts |
 | `scripts/wipe-clean.sh` | Delete all known build artifacts and dependency folders from the current directory. Aliased as `wipe_clean` |
 | `scripts/copy-clean.sh` | Clone-copy or ZIP a source directory, defaulting to the current directory, excluding the same artifacts as `wipe_clean`; supports `--ignore-git` and `--keep-name`. Aliased as `copy_clean` |
