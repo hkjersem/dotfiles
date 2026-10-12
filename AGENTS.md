@@ -82,6 +82,7 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 - **After making changes** that affect symlinks, brew formulae, plugins, or npm globals — run `bash scripts/audit.sh` to verify the repo and installed state are consistent
 - **After installing or removing skills** via `npx skills` — run `bash scripts/audit-skills.sh --fix-symlinks` to sync symlinks across all preferred agent providers
 - **Repo-authored skills** belong in `agents/skills/` and are linked with `bash scripts/sync-agent-skills.sh`. Existing names are conflicts and must never be overwritten automatically.
+- **Repo-authored skills must support repositories with and without a remote** — where a skill compares against the default branch, use the remote-tracking ref (e.g. `origin/main`) when a remote exists, and the local default branch in local-only repositories.
 - **Cross-machine third-party skills** belong in `agents/skills/skills.txt`; machine-specific skills remain installed locally and must not be added to the manifest.
 - **To suppress audit warnings** — add entries to `audit.ignore` with format `category:name` (e.g. `brew:tool`, `home:.config/dir`, `skills:dirname`). This file is gitignored and machine-specific.
 
