@@ -70,7 +70,9 @@ The repository may or may not have a remote. Resolve the default branch, called
   existing ref and say how old it is, or that its age is unknown. If no usable
   ref exists, report the check as unavailable. Never use a local copy of the
   default branch instead; it can be stale, or checked out in another worktree.
-- **Without a remote:** the local default branch, such as `main`.
+- **Without a remote:** infer the local default branch from the repository,
+  such as `main`, and state which branch you used. If ambiguous, ask rather
+  than guess.
 - **Neither:** if the current branch is the only candidate, for example when
   working directly on the local default branch, skip the upstream check.
 
