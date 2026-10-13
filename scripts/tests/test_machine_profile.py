@@ -27,7 +27,7 @@ if name + " " + " ".join(args) == os.environ.get("PROFILE_TEST_FAIL"):
 root = Path(os.environ["PROFILE_TEST_ROOT"])
 nav = root / "bin/nav-pilot"
 formulae = ["bat", "coreutils", "fnm", "fzf", "git-filter-repo", "jq", "mas",
-            "ripgrep", "tree"]
+            "python@3.15", "ripgrep", "tree"]
 if name == "brew":
     if args == ["--cellar"]:
         print(root / "Cellar")
@@ -47,13 +47,16 @@ if name == "brew":
             target.chmod(0o755)
             (root / "bin/gcloud").symlink_to(target)
     elif args[:2] == ["bundle", "list"]:
-        print("\n".join(formulae))
+        print("\n".join(["bat", "coreutils", "fnm", "fzf", "git-filter-repo",
+                         "jq", "mas", "python", "ripgrep", "tree"]))
         if os.environ.get("DOTFILES_PROFILE") == "work":
             print("navikt/tap/nav-pilot")
+    elif args == ["list", "--versions", "python"]:
+        print("python@3.15 3.15.0")
     elif args[:1] == ["list"]:
         print("\n".join(formulae + (["nav-pilot"] if nav.exists() else [])))
     elif args == ["leaves"]:
-        print("\n".join(formulae + (["nav-pilot"] if nav.exists() else [])))
+        print("\n".join(formulae + (["navikt/tap/nav-pilot"] if nav.exists() else [])))
 elif name == "npm" and args[:2] == ["list", "-g"]:
     print("corepack@1.0.0")
 '''
@@ -507,6 +510,14 @@ class MachineProfileTests(unittest.TestCase):
         self.assertFalse(self.calls("nav-pilot"))
         self.assertFalse(self.calls("gcloud"))
         self.assertEqual(self.profile.read_text(), "personal\n")
+
+    def test_audit_recognizes_homebrew_python_alias(self):
+        result = self.run_script("scripts/audit.sh")
+        section = result.stdout.split("Brew Formulae", 1)[1].split("Oh-my-zsh Plugins", 1)[0]
+
+        self.assertIn("All checks passed", section)
+        self.assertNotIn("python (in Brewfile but not installed)", section)
+        self.assertNotIn("python@3.15 (installed but not in Brewfile)", section)
 
     def test_audit_only_shows_profile_when_expected_tools_are_present(self):
         for profile in ("personal", "work"):

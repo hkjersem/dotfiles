@@ -150,6 +150,7 @@ if ! command -v brew &>/dev/null; then
 else
     BREW_INSTALLED=$(brew list --formula 2>/dev/null)
     BREW_LEAVES=$(brew leaves 2>/dev/null)
+    BREW_PYTHON=$(brew list --versions python 2>/dev/null | awk 'NR == 1 {print $1}')
     if ! DECLARED=$(HOMEBREW_NO_AUTO_UPDATE=1 brew bundle list --file="$DOTFILES/Brewfile" --formula); then
         echo "Error: could not read the profile-aware Brewfile." >&2
         exit 1
@@ -162,6 +163,10 @@ else
         [[ "$formula" == nav-pilot ]] && continue
         if echo "$BREW_INSTALLED" | grep -qx "$formula"; then
             ok "$formula"
+        elif [[ "$formula" == python && -n "$BREW_PYTHON" ]] \
+            && echo "$BREW_INSTALLED" | grep -qx "$BREW_PYTHON"; then
+            installed_python="$BREW_PYTHON"
+            ok "$formula ($installed_python)"
         else
             fail "$formula (in Brewfile but not installed)"
         fi
@@ -170,9 +175,13 @@ else
     # Installed but not declared — only check leaves (explicit installs, not dependencies)
     while IFS= read -r installed; do
         [[ -z "$installed" ]] && continue
+        # Leaves from third-party taps carry a tap prefix; DECLARED has it stripped.
+        installed_short="${installed##*/}"
         # Nav Pilot's optional personal installation is covered by the profile section.
-        [[ "$installed" == nav-pilot ]] && command -v nav-pilot >/dev/null && continue
-        if ! echo "$DECLARED" | grep -qw "$installed"; then
+        [[ "$installed_short" == nav-pilot ]] && command -v nav-pilot >/dev/null && continue
+        # Homebrew resolves the unversioned python alias to a versioned formula.
+        [[ "$installed" == "$BREW_PYTHON" ]] && echo "$DECLARED" | grep -qx python && continue
+        if ! echo "$DECLARED" | grep -qwF "$installed_short"; then
             is_ignored "brew:$installed" && continue
             warn "$installed (installed but not in Brewfile)"
         fi
