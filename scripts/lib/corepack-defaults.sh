@@ -149,6 +149,23 @@ fnm_installation_label() {
   basename "$(dirname "$1")"
 }
 
+# Prints "major|version version ..." (oldest first) for each Node major that has
+# more than one fnm installation; install-node.sh keeps one version per major.
+fnm_duplicate_majors() {
+  local inst label major
+  while IFS= read -r inst; do
+    [[ -z "$inst" ]] && continue
+    label=$(fnm_installation_label "$inst")
+    major="${label#v}"
+    printf '%s %s\n' "${major%%.*}" "$label"
+  done < <(fnm_node_installations) | sort -k1,1n -k2,2V | awk '
+    function flush() { if (n > 1) print major "|" versions }
+    $1 != major { flush(); major = $1; versions = $2; n = 1; next }
+    { versions = versions " " $2; n++ }
+    END { flush() }
+  '
+}
+
 # Prints "label|executable" for each Bun: one per fnm Node version with a global
 # bun package, plus a bun on PATH that comes from somewhere else.
 bun_installations() {

@@ -295,6 +295,12 @@ else
     # shellcheck source=scripts/lib/corepack-defaults.sh
     source "$DOTFILES/scripts/lib/corepack-defaults.sh"
 
+    # install-node.sh keeps one installed version per major
+    while IFS='|' read -r dup_major dup_versions; do
+        [[ -z "$dup_major" ]] && continue
+        warn "Node $dup_major: multiple versions installed ($dup_versions) — run: install_node $dup_major (installs the newest $dup_major.x and removes the other installed versions)"
+    done < <(fnm_duplicate_majors)
+
     # corepack itself and its pnpm/yarn shims are per Node version
     while IFS= read -r inst; do
         [[ -z "$inst" ]] && continue

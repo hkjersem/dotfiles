@@ -265,6 +265,31 @@ class CorepackDefaultsTest(unittest.TestCase):
             "v26.1.0 missing",
         ])
 
+    def test_duplicate_node_majors_are_reported_oldest_first(self):
+        for version in ("v22.10.0", "v22.9.1", "v24.1.0", "v26.1.0", "v26.2.0", "v26.10.0"):
+            self.add_fnm_node(version)
+
+        result = subprocess.run(
+            ["/bin/bash", "-c", f'source "{LIB}"; fnm_duplicate_majors'],
+            env=self.env, capture_output=True, text=True, check=True,
+        )
+
+        self.assertEqual(result.stdout.splitlines(), [
+            "22|v22.9.1 v22.10.0",
+            "26|v26.1.0 v26.2.0 v26.10.0",
+        ])
+
+    def test_no_duplicate_node_majors_prints_nothing(self):
+        for version in ("v22.10.0", "v24.1.0"):
+            self.add_fnm_node(version)
+
+        result = subprocess.run(
+            ["/bin/bash", "-c", f'source "{LIB}"; fnm_duplicate_majors'],
+            env=self.env, capture_output=True, text=True, check=True,
+        )
+
+        self.assertEqual(result.stdout, "")
+
     def test_bun_registry_failure_only_warns(self):
         self.set_defaults({"pnpm": "10.33.4", "yarn": "1.22.22"})
         self.standard_registry()
