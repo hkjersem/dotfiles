@@ -32,6 +32,7 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 | `scripts/lib/agent-instructions.sh` | Shared target list and link-state detection for the instruction sync and audit |
 | `agents/skills/` | Skills authored in this repository — synced into `~/.agents/skills/` and then linked to installed agent providers |
 | `agents/skills/skills.txt` | Third-party global skills installed on every machine; machine-specific skills stay local and unlisted |
+| `agents/skills/sources.txt` | Optional `~/path` directories owned by other repositories (e.g. Minne); each `*/SKILL.md` is linked like a repo-authored skill, and missing directories are skipped |
 | `scripts/sync-agent-skills.sh` | Collision-safe agent skill sync — links repo-authored skills and installs missing entries from `agents/skills/skills.txt` without overwriting existing names |
 | `scripts/lib/skills-utils.sh` | Shared skills name/manifest validation and conservative link/cleanup helpers |
 | `audit.ignore` | Machine-local audit suppressions (gitignored) — silence known-safe warnings per machine |
@@ -87,6 +88,7 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 - **Repo-authored skills** belong in `agents/skills/` and are linked with `bash scripts/sync-agent-skills.sh`. Existing names are conflicts and must never be overwritten automatically.
 - **Repo-authored skills must support repositories with and without a remote** — where a skill compares against the default branch, use the remote-tracking ref (e.g. `origin/main`) when a remote exists, and the local default branch in local-only repositories.
 - **Global agent instructions** belong in `agents/AGENTS.md`, never in a tool-specific global file. Keep it short and free of repository-specific rules.
+- **Skills owned by another repository** stay in that repository; list its skill directory as `~/path` in `agents/skills/sources.txt` instead of copying the skill here.
 - **Cross-machine third-party skills** belong in `agents/skills/skills.txt`; machine-specific skills remain installed locally and must not be added to the manifest.
 - **To suppress audit warnings** — add entries to `audit.ignore` with format `category:name` (e.g. `brew:tool`, `home:.config/dir`, `skills:dirname`). This file is gitignored and machine-specific.
 

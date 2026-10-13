@@ -28,7 +28,8 @@
 # ── CONFIGURATION ─────────────────────────────────────────────────────────────
 
 # Runtime canonical location — contains installed third-party skills and
-# symlinks to skills authored in this dotfiles repository.
+# symlinks to skills authored in this dotfiles repository or in the external
+# source directories listed in agents/skills/sources.txt.
 SKILLS_DIR="$HOME/.agents/skills"
 LOCK_FILE="$(dirname "$SKILLS_DIR")/.skill-lock.json"
 
@@ -148,6 +149,7 @@ DOTFILES="${DOTFILES:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 source "$DOTFILES/scripts/lib/skills-utils.sh" || { return 1 2>/dev/null || exit 1; }
 REPO_SKILLS_DIR="$DOTFILES/agents/skills"
 SKILLS_MANIFEST="$REPO_SKILLS_DIR/skills.txt"
+SKILLS_SOURCES="$REPO_SKILLS_DIR/sources.txt"
 if [ -f "$DOTFILES/audit.ignore" ]; then
     while IFS= read -r line; do
         [[ -z "$line" || "$line" == \#* ]] && continue
@@ -167,6 +169,14 @@ if ! skills_check_manifest "$SKILLS_MANIFEST" "$REPO_SKILLS_DIR"; then
     section_end
     [[ "$_SKILLS_STANDALONE" -eq 1 ]] && exit 1 || return 1
 fi
+
+if ! skills_read_sources "$SKILLS_SOURCES"; then
+    section_start "Skills — External"
+    fail "invalid sources.txt; no repairs performed"
+    section_end
+    [[ "$_SKILLS_STANDALONE" -eq 1 ]] && exit 1 || return 1
+fi
+skills_collect_external "$REPO_SKILLS_DIR" "$SKILLS_MANIFEST"
 
 # ── COLLECT REPO-AUTHORED SKILLS ───────────────────────────────────────────────
 
@@ -216,6 +226,40 @@ if [ "${#REPO_SKILL_NAMES[@]}" -gt 0 ]; then
     done
 
     [[ $SECTION_ISSUES -eq 0 && $SECTION_WARNINGS -eq 0 ]] && ok "all repo-authored skills linked"
+    section_end
+fi
+
+# ── EXTERNAL SKILL SOURCES ─────────────────────────────────────────────────────
+
+if [ "${#SKILLS_SOURCE_DIRS[@]}" -gt 0 ]; then
+    section_start "Skills — External"
+
+    for ((source_i = 0; source_i < ${#SKILLS_SOURCE_DIRS[@]}; source_i++)); do
+        [ -d "${SKILLS_SOURCE_DIRS[$source_i]}" ] \
+            || ok "${SKILLS_SOURCE_LABELS[$source_i]} not present on this machine; skipped"
+    done
+    for ((problem_i = 0; problem_i < ${#SKILLS_EXTERNAL_PROBLEMS[@]}; problem_i++)); do
+        fail "${SKILLS_EXTERNAL_PROBLEMS[$problem_i]}"
+    done
+    for ((external_i = 0; external_i < ${#SKILLS_EXTERNAL_NAMES[@]}; external_i++)); do
+        skill_name="${SKILLS_EXTERNAL_NAMES[$external_i]}"
+        canonical="$SKILLS_DIR/$skill_name"
+        if [ -L "$canonical" ] \
+            && skills_same_path "$canonical" "${SKILLS_EXTERNAL_PATHS[$external_i]}"; then
+            continue
+        fi
+        if [ -e "$canonical" ] || [ -L "$canonical" ]; then
+            fail "$skill_name (name conflict at $canonical — left unchanged)"
+        else
+            fail "$skill_name (not linked — run: bash scripts/sync-agent-skills.sh)"
+        fi
+    done
+    for link in "$SKILLS_DIR"/*; do
+        skills_dangling_external "$link" || continue
+        warn "$(basename "$link") (external skill no longer present — run: bash scripts/sync-agent-skills.sh)"
+    done
+
+    [[ $SECTION_ISSUES -eq 0 && $SECTION_WARNINGS -eq 0 ]] && ok "all external skills linked"
     section_end
 fi
 
@@ -369,6 +413,8 @@ if [ -f "$LOCK_FILE" ]; then
                     && skills_same_path "$canonical_path" "$repo_skill"; then
                     continue
                 fi
+                skills_is_external_link "$canonical_path" && continue
+                skills_dangling_external "$canonical_path" && continue
                 warn "$skill_name (folder exists but not in lockfile — installed outside npx skills?)"
             fi
         done

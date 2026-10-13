@@ -12,12 +12,17 @@
 #   source|skill-name
 # Disable and uninstall a managed skill by commenting it with:
 #   # disabled: source|skill-name
+#
+# agents/skills/sources.txt lists optional directories (~/path) owned by other
+# repositories. Each subdirectory with a SKILL.md is linked like a repo-authored
+# skill; directories missing on this machine are skipped.
 
 set -u
 
 DOTFILES="${DOTFILES:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 AUTHORED_DIR="$DOTFILES/agents/skills"
 MANIFEST="$DOTFILES/agents/skills/skills.txt"
+SOURCES="$DOTFILES/agents/skills/sources.txt"
 CANONICAL_DIR="$HOME/.agents/skills"
 LOCK_FILE="$HOME/.agents/.skill-lock.json"
 source "$DOTFILES/scripts/lib/skills-utils.sh" || exit 1
@@ -94,6 +99,60 @@ sync_authored_skills() {
             continue
         fi
 
+        if [ "$DRY_RUN" -eq 1 ]; then
+            changed "$skill_name -> $source (dry run)"
+        elif ln -s "$source" "$destination"; then
+            changed "$skill_name -> $source"
+        else
+            error "could not link $skill_name"
+        fi
+    done
+}
+
+sync_external_skills() {
+    local i skill_name source destination link
+
+    for ((i = 0; i < ${#SKILLS_EXTERNAL_PROBLEMS[@]}; i++)); do
+        conflict "${SKILLS_EXTERNAL_PROBLEMS[$i]}"
+    done
+
+    if [ -d "$CANONICAL_DIR" ]; then
+        for link in "$CANONICAL_DIR"/*; do
+            skills_dangling_external "$link" || continue
+            skill_name=$(basename "$link")
+            if [ "$DRY_RUN" -eq 1 ]; then
+                CHANGES=$((CHANGES + 1))
+                info "would unlink: $skill_name (external skill no longer present)"
+            elif rm "$link"; then
+                CHANGES=$((CHANGES + 1))
+                info "unlinked: $skill_name (external skill no longer present)"
+            else
+                error "could not remove dangling link $skill_name"
+            fi
+        done
+    fi
+
+    [ "${#SKILLS_EXTERNAL_NAMES[@]}" -gt 0 ] || return
+    if [ "$DRY_RUN" -eq 0 ]; then
+        mkdir -p "$CANONICAL_DIR" || {
+            error "could not create $CANONICAL_DIR"
+            return
+        }
+    fi
+
+    for ((i = 0; i < ${#SKILLS_EXTERNAL_NAMES[@]}; i++)); do
+        skill_name="${SKILLS_EXTERNAL_NAMES[$i]}"
+        source="${SKILLS_EXTERNAL_PATHS[$i]}"
+        destination="$CANONICAL_DIR/$skill_name"
+
+        if [ -L "$destination" ] && skills_same_path "$destination" "$source"; then
+            info "ok: $skill_name (external)"
+            continue
+        fi
+        if [ -e "$destination" ] || [ -L "$destination" ]; then
+            conflict "$skill_name already exists at $destination; external skill not linked"
+            continue
+        fi
         if [ "$DRY_RUN" -eq 1 ]; then
             changed "$skill_name -> $source (dry run)"
         elif ln -s "$source" "$destination"; then
@@ -231,9 +290,12 @@ if [[ -f "$LOCK_FILE" ]] && ! skills_valid_lockfile "$LOCK_FILE"; then
     exit 1
 fi
 skills_check_manifest "$MANIFEST" "$AUTHORED_DIR" || exit 1
+skills_read_sources "$SOURCES" || { error "invalid $SOURCES; nothing changed"; exit 1; }
+skills_collect_external "$AUTHORED_DIR" "$MANIFEST"
 
 sync_authored_skills
 sync_third_party_skills
+sync_external_skills
 
 if [ "$QUIET" -eq 1 ]; then
     if [ "$ERRORS" -gt 0 ] || [ "$CONFLICTS" -gt 0 ]; then

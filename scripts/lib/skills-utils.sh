@@ -125,3 +125,102 @@ skills_clean_stale() {
     done
     rmdir "$candidate"
 }
+
+# External skill sources: each non-comment line is a directory written as
+# ~/path. Sets SKILLS_SOURCE_LABELS (as written) and SKILLS_SOURCE_DIRS
+# (expanded), including directories that do not exist on this machine.
+skills_read_sources() {
+    local file="$1" line rest re='^~/[A-Za-z0-9._/-]+$'
+    SKILLS_SOURCE_LABELS=()
+    SKILLS_SOURCE_DIRS=()
+    [[ -f "$file" ]] || return 0
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line=$(skills_trim "$line")
+        [[ -z "$line" || "$line" == \#* ]] && continue
+        rest="${line#\~/}"
+        rest="${rest%/}"
+        if ! [[ "$line" =~ $re ]] || [[ -z "$rest" || "/$rest/" == *"/../"* || "/$rest/" == *"/./"* || "/$rest/" == *"//"* ]]; then
+            echo "Invalid skill source (use ~/path): $line" >&2
+            return 1
+        fi
+        SKILLS_SOURCE_LABELS+=("$line")
+        SKILLS_SOURCE_DIRS+=("$HOME/$rest")
+    done < "$file"
+}
+
+skills_manifest_has() {
+    local manifest="$1" name="$2" line
+    [[ -f "$manifest" ]] || return 1
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line=$(skills_trim "$line")
+        if [[ "$line" == "# disabled:"* ]]; then
+            line=$(skills_trim "${line#\# disabled:}")
+        elif [[ "$line" == \#* ]]; then
+            continue
+        fi
+        [[ "$line" == *"|"* ]] || continue
+        [[ "$(skills_trim "${line#*|}")" == "$name" ]] && return 0
+    done < "$manifest"
+    return 1
+}
+
+# Collects skills from existing source directories after skills_read_sources.
+# Sets SKILLS_EXTERNAL_NAMES/PATHS for linkable skills and
+# SKILLS_EXTERNAL_PROBLEMS for skipped ones (invalid, duplicate or conflicting).
+skills_collect_external() {
+    local authored="$1" manifest="$2" dir skill name i j duplicate
+    SKILLS_EXTERNAL_NAMES=()
+    SKILLS_EXTERNAL_PATHS=()
+    SKILLS_EXTERNAL_PROBLEMS=()
+    for ((i = 0; i < ${#SKILLS_SOURCE_DIRS[@]}; i++)); do
+        dir="${SKILLS_SOURCE_DIRS[$i]}"
+        [[ -d "$dir" ]] || continue
+        for skill in "$dir"/*; do
+            [[ -d "$skill" && -f "$skill/SKILL.md" ]] || continue
+            name=$(basename "$skill")
+            if ! skills_valid_name "$name"; then
+                SKILLS_EXTERNAL_PROBLEMS+=("invalid external skill name: $skill")
+                continue
+            fi
+            if [[ -d "$authored/$name" ]]; then
+                SKILLS_EXTERNAL_PROBLEMS+=("$name from ${SKILLS_SOURCE_LABELS[$i]} conflicts with a repo-authored skill; not linked")
+                continue
+            fi
+            if skills_manifest_has "$manifest" "$name"; then
+                SKILLS_EXTERNAL_PROBLEMS+=("$name from ${SKILLS_SOURCE_LABELS[$i]} conflicts with a manifest skill; not linked")
+                continue
+            fi
+            duplicate=0
+            for ((j = 0; j < ${#SKILLS_EXTERNAL_NAMES[@]}; j++)); do
+                [[ "${SKILLS_EXTERNAL_NAMES[$j]}" == "$name" ]] && duplicate=1
+            done
+            if [[ "$duplicate" -eq 1 ]]; then
+                SKILLS_EXTERNAL_PROBLEMS+=("$name is provided by more than one skill source; only the first is linked")
+                continue
+            fi
+            SKILLS_EXTERNAL_NAMES+=("$name")
+            SKILLS_EXTERNAL_PATHS+=("$skill")
+        done
+    done
+}
+
+# True for a canonical symlink into a declared source directory whose target
+# no longer exists or no longer contains a SKILL.md.
+skills_dangling_external() {
+    local link="$1" target i
+    [[ -L "$link" && ! -f "$link/SKILL.md" ]] || return 1
+    target=$(readlink "$link") || return 1
+    for ((i = 0; i < ${#SKILLS_SOURCE_DIRS[@]}; i++)); do
+        [[ "$target" == "${SKILLS_SOURCE_DIRS[$i]}/"* ]] && return 0
+    done
+    return 1
+}
+
+skills_is_external_link() {
+    local link="$1" i
+    [[ -L "$link" ]] || return 1
+    for ((i = 0; i < ${#SKILLS_EXTERNAL_PATHS[@]}; i++)); do
+        skills_same_path "$link" "${SKILLS_EXTERNAL_PATHS[$i]}" && return 0
+    done
+    return 1
+}

@@ -1,0 +1,7 @@
+# External skill source directories owned by other repositories.
+# Format: ~/path — one directory per line. Each subdirectory containing a
+# SKILL.md is linked into ~/.agents/skills by scripts/sync-agent-skills.sh.
+# Directories missing on a machine are skipped. Existing names are never
+# overwritten, and names must not collide with repo-authored or manifest skills.
+
+~/minne/integrations/skills

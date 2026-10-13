@@ -277,6 +277,15 @@ bash scripts/sync-agent-skills.sh --dry-run
 bash scripts/sync-agent-skills.sh
 ```
 
+`agents/skills/sources.txt` lists skill directories owned by other
+repositories, one `~/path` per line. Each subdirectory containing a `SKILL.md`
+is linked like a repo-authored skill, so the owning repository stays the only
+copy. A directory that does not exist on a machine is skipped, and a link whose
+external skill has disappeared or lost its `SKILL.md` is removed by the next
+sync. Names that collide
+with repo-authored, manifest or already installed skills are reported and left
+unchanged.
+
 Afterward, `scripts/audit-skills.sh --fix-symlinks` exposes the canonical skills
 to installed agent providers.
 

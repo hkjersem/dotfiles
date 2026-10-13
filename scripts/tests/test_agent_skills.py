@@ -357,6 +357,95 @@ echo "issues=$ISSUES"
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(self.snapshot(), before)
 
+    def external_source(self, *names):
+        source = self.home / "other/skills"
+        for name in names:
+            (source / name).mkdir(parents=True)
+            (source / name / "SKILL.md").write_text(name + "\n")
+        (self.authored / "sources.txt").write_text("# comment\n~/other/skills\n~/missing/skills\n")
+        return source
+
+    def test_external_sources_link_idempotently_and_skip_missing_directories(self):
+        source = self.external_source("ext")
+        (self.lock).write_text(json.dumps({"skills": {}}))
+        provider = self.provider()
+        result = self.run_script("sync-agent-skills.sh")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(os.readlink(self.canonical / "ext"), str(source / "ext"))
+        before = self.snapshot()
+        result = self.run_script("sync-agent-skills.sh", "--quiet")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(self.snapshot(), before)
+        result = self.run_script("audit-skills.sh", "--fix-symlinks")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Skills — External", result.stdout)
+        self.assertNotIn("not in lockfile", result.stdout)
+        self.assertEqual((provider / "ext").resolve(), source / "ext")
+
+    def test_external_name_collisions_preserve_existing_skills(self):
+        local = self.authored / "local"
+        local.mkdir()
+        (local / "SKILL.md").write_text("local\n")
+        self.manifest.write_text("owner/repo|third\n")
+        self.installed("third")
+        self.installed("taken", source="some/where")
+        self.external_source("local", "third", "taken")
+        result = self.run_script("sync-agent-skills.sh")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("repo-authored", result.stderr)
+        self.assertIn("manifest skill", result.stderr)
+        self.assertIn("taken already exists", result.stderr)
+        self.assertEqual((self.canonical / "local").resolve(), local)
+        self.assertFalse((self.canonical / "third").is_symlink())
+        self.assertFalse((self.canonical / "taken").is_symlink())
+        result = self.run_script("audit-skills.sh")
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_removed_external_skill_unlinks_only_its_own_dangling_link(self):
+        source = self.external_source("ext")
+        result = self.run_script("sync-agent-skills.sh")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        foreign = self.canonical / "foreign"
+        foreign.symlink_to(self.root / "missing")
+        (source / "ext/SKILL.md").unlink()
+        (source / "ext").rmdir()
+        before = self.snapshot()
+        result = self.run_script("audit-skills.sh")
+        self.assertIn("external skill no longer present", result.stdout)
+        result = self.run_script("sync-agent-skills.sh", "--dry-run")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.snapshot(), before)
+        result = self.run_script("sync-agent-skills.sh")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.canonical / "ext").is_symlink())
+        self.assertTrue(foreign.is_symlink())
+
+    def test_external_skill_without_skill_md_is_unlinked_but_folder_kept(self):
+        source = self.external_source("ext")
+        self.lock.write_text(json.dumps({"skills": {}}))
+        result = self.run_script("sync-agent-skills.sh")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        (source / "ext/SKILL.md").unlink()
+        (source / "ext/notes.txt").write_text("keep")
+        result = self.run_script("audit-skills.sh")
+        self.assertIn("external skill no longer present", result.stdout)
+        self.assertNotIn("not in lockfile", result.stdout)
+        result = self.run_script("sync-agent-skills.sh")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.canonical / "ext").is_symlink())
+        self.assertEqual((source / "ext/notes.txt").read_text(), "keep")
+
+    def test_invalid_external_sources_are_rejected_before_changes(self):
+        for invalid in ("/absolute/skills", "relative/skills", "~/a/../b", "~/", "~/$(touch x)"):
+            with self.subTest(invalid=invalid):
+                (self.authored / "sources.txt").write_text(invalid + "\n")
+                before = self.snapshot()
+                for script in ("sync-agent-skills.sh", "audit-skills.sh"):
+                    result = self.run_script(script)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertEqual(self.snapshot(), before)
+
 
 if __name__ == "__main__":
     unittest.main()
