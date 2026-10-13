@@ -2,6 +2,7 @@ brew "bat"             # better cat with syntax highlighting
 brew "coreutils"       # GNU date, sed, etc. (gdate, gsed, ...)
 brew "fnm"             # Fast Node Manager
 brew "fzf"             # fuzzy finder
+brew "gh"              # GitHub CLI — PRs, issues, Actions; also the Git credential helper for github.com
 brew "git-filter-repo" # rewrite git history (remove secrets, large files, change authors)
 brew "jq"              # JSON processor
 brew "mas"             # Mac App Store CLI
