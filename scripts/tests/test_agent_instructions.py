@@ -82,9 +82,19 @@ class AgentInstructionsTests(unittest.TestCase):
         result = self.run_sync("--quiet")
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout, "")
+        self.assertIn("2 target(s) linked", result.stdout)
         self.assertEqual(os.readlink(self.home / ".claude/CLAUDE.md"), str(self.source))
         self.assertEqual(os.readlink(self.home / ".codex/AGENTS.md"), str(self.source))
+
+    def test_quiet_rerun_reports_instructions_are_up_to_date(self):
+        (self.home / ".copilot").mkdir()
+        first = self.run_sync("--quiet")
+        self.assertEqual(first.returncode, 0, first.stderr)
+
+        result = self.run_sync("--quiet")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Agent instructions: up to date", result.stdout)
 
     def test_existing_content_and_foreign_links_are_preserved_as_conflicts(self):
         (self.home / ".claude").mkdir()

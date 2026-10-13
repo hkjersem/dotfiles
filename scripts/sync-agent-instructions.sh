@@ -59,6 +59,13 @@ for entry in "${AGENT_INSTRUCTION_TARGETS[@]}"; do
     esac
 done
 
-[ "$QUIET" -eq 1 ] && [ "$conflicts" -eq 0 ] && [ "$errors" -eq 0 ] \
-    || echo "Agent instructions: $changes change(s), $conflicts conflict(s), $errors error(s)"
+if [ "$QUIET" -eq 1 ] && [ "$conflicts" -eq 0 ] && [ "$errors" -eq 0 ]; then
+    if [ "$changes" -eq 0 ]; then
+        echo "Agent instructions: up to date"
+    else
+        echo "Agent instructions: $changes target(s) linked"
+    fi
+else
+    echo "Agent instructions: $changes change(s), $conflicts conflict(s), $errors error(s)"
+fi
 [ "$errors" -eq 0 ]
