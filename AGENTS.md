@@ -11,7 +11,7 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 | `install` | Dotbot entry point — run this to apply the dotfiles |
 | `install.conf.yaml` | Dotbot symlink map |
 | `zsh/zshrc` | Main zsh config — sources conf.d modules, installer-managed tool blocks, and local overrides |
-| `zsh/conf.d/` | Zsh config modules (sourced in order by zshrc): `omz.zsh`, `plugins.zsh`, `history.zsh`, `env.zsh`, `aliases.zsh`, `prompt.zsh`, `fnm.zsh`, `fzf.zsh` |
+| `zsh/conf.d/` | Zsh config modules (sourced in order by zshrc): `omz.zsh`, `plugins.zsh`, `history.zsh`, `env.zsh`, `aliases.zsh`, `prompt.zsh`, `fnm.zsh`, `fzf.zsh`, `agent-sessions.zsh` |
 | `zsh/zlogin` | Login shell config (runs after zshrc) — compiles compdump, propagates PATH to launchd |
 | `Brewfile` | Homebrew formula/cask declarations — source of truth for brew packages; used by `applications.sh` and `update.sh` via `brew bundle --file` |
 | `scripts/machine-profile.sh` | Read, choose, or change the machine-local personal/work profile; also sourced by setup, updates, and audit |

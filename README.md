@@ -300,6 +300,27 @@ bash scripts/sync-agent-instructions.sh
 Keep the file short; it is loaded into every session. Instructions an agent
 writes through a tool's memory command land in this tracked file.
 
+## Agent sessions
+
+`zsh/conf.d/agent-sessions.zsh` wraps `copilot`, `claude` and `cplt` when
+they are installed, for Copilot CLI and Claude Code sessions. If a session's
+terminal closes while it runs, such as when VS Code or iTerm2 quits, the next
+terminal opened in the same directory resumes it. Switching session with
+`/new`, `/clear` or `/resume` is followed, so the session in use when the
+terminal closed comes back, even if you only resumed it without writing
+anything. A session you never wrote to cannot be resumed. Several terminals
+in one repository each get one session back, oldest first; which tab gets
+which is not guaranteed. Exiting the agent normally means it is not resumed,
+and sessions older than 7 days are dropped. `CPLT_NO_RESUME=1` turns resuming
+off.
+
+`cplt` also starts Copilot with `--allow-all` and Claude Code with
+`--dangerously-skip-permissions`, since cplt has no setting for agent flags;
+the sandbox still limits what they can reach. Plain `copilot` and `claude`
+keep their permission prompts. cplt subcommands and other agents, chosen with
+`--agent` or `sandbox.agent`, run unchanged. `command cplt`, `command copilot`
+and `command claude` skip the wrappers.
+
 ## Agent skills
 
 Skills authored in this repository live under `agents/skills/`.

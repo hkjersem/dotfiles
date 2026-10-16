@@ -43,3 +43,7 @@ if [ -d "$HOME/.local/bin" ]; then
     *) export PATH="$HOME/.local/bin:$PATH" ;;
   esac
 fi
+
+# Wraps copilot, claude and cplt only once PATH is complete, so installs in
+# ~/.local/bin are wrapped too.
+source ~/.zsh_conf.d/agent-sessions.zsh
