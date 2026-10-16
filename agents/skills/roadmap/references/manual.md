@@ -157,6 +157,11 @@ Run the bundled script from the repository root:
 | `ready` | Show what is due, what is in progress and which committed items can start |
 | `archive <slug>` | Move a done or dropped brief into the archive, rewrite links to and from it across the repository's Markdown, sync |
 
+Create an item only when the owner asks, or when work is being deferred and
+should not be lost. Implementing something directly needs no item. If the work
+matches an existing item, update that item; otherwise leave the roadmap alone
+and at most mention a follow-up worth recording.
+
 - **Add:** write the brief as `idea` unless the owner has said they will do it,
   then sync. Do not ask where it ranks. A thought not yet worth a brief goes
   under Ideas as a one-liner with its entry condition.

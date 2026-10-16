@@ -24,5 +24,7 @@ Classify the repository's roadmap first, then read only what applies.
 
 In every case: listing an item on a roadmap does not authorise implementing it,
 and decisions about commitment, acceptance and dropping belong to the owner.
+Do not add roadmap items for work you are simply asked to do; add one only
+when the owner asks or deferred work would otherwise be lost.
 Asked what to do next, present the open options briefly and let the owner
 choose; do not invent a ranking the roadmap does not have.

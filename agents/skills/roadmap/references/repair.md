@@ -52,7 +52,10 @@ In this skill's layout only:
 Anything that removes content or changes what the roadmap commits to:
 
 - Marking items done or dropped without recorded acceptance, including items
-  that look shipped from the code.
+  that look shipped from the code. In another format, judge "done" by that
+  roadmap's own completion rule (for example "acceptance checks pass") and say,
+  per item, what that rule still lacks; ask for owner approval only where the
+  rule requires it or the record is unclear.
 - Deleting ideas, notes or history; splitting or merging items.
 - Changing commitment (`idea` to `planned`), readiness or parking.
 - Mapping ambiguous statuses ("parked, likely delete", "partly done"). For
