@@ -64,9 +64,13 @@ class RoadmapScriptTests(unittest.TestCase):
         self.write("roadmap/open.md", brief("title: Open\nstatus: planned\nkind: debt"))
         self.write("roadmap/parked.md", brief("title: Parked\nstatus: ready\nwhen: after release"))
         self.write("roadmap/idea.md", brief("title: Idea\nstatus: idea"))
+        self.write("roadmap/archive/base.md", brief("title: Base\nstatus: done", "[Roadmap](../../ROADMAP.md)\n"))
+        self.write("roadmap/after.md", brief("title: After\nstatus: planned\ndepends_on: [base, open]"))
         self.assertEqual(self.run_script("sync").returncode, 0)
 
         block = self.block()
+        self.assertIn("[After](roadmap/after.md) · planned · after: open\n", block,
+                      "only unfinished dependencies are shown")
         now, rest = block.split("## Next")
         nxt, later = rest.split("## Later")
         self.assertIn("[Live](roadmap/live.md) · active · **blocked:** waiting on key", now)

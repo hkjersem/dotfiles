@@ -22,7 +22,7 @@ import datetime
 import os
 import re
 import sys
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Set, Tuple, Union
 
 START = "<!-- roadmap:start -->"
 END = "<!-- roadmap:end -->"
@@ -258,14 +258,15 @@ def posix_rel(target: str, start_dir: str) -> str:
     return os.path.relpath(target, start_dir).replace(os.sep, "/")
 
 
-def entry(brief: Brief, index_path: str) -> str:
+def entry(brief: Brief, index_path: str, done: Set[str]) -> str:
     parts = [f"[{brief.title}]({posix_rel(brief.path, os.path.dirname(index_path))})", brief.status]
     if brief.get("kind") and brief.get("kind") != "feature":
         parts.append(brief.get("kind"))
     if brief.get("summary"):
         parts.append(brief.get("summary"))
-    if brief.depends_on:
-        parts.append("after: " + ", ".join(brief.depends_on))
+    pending = [d for d in brief.depends_on if d not in done]
+    if pending:
+        parts.append("after: " + ", ".join(pending))
     if brief.routine and brief.get("every"):
         parts.append("every " + brief.get("every"))
     if brief.get("due") or (brief.routine and brief.get("last_done")):
@@ -306,16 +307,17 @@ def plan(briefs: List[Brief]) -> Tuple[List[Brief], List[Brief], List[Brief], Li
 
 def render(index_path: str, briefs: List[Brief]) -> str:
     now, nxt, routines, later = plan(briefs)
+    done = {b.slug for b in briefs if b.valid and b.status == "done"}
     out = ["<!-- Generated from brief front matter by the roadmap skill;",
            "     edits here are overwritten on sync. -->", "", "## Now", ""]
-    out += [f"- {entry(b, index_path)}" for b in now] or ["_Nothing in progress._"]
+    out += [f"- {entry(b, index_path, done)}" for b in now] or ["_Nothing in progress._"]
     out += ["", "## Next", ""]
-    out += [f"- {entry(b, index_path)}" for b in nxt] or ["_Nothing committed._"]
+    out += [f"- {entry(b, index_path, done)}" for b in nxt] or ["_Nothing committed._"]
     if routines:
         out += ["", "## Routines", ""]
-        out += [f"- {entry(b, index_path)}" for b in routines]
+        out += [f"- {entry(b, index_path, done)}" for b in routines]
     out += ["", "## Later", ""]
-    out += [f"- {entry(b, index_path)}" + (f" · when: {b.get('when')}" if b.get("when") else "")
+    out += [f"- {entry(b, index_path, done)}" + (f" · when: {b.get('when')}" if b.get("when") else "")
             for b in later] or ["_Nothing here._"]
     return "\n" + "\n".join(out) + "\n"
 
