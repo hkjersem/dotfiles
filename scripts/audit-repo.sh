@@ -129,7 +129,7 @@ else
 fi
 
 AUDIT_TMP=$(mktemp -d) || exit 1
-trap 'rm -f "$AUDIT_TMP/tracked" "$AUDIT_TMP/stderr" "$AUDIT_TMP/sizes" "$AUDIT_TMP/status" "$AUDIT_TMP/upstream-ids"; rm -rf "$AUDIT_TMP/merge-objects"; rmdir "$AUDIT_TMP"' EXIT
+trap 'rm -f "$AUDIT_TMP/tracked" "$AUDIT_TMP/stderr" "$AUDIT_TMP/sizes" "$AUDIT_TMP/status" "$AUDIT_TMP/upstream-ids" "$AUDIT_TMP/doc-files.z" "$AUDIT_TMP/doc-files" "$AUDIT_TMP/doc-paths"; rm -rf "$AUDIT_TMP/merge-objects"; rmdir "$AUDIT_TMP"' EXIT
 
 command_error() {
   local line
@@ -759,7 +759,113 @@ fi
 section_end
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 5. TEST SIGNALS
+# 5. DOCUMENTATION FILES
+# ══════════════════════════════════════════════════════════════════════════════
+section_start "Documentation Files"
+
+# macOS ignores case, so a misspelled name or link works locally and fails on
+# Linux, CI and Git hosts; agents may also read a lowercase agents.md as AGENTS.md.
+# Untracked files are included so mistakes surface before they are committed.
+DOC_FINDINGS=0
+if ! git ls-files -z -co --exclude-standard > "$AUDIT_TMP/doc-files.z"; then
+  fail "Could not list files for documentation checks"
+else
+  tr '\0' '\n' < "$AUDIT_TMP/doc-files.z" > "$AUDIT_TMP/doc-files"
+  awk -F/ '{ print; p = $1; for (i = 2; i <= NF; i++) { print p; p = p "/" $i } }' \
+    "$AUDIT_TMP/doc-files" | sort -u > "$AUDIT_TMP/doc-paths"
+
+  while IFS=$'\t' read -r path message; do
+    if [[ "$path" == DESIGN-TOKENS ]]; then
+      if ! awk 'NR == 1 && $0 != "---" { exit 1 } NR > 1 && $0 == "---" { exit 1 }
+                NR > 1 && /^(colors|typography|rounded|spacing|components):/ { found = 1; exit }
+                END { exit !found }' "./$message"; then
+        warn "$(printf '%q' "$message") has no design tokens — agents read DESIGN.md as a visual design system; use another name (e.g. docs/architecture.md) for other design documents"
+        DOC_FINDINGS=$((DOC_FINDINGS + 1))
+      fi
+      continue
+    fi
+    warn "$(printf '%q' "$path"): $message"
+    DOC_FINDINGS=$((DOC_FINDINGS + 1))
+  done < <(awk '
+    {
+      path = $0; n = split(path, part, "/"); base = part[n]; b = tolower(base)
+      dir = n > 1 ? substr(path, 1, length(path) - length(base) - 1) : ""
+      seen[tolower(path)] = seen[tolower(path)] ? seen[tolower(path)] "\t" path : path
+      dot = index(b, "."); stem = dot ? substr(b, 1, dot - 1) : b; ext = dot ? substr(b, dot) : ""
+      want = toupper(stem) ext
+      if (base == "DESIGN.md") print "DESIGN-TOKENS\t" path
+      if (b == "agents.md" || b == "claude.md" || b == "gemini.md") {
+        if (base != want) print path "\tagents that look for " want " here may read this file on macOS but not elsewhere; rename it to " want " if it holds instructions, otherwise choose another name"
+      } else if (b == "readme.md") {
+        if (base != want) print path "\tname it README.md; Git hosts and tools expect that spelling"
+      } else if (b == "copilot-instructions.md") {
+        if (path != ".github/copilot-instructions.md") print path "\tCopilot reads only .github/copilot-instructions.md"
+      } else if (dir == "" && b == "design.md") {
+        if (base != want) print path "\tagents read DESIGN.md as a visual design system and on macOS would read this file; use DESIGN.md only for design tokens, otherwise another name (e.g. docs/architecture.md)"
+      } else if ((dir == "" && b ~ /^(licen[cs]e(\.(md|txt))?|changelog\.md)$/) ||
+                 ((dir == "" || dir == ".github") && b ~ /^(contributing|security|code_of_conduct)\.md$/)) {
+        if (base != want) print path "\tname it " want "; Git hosts and tools expect that spelling"
+      }
+    }
+    END {
+      for (k in seen) if ((n = split(seen[k], same, "\t")) > 1) {
+        others = same[2]; for (i = 3; i <= n; i++) others = others ", " same[i]
+        print same[1] "\tdiffers only in case from " others "; only one survives a macOS checkout"
+      }
+    }
+  ' "$AUDIT_TMP/doc-files" | sort)
+
+  MD_FILES=()
+  while IFS= read -r file; do
+    [[ "$file" == *.md && -f "./$file" && ! -L "./$file" ]] && MD_FILES+=("$file")
+  done < "$AUDIT_TMP/doc-files"
+  if [[ ${#MD_FILES[@]} -gt 0 ]]; then
+    while IFS=$'\t' read -r file target actual; do
+      warn "$(printf '%q' "$file"): link to $target differs in case from $actual"
+      DOC_FINDINGS=$((DOC_FINDINGS + 1))
+    done < <(awk '
+      function norm(p,   n, part, out, k, i, s) {
+        n = split(p, part, "/"); k = 0
+        for (i = 1; i <= n; i++) {
+          if (part[i] == "" || part[i] == ".") continue
+          if (part[i] == "..") { if (k == 0) return ""; k--; continue }
+          out[++k] = part[i]
+        }
+        if (k == 0) return ""
+        s = out[1]; for (i = 2; i <= k; i++) s = s "/" out[i]
+        return s
+      }
+      function check(t,   p) {
+        sub(/^</, "", t); sub(/>$/, "", t)
+        if (t ~ /^#/ || t ~ /^[A-Za-z][A-Za-z0-9+.-]*:/ || t ~ /^\//) return
+        sub(/[#?].*$/, "", t); gsub(/%20/, " ", t)
+        if (t == "") return
+        p = norm((dir == "" ? "" : dir "/") t)
+        if (p == "" || p in exact) return
+        if (tolower(p) in lower) print FILENAME "\t" t "\t" lower[tolower(p)]
+      }
+      NR == FNR { exact[$0] = 1; lower[tolower($0)] = $0; next }
+      FNR == 1 { fence = 0; dir = FILENAME; if (!sub(/\/[^\/]*$/, "", dir)) dir = "" }
+      /^[ \t]*(```|~~~)/ { fence = !fence; next }
+      fence { next }
+      {
+        line = $0; gsub(/`[^`]*`/, "", line)
+        if (match(line, /^[ \t]*\[[^\]]+\]:[ \t]*[^ \t]+/)) {
+          t = substr(line, RSTART, RLENGTH); sub(/^[ \t]*\[[^\]]+\]:[ \t]*/, "", t); check(t)
+        }
+        while (match(line, /\]\([^) \t]+/)) {
+          check(substr(line, RSTART + 2, RLENGTH - 2)); line = substr(line, RSTART + RLENGTH)
+        }
+      }
+    ' "$AUDIT_TMP/doc-paths" "${MD_FILES[@]}" | sort)
+  fi
+  [[ $DOC_FINDINGS -eq 0 ]] && ok "Conventional file names, placement and Markdown link casing look right"
+fi
+
+section_end
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 6. TEST SIGNALS
 # ══════════════════════════════════════════════════════════════════════════════
 section_start "Test Signals"
 
@@ -838,7 +944,7 @@ fi
 section_end
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 6. BUILD SIGNALS
+# 7. BUILD SIGNALS
 # ══════════════════════════════════════════════════════════════════════════════
 section_start "Build Signals"
 

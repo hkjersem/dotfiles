@@ -180,6 +180,41 @@ class AuditRepoTests(unittest.TestCase):
         self.assertIn("symlink", result.stdout)
         self.assertEqual(outside.read_text(), "TODO external\n" * 900)
 
+    def test_documentation_names_placement_and_link_casing(self):
+        self.state.update(commits=[], authors="")
+        self.write("AGENTS.md", "# Rules\n")
+        self.write("LICENSE", "MIT\n")
+        self.write(".github/copilot-instructions.md", "# Copilot\n")
+        self.write("docs/security.md", "# Threat model\n")
+        self.write("docs/guide.md", "# Guide\n")
+        self.write("DESIGN.md", "---\nname: Brand\ncolors:\n  primary: \"#000\"\n---\n# Design\n")
+        result = self.run_audit("--skip-security")
+        self.assertIn("Conventional file names, placement and Markdown link casing look right", result.stdout)
+
+        self.write("docs/agents.md", "# Agent API\n")
+        self.write("pkg/Readme.md", "# Package\n")
+        self.write("changelog.md", "# Changes\n")
+        self.write("copilot-instructions.md", "# Misplaced\n")
+        self.write("app/DESIGN.md", "# Architecture\n\nNo tokens.\n")
+        self.write("README.md", "[ok](docs/guide.md) [bad](docs/Guide.md#top) [gone](docs/missing.md)\n"
+                   "[ref]: ./DOCS/guide.md\n`[code](docs/GUIDE.md)`\n```\n[fenced](docs/GUIDE.md)\n```\n"
+                   "[web](https://example.com/Docs/Guide.md)\n")
+        result = self.run_audit("--skip-security")
+        out = result.stdout
+        self.assertNotIn("look right", out)
+        self.assertIn("docs/agents.md: agents that look for AGENTS.md here", out)
+        self.assertIn("pkg/Readme.md: name it README.md", out)
+        self.assertIn("changelog.md: name it CHANGELOG.md", out)
+        self.assertIn("copilot-instructions.md: Copilot reads only .github/copilot-instructions.md", out)
+        self.assertIn("app/DESIGN.md has no design tokens", out)
+        self.assertEqual(out.count("has no design tokens"), 1)
+        self.assertIn("README.md: link to docs/Guide.md differs in case from docs/guide.md", out)
+        self.assertIn("README.md: link to ./DOCS/guide.md differs in case from docs/guide.md", out)
+        self.assertNotIn("GUIDE.md", out)
+        self.assertNotIn("missing.md", out)
+        self.assertNotIn("security.md", out)
+        self.assertEqual(out.count("differs in case"), 2)
+
     def test_audit_failures_and_unknown_shapes_never_report_clean(self):
         self.package()
         cases = [
