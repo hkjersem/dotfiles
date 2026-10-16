@@ -22,6 +22,8 @@ precedence for its conventions.
 - A test must fail when the behavior it covers breaks. If it would still pass
   with every function it calls returning nothing, rewrite its assertions or
   delete it.
+- When finishing a change, report which checks you ran, what they verified,
+  and what remains unverified.
 
 ## Sandbox
 

@@ -10,6 +10,7 @@ anthropics/skills|skill-creator
 
 # disabled: googlechrome/modern-web-guidance|modern-web-guidance
 
+mattpocock/skills|diagnosing-bugs
 mattpocock/skills|grill-me
 mattpocock/skills|prototype
 mattpocock/skills|tdd
