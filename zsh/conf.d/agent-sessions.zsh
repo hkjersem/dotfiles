@@ -297,12 +297,8 @@ _agent_session_resume() {
   rm -f -- "$_agent_sessions_dir"/*(N.m+7)
   for f in "$_agent_sessions_dir"/^*.*(N.Om); do
     cwd= launcher= line= pid= started= id= agent=
-    # Records from before the session ID and agent lines are named after a
-    # Copilot session.
     { IFS= read -r cwd; IFS= read -r launcher; IFS= read -r line; IFS= read -r pid
-      IFS= read -r started && IFS= read -r id || id=${f:t}
-      IFS= read -r agent } < "$f"
-    : ${agent:=copilot}
+      IFS= read -r started; IFS= read -r id; IFS= read -r agent } < "$f"
     [[ $cwd == "${PWD:A}" ]] || continue
     [[ $pid == <-> ]] && kill -0 $pid 2>/dev/null &&
       [[ -z $started || $started == "$(_agent_session_started $pid)" ]] && continue
