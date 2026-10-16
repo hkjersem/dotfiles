@@ -80,7 +80,10 @@ Present the plan before implementing:
 
 - **Risks covered**: for each, the expected behavior and its source, the check,
   its level, the public interface it tests through, and whether it is new,
-  extended, or existing.
+  extended, or existing. Also name the observable result that would expose a
+  violation and how you will judge it against the expected behavior. Prefer a
+  reference independent of the implementation, such as a published contract, a
+  known example, or a consumer's requirement.
 - **Not tested**: risks you chose not to cover, and why.
 - **Assumptions**: anything you inferred rather than found.
 
