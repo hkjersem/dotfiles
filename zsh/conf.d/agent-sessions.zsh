@@ -275,6 +275,19 @@ if (( $+commands[cplt] )); then
   }
 fi
 
+# VS Code can revive terminals it never shows. Those keep its unsized default
+# of 80x30, so leave the session for a terminal that gets a real size.
+_agent_session_displayed() {
+  emulate -L zsh
+  [[ $TERM_PROGRAM == vscode ]] || return 0
+  local i
+  for i in {1..20}; do
+    [[ $(command stty size 2>/dev/null) == '30 80' ]] || return 0
+    sleep 0.1
+  done
+  return 1
+}
+
 _agent_session_resume() {
   emulate -L zsh -o extended_glob
   add-zsh-hook -d precmd _agent_session_resume
@@ -295,6 +308,7 @@ _agent_session_resume() {
       [[ -z $started || $started == "$(_agent_session_started $pid)" ]] && continue
     [[ $launcher == (copilot|claude|cplt) && $agent == (copilot|claude) ]] &&
       (( $+functions[$launcher] )) || continue
+    _agent_session_displayed || return
     claim=$f.$$
     command mv -- "$f" "$claim" 2>/dev/null || continue
     [[ -f $f.current ]] && IFS= read -r id < "$f.current"

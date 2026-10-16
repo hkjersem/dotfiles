@@ -310,7 +310,9 @@ terminal opened in the same directory resumes it. Switching session with
 terminal closed comes back, even if you only resumed it without writing
 anything. A session you never wrote to cannot be resumed. Several terminals
 in one repository each get one session back, oldest first; which tab gets
-which is not guaranteed. Exiting the agent normally means it is not resumed,
+which is not guaranteed. VS Code can revive terminals it never shows, so
+there a session only resumes in a terminal that gets a real size within 2
+seconds. Exiting the agent normally means it is not resumed,
 and sessions older than 7 days are dropped. `CPLT_NO_RESUME=1` turns resuming
 off.
 

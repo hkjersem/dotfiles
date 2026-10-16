@@ -1,5 +1,6 @@
 """Tests for the copilot/cplt wrappers and session resuming in zsh/conf.d/agent-sessions.zsh."""
 
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -8,10 +9,16 @@ import select
 import shutil
 import signal
 import subprocess
+import struct
 import tempfile
+import termios
 import time
 import unittest
 import uuid
+
+
+def set_size(fd, rows, cols):
+    fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
 
 
 REPO = Path(__file__).resolve().parents[2]
@@ -172,11 +179,13 @@ class AgentSessionsTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         return result
 
-    def interactive_shell(self, cwd, leader=None, **env):
+    def interactive_shell(self, cwd, leader=None, size=None, **env):
         """With leader, zsh runs under that sh command, as iTerm2 runs it under login."""
         pid, fd = pty.fork()
         if pid == 0:
             os.chdir(cwd)
+            if size:
+                set_size(0, *size)
             if leader:
                 os.execve("/bin/sh", ["sh", "-c", f"{leader} /bin/zsh -d -i; :"], {**self.env, **env})
             os.execve("/bin/zsh", ["zsh", "-d", "-i"], {**self.env, **env})
@@ -537,6 +546,23 @@ class AgentSessionsTest(unittest.TestCase):
         self.assertEqual(calls[0][:2], ["copilot", "--session-id"])
         self.assertEqual(calls[1], ["cplt", "--agent", "claude", "--", "--dangerously-skip-permissions",
                                     "--resume", ID_A])
+
+    def test_vscode_resumes_only_in_a_terminal_it_displays(self):
+        self.write_marker(ID_A, self.project)
+        pid, fd = self.interactive_shell(self.project, size=(30, 80), TERM_PROGRAM="vscode")
+        deadline = time.time() + 3
+        self.drain(fd, lambda _: time.time() > deadline)
+        self.assertEqual(self.calls(), [])
+        self.assertEqual(self.recorded(), [ID_A])
+        self.exit_shell(pid, fd)
+
+        pid, fd = self.interactive_shell(self.project, size=(30, 80), TERM_PROGRAM="vscode")
+        deadline = time.time() + 0.5
+        self.drain(fd, lambda _: time.time() > deadline)
+        set_size(fd, 43, 106)
+        self.wait_for_calls(fd, 1)
+        self.exit_shell(pid, fd)
+        self.assertEqual(self.args()[0][-1], f"--resume={ID_A}")
 
     def test_resume_is_skipped_when_disabled_or_stale(self):
         marker = self.write_marker(ID_A, self.project)
