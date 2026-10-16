@@ -213,6 +213,35 @@ class RoadmapScriptTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("roadmap markers", result.stdout)
 
+    def test_case_mismatches_are_reported_on_case_insensitive_disks(self):
+        (self.root / "probe").write_text("")
+        if not (self.root / "PROBE").exists():
+            self.skipTest("file system is case-sensitive; mismatched names are simply missing")
+        (self.root / "probe").unlink()
+
+        self.write("roadmap.md", "# Plan\n\n- [ ] Something\n")
+        result = self.run_script("check")
+        self.assertEqual(result.returncode, 2)
+        self.assertTrue(result.stdout.startswith("roadmap.md uses a different roadmap format"), result.stdout)
+
+        (self.root / "roadmap.md").unlink()
+        self.init()
+        (self.root / "ROADMAP.md").rename(self.root / "Roadmap.md")
+        self.write("roadmap/item.md", brief("""
+            title: Item
+            status: planned
+            summary: Link with the wrong case.
+        """, "[Roadmap](../ROADMAP.md)\n"))
+        self.assertIn("Updated Roadmap.md.", self.run_script("sync").stdout)
+        result = self.run_script("check")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("index is spelled Roadmap.md, not ROADMAP.md", result.stdout)
+        self.assertIn("link to ../ROADMAP.md differs in case from Roadmap.md", result.stdout)
+
+        result = self.run_script("check", "--index", "Roadmap.md")
+        self.assertNotIn("index is spelled", result.stdout)
+        self.assertIn("differs in case", result.stdout)
+
     def test_routines_and_due_dates(self):
         self.init()
         self.write("roadmap/review.md", brief(

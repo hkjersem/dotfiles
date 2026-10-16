@@ -412,9 +412,14 @@ def is_local(target: str) -> bool:
 def check_links(path: str, text: str, root: str, report: Report) -> None:
     base = os.path.dirname(path)
     for target in link_targets(text):
-        if not os.path.exists(os.path.normpath(os.path.join(base, target.split("#", 1)[0]))):
+        wanted = os.path.normpath(os.path.join(base, target.split("#", 1)[0]))
+        actual = disk_case(wanted, root)
+        if actual is None:
             report.error(rel(path, root), f"broken link to {target}",
                          "point it at the moved or renamed file, or remove it if the target is gone")
+        elif actual != os.path.normpath(os.path.abspath(wanted)):
+            report.error(rel(path, root), f"link to {target} differs in case from {rel(actual, root)}",
+                         "match the casing on disk; the link breaks on case-sensitive systems")
 
 
 def markdown_files(root: str) -> List[str]:
@@ -555,6 +560,39 @@ def paths(args: argparse.Namespace) -> Tuple[str, str, str]:
     return root, os.path.join(root, args.index), os.path.join(root, args.dir)
 
 
+def disk_case(path: str, root: str) -> Optional[str]:
+    """`path` spelled as on disk, or None when missing. macOS accepts any
+    casing, but Git, Linux and web hosts do not."""
+    path, root = os.path.normpath(os.path.abspath(path)), os.path.normpath(root)
+    if os.path.relpath(path, root).startswith(".."):
+        return path if os.path.exists(path) else None
+    current = root
+    for part in os.path.relpath(path, root).split(os.sep):
+        if part == ".":
+            continue
+        try:
+            names = os.listdir(current)
+        except OSError:
+            return path if os.path.exists(path) else None
+        match = part if part in names else next((n for n in names if n.lower() == part.lower()), None)
+        if match is None:
+            return None
+        current = os.path.join(current, match)
+    return current
+
+
+def shown(path: str, root: str) -> str:
+    return rel(disk_case(path, root) or path, root)
+
+
+def check_case(path: str, root: str, what: str, option: str, report: Report) -> None:
+    actual = disk_case(path, root)
+    if actual and actual != os.path.normpath(os.path.abspath(path)):
+        report.error(rel(actual, root), f"{what} is spelled {rel(actual, root)}, not {rel(path, root)}",
+                     f"rename it with `git mv`, or pass {option} {rel(actual, root)}; "
+                     "case-sensitive systems will not find it")
+
+
 def read(path: str) -> str:
     with open(path, encoding="utf-8") as handle:
         return handle.read()
@@ -605,7 +643,7 @@ def has_status_front_matter(text: str) -> bool:
 def cmd_init(args: argparse.Namespace) -> int:
     root, index_path, brief_dir = paths(args)
     if os.path.exists(index_path):
-        print(f"{rel(index_path, root)} already exists; not overwriting it. "
+        print(f"{shown(index_path, root)} already exists; not overwriting it. "
               "Adapt the existing roadmap instead (see the skill's repair guidance).")
         return 1
     archive = os.path.join(brief_dir, "archive")
@@ -621,12 +659,12 @@ def cmd_init(args: argparse.Namespace) -> int:
 def cmd_sync(args: argparse.Namespace) -> int:
     root, index_path, brief_dir = paths(args)
     if not os.path.exists(index_path):
-        print(f"{rel(index_path, root)} not found; run `init` or pass --index.")
+        print(f"{shown(index_path, root)} not found; run `init` or pass --index.")
         return 1
     text = read(index_path)
     parts = split_index(text)
     if parts is None:
-        print(f"{rel(index_path, root)} needs exactly one {START} and one {END}, in that order. "
+        print(f"{shown(index_path, root)} needs exactly one {START} and one {END}, in that order. "
               "Place them where the generated lists belong, then sync again.")
         return 1
     report = Report()
@@ -635,9 +673,9 @@ def cmd_sync(args: argparse.Namespace) -> int:
     new = head + render(index_path, briefs) + tail
     if new != text:
         write(index_path, new)
-        print(f"Updated {rel(index_path, root)}.")
+        print(f"Updated {shown(index_path, root)}.")
     else:
-        print(f"{rel(index_path, root)} is up to date.")
+        print(f"{shown(index_path, root)} is up to date.")
     for line in report.errors:
         print("error: " + line)
     return 1 if report.errors else 0
@@ -649,6 +687,8 @@ def cmd_check(args: argparse.Namespace) -> int:
     if not os.path.isdir(brief_dir):
         report.error(rel(brief_dir, root), "brief directory not found",
                      "run `init`, or pass --dir for a roadmap kept elsewhere")
+    check_case(brief_dir, root, "brief directory", "--dir", report)
+    check_case(index_path, root, "index", "--index", report)
     briefs = load_briefs(brief_dir, report, root, index_path)
     if not os.path.exists(index_path):
         report.error(rel(index_path, root), "index not found",
@@ -772,7 +812,7 @@ def cmd_archive(args: argparse.Namespace) -> int:
         print(f"{rel(source, root)} not found.")
         return 1
     if not os.path.exists(index_path) or split_index(read(index_path)) is None:
-        print(f"{rel(index_path, root)} is missing or lacks one pair of roadmap markers; "
+        print(f"{shown(index_path, root)} is missing or lacks one pair of roadmap markers; "
               "fix that first so the index can be regenerated after the move.")
         return 1
     text = read(source)
@@ -843,7 +883,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         parser.error("archive needs the slug of the brief")
     if args.command != "init" and foreign_layout(args):
         root, index_path, brief_dir = paths(args)
-        print(f"{rel(index_path, root)} and {rel(brief_dir, root)}/ use a different roadmap format "
+        found = [shown(p, root) + suffix for p, suffix in ((index_path, ""), (brief_dir, "/"))
+                 if os.path.exists(p)]
+        print(f"{' and '.join(found)} {'uses' if len(found) == 1 else 'use'} a different roadmap format "
               "(no generated-list markers and no brief front matter). This script only handles "
               "its own layout: work within the existing format, and migrate only if the owner asks.")
         return 2
