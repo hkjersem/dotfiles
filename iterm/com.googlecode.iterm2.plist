@@ -285,7 +285,7 @@
 	<real>1</real>
 	<key>GlobalKeyMap</key>
 	<dict>
-		<key>0x19-0x60000-0x30</key>
+		<key>0x19-0x60000-0x30-0x1</key>
 		<dict>
 			<key>Action</key>
 			<integer>2</integer>
@@ -298,7 +298,7 @@
 			<key>Version</key>
 			<integer>2</integer>
 		</dict>
-		<key>0x9-0x40000-0x30</key>
+		<key>0x9-0x40000-0x30-0x1</key>
 		<dict>
 			<key>Action</key>
 			<integer>0</integer>
