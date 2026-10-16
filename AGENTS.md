@@ -25,7 +25,7 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 | `scripts/setup-git-local.sh` | Interactive setup for machine-local git identity — generates `~/.gitconfig_local`, `~/.gitconfig_local_work`, `~/.gitconfig_local_personal` (all untracked). Called by `applications.sh` during install. |
 | `scripts/install-zsh-plugins.sh` | Clone or pull oh-my-zsh and custom plugins — called by both `applications.sh` and `update.sh` |
 | `scripts/audit.sh` | Read-only drift detection — compares repo declarations vs installed state |
-| `scripts/audit-repo.sh` | Repository triage — Git, file, test, and build indicators; extra checks for a root `package.json`. Aliased as `audit-repo`. npm/pnpm audit and outdated queries can use the network; `--skip-security` skips only audit. See [README](README.md#repository-triage). |
+| `scripts/audit-repo.sh` | Repository triage — Git, stale-branch, file, test, and build indicators; extra checks for a root `package.json`. Aliased as `audit-repo`. npm/pnpm audit and outdated queries can use the network; `--skip-security` skips only audit. See [README](README.md#repository-triage). |
 | `scripts/audit-skills.sh` | Skills drift detection — read-only under `audit.sh`; explicit repair flags preserve real content and foreign links. `--clean-stale` removes only verified managed links and empty skills-only agent directories. See [README](README.md#agent-skills). |
 | `agents/AGENTS.md` | Personal global agent instructions — symlinked into each installed tool's global instruction file |
 | `scripts/sync-agent-instructions.sh` | Links `agents/AGENTS.md` for Claude Code, Codex and Copilot CLI when their home directory exists; existing content is a conflict and never overwritten. Run by setup and update, checked by `audit.sh` |
@@ -53,7 +53,9 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 | `scripts/package-manager/npm-update.sh` | npm wrapper — workspace detection, `npm outdated`, augmentation, reads cooldown from project and global `~/.npmrc` |
 | `scripts/package-manager/bun-update.sh` | bun wrapper — `bun outdated`, augmentation, reads cooldown from `bunfig.toml` or `~/.bunfig.toml` |
 | `scripts/tests/` | Isolated shell-script regression tests, plus tests for scripts shipped by repo-authored skills — run with `python3 -B -m unittest discover -s scripts/tests` |
-| `scripts/lib/clean-targets.sh` | Shared generated-artifact lists and matching patterns for cleanup, clean-copy, and repository-audit scripts |
+| `scripts/lib/clean-targets.sh` | Shared generated-artifact lists and matching patterns for cleanup, clean-copy, repository-audit, and branch-pruning scripts |
+| `scripts/prune-branches.sh` | Delete local branches whose remote branch was deleted once their commits are confirmed on a remote, removing clean linked worktrees wherever they live. Dry run by default; `--apply` deletes; never touches never-pushed branches or repositories without a remote. Works in one repository or recursively. Aliased as `prune_branches`. See [README](README.md#prune-stale-branches). |
+| `scripts/lib/stale-branches.sh` | Shared stale-branch and worktree classification for `prune-branches.sh` and the read-only section in `audit-repo.sh` |
 | `scripts/wipe-clean.sh` | Delete all known build artifacts and dependency folders from the current directory. Aliased as `wipe_clean` |
 | `scripts/copy-clean.sh` | Clone-copy or ZIP a source directory, defaulting to the current directory, excluding the same artifacts as `wipe_clean`; supports `--ignore-git` and `--keep-name`. Aliased as `copy_clean` |
 | `scripts/lib/pm-utils.sh` | Shared package-manager duration and configuration parsing helpers, also used by repository audit |

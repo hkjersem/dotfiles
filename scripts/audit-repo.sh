@@ -21,6 +21,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/pm-utils.sh" || exit 1
 # shellcheck source=lib/clean-targets.sh
 source "$SCRIPT_DIR/lib/clean-targets.sh" || exit 1
+# shellcheck source=lib/stale-branches.sh
+source "$SCRIPT_DIR/lib/stale-branches.sh" || exit 1
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
 
@@ -127,7 +129,7 @@ else
 fi
 
 AUDIT_TMP=$(mktemp -d) || exit 1
-trap 'rm -f "$AUDIT_TMP/tracked" "$AUDIT_TMP/stderr" "$AUDIT_TMP/sizes"; rmdir "$AUDIT_TMP"' EXIT
+trap 'rm -f "$AUDIT_TMP/tracked" "$AUDIT_TMP/stderr" "$AUDIT_TMP/sizes" "$AUDIT_TMP/status" "$AUDIT_TMP/upstream-ids"; rm -rf "$AUDIT_TMP/merge-objects"; rmdir "$AUDIT_TMP"' EXIT
 
 command_error() {
   local line
@@ -393,6 +395,56 @@ else
   else
     info "No readable HEAD — Git history checks skipped"
   fi
+fi
+
+section_end
+
+# ── Stale branches and worktrees (read-only; uses the last fetch) ────────────
+section_start "Stale Branches & Worktrees"
+
+SB_TMP=$AUDIT_TMP
+SB_INVOKING_TOP=$(pwd -P)
+if ! SB_GIT_DIR=$(sb_common_dir "$GIT_ROOT"); then
+  fail "Could not resolve the Git directory — stale branch check skipped"
+elif ! sb_has_remote; then
+  info "No remote — stale branch check skipped"
+else
+  STALE_PLAN=$(sb_classify "$SB_GIT_DIR/$SB_SNAPSHOT_FILE")
+  stale_rows() {
+    local kind name sha detail wt
+    while IFS="$SB_SEP" read -r kind name sha detail wt; do
+      [[ "$kind" == "$1" ]] || continue
+      [[ "$name" == /* ]] && name=$(sb_short_path "$name")
+      row "${name} — ${detail}"
+      [[ -n "$wt" ]] && row "  └ worktree $(sb_short_path "$wt")"
+    done <<< "$STALE_PLAN"
+  }
+  stale_count() { printf '%s\n' "$STALE_PLAN" | awk -F "$SB_SEP" -v k="$1" '$1 == k { n++ } END { print n + 0 }'; }
+  STALE_DELETE=$(stale_count delete)
+  STALE_BLOCKED=$(stale_count blocked)
+  STALE_REVIEW=$(( $(stale_count review) + $(stale_count unverified) ))
+  STALE_HINTS=$(stale_count hint)
+  if [[ "$STALE_DELETE" -gt 0 ]]; then
+    warn "${STALE_DELETE} branch(es) whose remote branch was deleted can be pruned (run prune_branches)"
+    stale_rows delete
+  fi
+  if [[ "$STALE_BLOCKED" -gt 0 ]]; then
+    warn "${STALE_BLOCKED} stale branch(es) kept by a worktree with local changes or a checkout"
+    stale_rows blocked
+  fi
+  if [[ "$STALE_REVIEW" -gt 0 ]]; then
+    warn "${STALE_REVIEW} branch(es) lost their remote branch but have commits not confirmed on a remote"
+    stale_rows review
+    stale_rows unverified
+  fi
+  if [[ $((STALE_DELETE + STALE_BLOCKED + STALE_REVIEW)) -eq 0 ]]; then
+    ok "No branches with a deleted remote branch"
+  fi
+  if [[ "$STALE_HINTS" -gt 0 ]]; then
+    info "${STALE_HINTS} branch(es) or worktree(s) look stale but are kept"
+    stale_rows hint
+  fi
+  info "${DIM}Based on remote-tracking refs from the last fetch${RESET}"
 fi
 
 section_end

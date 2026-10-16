@@ -186,6 +186,10 @@ wipe() {
 # Usage: audit-repo [--dir PATH] [--since PERIOD] [--skip-security]
 audit-repo() { bash "$HOME/.dotfiles/scripts/audit-repo.sh" "$@"; }
 
+# Delete local branches whose remote branch was deleted, with their clean worktrees (dry run by default)
+# Usage: prune_branches [--apply [--yes]] [--no-fetch] [--depth N] [path]
+prune_branches() { bash "$HOME/.dotfiles/scripts/prune-branches.sh" "$@"; }
+
 # Delete all known build artifacts and dependency folders from the current directory.
 # Usage: wipe_clean
 wipe_clean() { bash "$HOME/.dotfiles/scripts/wipe-clean.sh" "$@"; }
