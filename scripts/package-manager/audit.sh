@@ -56,7 +56,8 @@ case "$pm" in
   bun)
     exec bun audit
     ;;
-  yarn)
-    exec yarn npm audit --fix --mode update-lockfile
+  *)
+    echo "pma: unsupported package manager: $pm" >&2
+    exit 1
     ;;
 esac
