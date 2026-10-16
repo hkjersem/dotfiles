@@ -233,7 +233,12 @@ and Markdown links whose case differs from the file. macOS ignores case, so
 these work locally but break on Linux and on Git hosts.
 
 Source-file statistics use tracked files, excluding known generated artifacts,
-symlinks, and missing files. With a root `package.json`, it also checks package metadata,
+symlinks, and missing files. `.env` files are never read by any check, since
+they may hold secrets. Files the audit has no permission to read are left out
+of the statistics with a note, but an unreadable documentation file fails the
+documentation check. A project is labelled a workspace only when
+`pnpm-workspace.yaml` or `package.json` `workspaces` lists packages. With a
+root `package.json`, it also checks package metadata,
 cooldowns, and JS/TS tooling; these checks require jq. npm and pnpm provide
 structured vulnerability and outdated-package results. Bun and other managers'
 audit/outdated results are not parsed by this tool.
@@ -251,12 +256,16 @@ can contact registries and write package-manager caches. `--skip-security`
 skips only the vulnerability query, not the outdated query.
 
 Findings are triage indicators, not a security verdict or measured test
-coverage. Ownership concentration may be expected in a solo project.
+coverage. Git-history signals (churn, ownership concentration, fix and
+firefighting commits) and missing conventionally named test files are warnings,
+since they suggest a closer look rather than prove a defect; ownership
+concentration is expected in a solo project.
 `--since` controls churn and fix/revert history; ownership uses all history,
 and velocity uses the last 12 complete calendar months, including inactive
 months. JSONC and inherited TypeScript settings are reported as unevaluated.
-Exit status is 1 for reported issues or operational failures, and 0 otherwise;
-warnings alone do not fail the command.
+Exit status is 1 for concrete issues (such as vulnerabilities or npm's
+always-failing placeholder `test` script) or checks that could not run, and 0
+otherwise; warnings alone do not fail the command.
 
 ## Testing
 

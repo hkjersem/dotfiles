@@ -129,7 +129,7 @@ else
 fi
 
 AUDIT_TMP=$(mktemp -d) || exit 1
-trap 'rm -f "$AUDIT_TMP/tracked" "$AUDIT_TMP/stderr" "$AUDIT_TMP/sizes" "$AUDIT_TMP/status" "$AUDIT_TMP/upstream-ids" "$AUDIT_TMP/doc-files.z" "$AUDIT_TMP/doc-files" "$AUDIT_TMP/doc-paths"; rm -rf "$AUDIT_TMP/merge-objects"; rmdir "$AUDIT_TMP"' EXIT
+trap 'rm -f "$AUDIT_TMP/tracked" "$AUDIT_TMP/stderr" "$AUDIT_TMP/sizes" "$AUDIT_TMP/status" "$AUDIT_TMP/upstream-ids" "$AUDIT_TMP/doc-files.z" "$AUDIT_TMP/doc-files" "$AUDIT_TMP/doc-paths" "$AUDIT_TMP/doc-links"; rm -rf "$AUDIT_TMP/merge-objects"; rmdir "$AUDIT_TMP"' EXIT
 
 command_error() {
   local line
@@ -174,9 +174,28 @@ LOCKFILES=()
 # Workspace detection — check common workspace formats across ecosystems
 WORKSPACE_INFO=""
 if $HAS_PACKAGE_JSON; then
-  # pnpm-workspace.yaml takes precedence; otherwise check package.json "workspaces" field
-  if [[ -f "pnpm-workspace.yaml" ]] || \
-     (command -v jq &>/dev/null && jq -e '.workspaces' package.json &>/dev/null 2>&1); then
+  # pnpm-workspace.yaml may hold only settings (cooldowns, overrides); it is a
+  # workspace only when it lists packages. Otherwise check package.json "workspaces".
+  if [[ -f "pnpm-workspace.yaml" ]] && awk '
+       function strip(t) { sub(/(^|[ \t])#.*$/, "", t); return t }
+       function flow(t,   i) {
+         if ((i = index(t, "]"))) { if (substr(t, 1, i - 1) ~ /[^ \t,]/) found = 1; done = 1 }
+         else if (t ~ /[^ \t,]/) { found = 1; done = 1 }
+       }
+       { sub(/\r$/, ""); line = strip($0) }
+       in_flow { flow(line); if (done) exit; next }
+       in_list && line ~ /^[ \t]*-([ \t]|$)/ { found = 1; exit }
+       in_list && line ~ /^[^ \t]/ { exit }
+       !in_list && line ~ /^["\047]?packages["\047]?[ \t]*:/ {
+         sub(/^["\047]?packages["\047]?[ \t]*:[ \t]*/, "", line)
+         if (line ~ /^\[/) { in_flow = 1; flow(substr(line, 2)); if (done) exit }
+         else if (line ~ /[^ \t]/) exit
+         else in_list = 1
+       }
+       END { exit !found }' pnpm-workspace.yaml; then
+    WORKSPACE_INFO="workspace"
+  elif command -v jq &>/dev/null && jq -e '.workspaces | if type == "array" then length > 0
+       elif type == "object" then (.packages | type == "array" and length > 0) else false end' package.json &>/dev/null; then
     WORKSPACE_INFO="workspace"
   fi
 elif [[ -f "go.work" ]]; then
@@ -272,7 +291,7 @@ if [[ -n "$CHURN_LIST" && "$TOTAL_COMMITS_SINCE" -gt 0 ]]; then
   TOP_CHURN_FILE=$(echo "$CHURN_LIST" | awk 'NR==1{$1=""; sub(/^ /,""); print}')
   TOP_CHURN_PCT=$(( (TOP_CHURN_COUNT * 100) / TOTAL_COMMITS_SINCE ))
   if [[ $TOP_CHURN_PCT -ge 30 ]]; then
-    fail "Top churn: ${TOP_CHURN_FILE} changed in ${TOP_CHURN_PCT}% of commits — likely a hotspot"
+    warn "Top churn: ${TOP_CHURN_FILE} changed in ${TOP_CHURN_PCT}% of commits — likely a hotspot"
   elif [[ $TOP_CHURN_PCT -ge 15 ]]; then
     warn "Top churn: ${TOP_CHURN_FILE} changed in ${TOP_CHURN_PCT}% of commits — worth watching"
   else
@@ -297,7 +316,7 @@ if [[ "$TOTAL_COMMITS" -gt 0 ]]; then
   TOP_NAME=$(echo "$TOP_LINE" | sed 's/^[[:space:]]*[0-9]*[[:space:]]*//')
   PCT=$(( (TOP_COUNT * 100) / TOTAL_COMMITS ))
   if [[ $PCT -ge 60 ]]; then
-    fail "Knowledge concentration: ${TOP_NAME} wrote ${PCT}% of all commits — critical single-author risk"
+    warn "Knowledge concentration: ${TOP_NAME} wrote ${PCT}% of all commits — single-author risk"
   elif [[ $PCT -ge 40 ]]; then
     warn "Knowledge concentration: ${TOP_NAME} at ${PCT}% (${TOP_COUNT}/${TOTAL_COMMITS} commits)"
   else
@@ -322,7 +341,7 @@ BUG_LIST=$(printf '%s\n' "$BUG_DATA" \
 if [[ "$TOTAL_COMMITS_SINCE" -gt 0 ]]; then
   BUG_PCT=$(( (BUG_FIX_COMMITS * 100) / TOTAL_COMMITS_SINCE ))
   if [[ $BUG_PCT -ge 25 ]]; then
-    fail "${BUG_FIX_COMMITS} fix-labelled commits (${BUG_PCT}% of total) — review maintenance load"
+    warn "${BUG_FIX_COMMITS} fix-labelled commits (${BUG_PCT}% of total) — review maintenance load"
   elif [[ $BUG_PCT -ge 10 ]]; then
     warn "${BUG_FIX_COMMITS} bug-fix commits (${BUG_PCT}% of total)"
   elif [[ $BUG_FIX_COMMITS -gt 0 ]]; then
@@ -386,7 +405,7 @@ if [[ "$FIRE_COUNT" -eq 0 ]]; then
 elif [[ "$FIRE_COUNT" -lt 5 ]]; then
   warn "Firefighting: ${FIRE_COUNT} hotfix/revert/emergency commits in period"
 else
-  fail "Firefighting: ${FIRE_COUNT} hotfix/revert/emergency commits — possible instability"
+  warn "Firefighting: ${FIRE_COUNT} hotfix/revert/emergency commits — possible instability"
 fi
 else
   if [[ -s "$AUDIT_TMP/stderr" ]]; then
@@ -685,11 +704,23 @@ SOURCE_FILES=$(count_files "$SOURCE_PAT")
 TOTAL_LINES=0
 TODO_TOTAL=0
 TODO_FILES=()
+ENV_FILES=0
+UNREADABLE_FILES=0
 : > "$AUDIT_TMP/sizes"
 for ((i = 0; i < ${#CLEAN_FILES[@]}; i++)); do
   file="${CLEAN_FILES[$i]}"
-  if ! lines=$(wc -l < "./$file"); then
-    fail "Could not count lines in $(printf '%q' "$file")"
+  # Environment files can hold secrets and add nothing to size or marker counts.
+  if [[ "${file##*/}" =~ ^\.env($|\.) ]]; then
+    ENV_FILES=$((ENV_FILES + 1))
+    continue
+  fi
+  # stderr is redirected before the input so a failed open is captured too.
+  if ! lines=$(wc -l 2>"$AUDIT_TMP/stderr" < "./$file"); then
+    if grep -qE 'Operation not permitted|Permission denied' "$AUDIT_TMP/stderr"; then
+      UNREADABLE_FILES=$((UNREADABLE_FILES + 1))
+    else
+      fail "Could not count lines in $(printf '%q' "$file")"
+    fi
     continue
   fi
   TOTAL_LINES=$((TOTAL_LINES + lines))
@@ -707,6 +738,8 @@ for ((i = 0; i < ${#CLEAN_FILES[@]}; i++)); do
 done
 info "${TRACKED_FILES} tracked files | ${SOURCE_FILES} source files | ~${TOTAL_LINES} lines"
 [[ $SKIPPED_FILES -gt 0 ]] && info "Skipped ${SKIPPED_FILES} symlink, missing or non-regular tracked path(s)"
+[[ $ENV_FILES -gt 0 ]] && info "Skipped ${ENV_FILES} tracked .env file(s) without reading them; they may hold secrets"
+[[ $UNREADABLE_FILES -gt 0 ]] && info "Skipped ${UNREADABLE_FILES} file(s) without read permission (for example a sandbox); line and marker counts exclude them"
 
 # Top 10 largest source files (god component candidates)
 info "Top 10 largest source files"
@@ -767,6 +800,8 @@ section_start "Documentation Files"
 # Linux, CI and Git hosts; agents may also read a lowercase agents.md as AGENTS.md.
 # Untracked files are included so mistakes surface before they are committed.
 DOC_FINDINGS=0
+DOC_UNREADABLE=0
+DOC_ENV=0
 if ! git ls-files -z -co --exclude-standard > "$AUDIT_TMP/doc-files.z"; then
   fail "Could not list files for documentation checks"
 else
@@ -776,7 +811,10 @@ else
 
   while IFS=$'\t' read -r path message; do
     if [[ "$path" == DESIGN-TOKENS ]]; then
-      if ! awk 'NR == 1 && $0 != "---" { exit 1 } NR > 1 && $0 == "---" { exit 1 }
+      # An unreadable DESIGN.md is counted once, with the Markdown files below.
+      if ! { : < "./$message"; } 2>/dev/null; then
+        :
+      elif ! awk 'NR == 1 && $0 != "---" { exit 1 } NR > 1 && $0 == "---" { exit 1 }
                 NR > 1 && /^(colors|typography|rounded|spacing|components):/ { found = 1; exit }
                 END { exit !found }' "./$message"; then
         warn "$(printf '%q' "$message") has no design tokens — agents read DESIGN.md as a visual design system; use another name (e.g. docs/architecture.md) for other design documents"
@@ -815,15 +853,21 @@ else
     }
   ' "$AUDIT_TMP/doc-files" | sort)
 
+  # Link targets may be .env files, but their contents are never opened.
   MD_FILES=()
   while IFS= read -r file; do
-    [[ "$file" == *.md && -f "./$file" && ! -L "./$file" ]] && MD_FILES+=("$file")
+    [[ "$file" == *.md && -f "./$file" && ! -L "./$file" ]] || continue
+    if [[ "${file##*/}" =~ ^\.env($|\.) ]]; then
+      DOC_ENV=$((DOC_ENV + 1))
+    elif ! { : < "./$file"; } 2>/dev/null; then
+      DOC_UNREADABLE=$((DOC_UNREADABLE + 1))
+    else
+      MD_FILES+=("$file")
+    fi
   done < "$AUDIT_TMP/doc-files"
+  DOC_SCAN_FAILED=false
   if [[ ${#MD_FILES[@]} -gt 0 ]]; then
-    while IFS=$'\t' read -r file target actual; do
-      warn "$(printf '%q' "$file"): link to $target differs in case from $actual"
-      DOC_FINDINGS=$((DOC_FINDINGS + 1))
-    done < <(awk '
+    if ! awk '
       function norm(p,   n, part, out, k, i, s) {
         n = split(p, part, "/"); k = 0
         for (i = 1; i <= n; i++) {
@@ -857,9 +901,21 @@ else
           check(substr(line, RSTART + 2, RLENGTH - 2)); line = substr(line, RSTART + RLENGTH)
         }
       }
-    ' "$AUDIT_TMP/doc-paths" "${MD_FILES[@]}" | sort)
+    ' "$AUDIT_TMP/doc-paths" "${MD_FILES[@]}" > "$AUDIT_TMP/doc-links" 2>"$AUDIT_TMP/stderr"; then
+      DOC_SCAN_FAILED=true
+      fail "Could not scan Markdown links: $(head -1 "$AUDIT_TMP/stderr")"
+    fi
+    while IFS=$'\t' read -r file target actual; do
+      warn "$(printf '%q' "$file"): link to $target differs in case from $actual"
+      DOC_FINDINGS=$((DOC_FINDINGS + 1))
+    done < <(sort "$AUDIT_TMP/doc-links")
   fi
-  [[ $DOC_FINDINGS -eq 0 ]] && ok "Conventional file names, placement and Markdown link casing look right"
+  [[ $DOC_ENV -gt 0 ]] && info "Skipped ${DOC_ENV} .env Markdown file(s) without reading them"
+  if [[ $DOC_UNREADABLE -gt 0 ]]; then
+    fail "Could not read ${DOC_UNREADABLE} documentation file(s); documentation checks are incomplete"
+  elif [[ $DOC_FINDINGS -eq 0 ]] && ! $DOC_SCAN_FAILED; then
+    ok "Conventional file names, placement and Markdown link casing look right"
+  fi
 fi
 
 section_end
@@ -895,7 +951,9 @@ if $HAS_PACKAGE_JSON && command -v jq &>/dev/null; then
   TEST_SCRIPT=$(jq -r '.scripts.test // empty' package.json 2>/dev/null || true)
   if [[ -z "$TEST_SCRIPT" ]]; then
     warn "No 'test' script in root package.json"
-  elif [[ "$TEST_SCRIPT" == *"Error: no test specified"* || "$TEST_SCRIPT" == "exit 1" ]]; then
+  # Only npm's generated placeholder and a bare "exit 1" are known to always fail.
+  elif [[ "$TEST_SCRIPT" =~ ^echo[[:space:]]+(\"Error:\ no\ test\ specified\"|\'Error:\ no\ test\ specified\')[[:space:]]*\&\&[[:space:]]*exit[[:space:]]+1[[:space:]]*$ \
+          || "$TEST_SCRIPT" =~ ^[[:space:]]*exit[[:space:]]+1[[:space:]]*$ ]]; then
     fail "test script is a placeholder: '${TEST_SCRIPT}'"
   else
     ok "test script: ${TEST_SCRIPT}"
@@ -914,7 +972,7 @@ TEST_FILES=$(count_files \
 )
 if [[ "$SOURCE_FILES" -gt 0 ]]; then
   if [[ "$TEST_FILES" -eq 0 ]]; then
-    fail "No test files found (by common naming conventions)"
+    warn "No test files found (by common naming conventions)"
   else
     TEST_RATIO=$(( (TEST_FILES * 100) / SOURCE_FILES ))
     if [[ "$TEST_RATIO" -lt 20 ]]; then

@@ -180,6 +180,98 @@ class AuditRepoTests(unittest.TestCase):
         self.assertIn("symlink", result.stdout)
         self.assertEqual(outside.read_text(), "TODO external\n" * 900)
 
+    def test_workspace_label_requires_listed_packages(self):
+        self.state.update(commits=[], authors="")
+        self.package("pnpm")
+        self.write("packages/a/package.json", "{}")
+        cases = [
+            ("pnpm-workspace.yaml", "packages: []\nminimumReleaseAge: 5760\n", False),
+            ("pnpm-workspace.yaml", "minimumReleaseAge: 5760\noverrides:\n  - x\n", False),
+            ("pnpm-workspace.yaml", "packages:\n  # comment\n  - 'packages/*'\n", True),
+            ("pnpm-workspace.yaml", "packages: ['packages/*']\n", True),
+            ("pnpm-workspace.yaml", "packages: # ['packages/*']\nminimumReleaseAge: 5760\n", False),
+            ("pnpm-workspace.yaml", "packages: [ # none yet\n]\n", False),
+            ("pnpm-workspace.yaml", "packages: [\n  'packages/*',\n]\n", True),
+            ("pnpm-workspace.yaml", "packages :\n  - 'packages/*'\n", True),
+            ("pnpm-workspace.yaml", '"packages":\r\n  - packages/*\r\n', True),
+            ("pnpm-workspace.yaml", "packages:\n---\n", False),
+        ]
+        for name, content, expected in cases:
+            with self.subTest(content=content):
+                self.write(name, content)
+                result = self.run_audit("--skip-security")
+                self.assertEqual("workspace (" in result.stdout, expected, result.stdout[:400])
+        (self.project / "pnpm-workspace.yaml").unlink()
+        for workspaces, expected in (([], False), (["packages/*"], True), ({"packages": []}, False),
+                                     ({"packages": ["packages/*"]}, True), ({"packages": "packages/*"}, False)):
+            with self.subTest(workspaces=workspaces):
+                manifest = json.loads((self.project / "package.json").read_text())
+                manifest["workspaces"] = workspaces
+                self.write("package.json", json.dumps(manifest))
+                result = self.run_audit("--skip-security")
+                self.assertEqual("workspace (" in result.stdout, expected, result.stdout[:400])
+
+    def test_env_files_are_not_read(self):
+        self.state.update(commits=[], authors="")
+        try:
+            self.write(".env.development", "TOKEN=x # TODO\n" * 40)
+            self.write("app/.env", "TODO\n")
+            self.write("docs/.env.local.md", "[guide](../README.md)\n")
+        except PermissionError:
+            self.skipTest("the sandbox denies .env files, so this case is unverified here")
+        self.write(".environment.ts", "// TODO\n")
+        self.write("notes.txt", "TODO\n")
+        result = self.run_audit("--skip-security")
+        self.assertIn("Skipped 3 tracked .env file(s) without reading them", result.stdout)
+        self.assertIn("2 TODO/FIXME/HACK/XXX", result.stdout)
+        self.assertIn("~2 lines", result.stdout)
+        self.assertIn("Skipped 1 .env Markdown file(s) without reading them", result.stdout)
+        self.assertNotIn("link to ../README.md", result.stdout)
+
+    def test_unreadable_files_are_reported_but_not_issues(self):
+        self.state.update(commits=[], authors="")
+        self.write("notes.txt", "TODO\n")
+        self.write("locked.txt", "TODO\nTODO\n")
+        self.run_audit("--skip-security")
+        locked = self.project / "locked.txt"
+        locked.chmod(0)
+        self.addCleanup(locked.chmod, 0o644)
+        if os.access(locked, os.R_OK):
+            self.skipTest("running with privileges that ignore file permissions")
+        result = subprocess.run(["/bin/bash", str(REPO / "scripts/audit-repo.sh"), "--skip-security"],
+                                cwd=self.project, env=self.env, text=True, input="",
+                                capture_output=True, timeout=30)
+        out = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout)
+        self.assertIn("Skipped 1 file(s) without read permission", out)
+        self.assertNotIn("Could not count lines", out)
+        self.assertEqual(result.stderr, "")
+        self.assertIn("1 TODO/FIXME/HACK/XXX", out)
+        self.assertIn("Conventional file names, placement and Markdown link casing look right", out)
+        self.assertEqual(result.returncode, 0, out)
+
+        readme = self.write("README.md", "[notes](NOTES.txt)\n")
+        readme.chmod(0)
+        self.addCleanup(readme.chmod, 0o644)
+        result = subprocess.run(["/bin/bash", str(REPO / "scripts/audit-repo.sh"), "--skip-security"],
+                                cwd=self.project, env=self.env, text=True, input="",
+                                capture_output=True, timeout=30)
+        out = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout)
+        self.assertIn("🔴 Could not read 1 documentation file(s)", out)
+        self.assertNotIn("Markdown link casing look right", out)
+        self.assertEqual(result.stderr, "")
+        self.assertEqual(result.returncode, 1, out)
+
+        design = self.write("DESIGN.md", "# Design\n")
+        design.chmod(0)
+        self.addCleanup(design.chmod, 0o644)
+        result = subprocess.run(["/bin/bash", str(REPO / "scripts/audit-repo.sh"), "--skip-security"],
+                                cwd=self.project, env=self.env, text=True, input="",
+                                capture_output=True, timeout=30)
+        out = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout)
+        self.assertIn("🔴 Could not read 2 documentation file(s)", out)
+        self.assertNotIn("has no design tokens", out)
+        self.assertEqual(result.stderr, "")
+
     def test_documentation_names_placement_and_link_casing(self):
         self.state.update(commits=[], authors="")
         self.write("AGENTS.md", "# Rules\n")
@@ -232,6 +324,7 @@ class AuditRepoTests(unittest.TestCase):
                 self.assertNotIn("No known vulnerabilities", result.stdout)
                 self.assertIn("could not", result.stdout.lower())
                 self.assertIn("Summary", result.stdout)
+                self.assertEqual(result.returncode, 1, result.stdout)
 
     def test_vulnerabilities_are_counted_even_when_audit_exits_one(self):
         self.package()
@@ -258,6 +351,7 @@ class AuditRepoTests(unittest.TestCase):
                     self.state[pm + "_outdated"] = payload
                     result = self.run_audit("--skip-security")
                     self.assertIn(expected, result.stdout)
+                    self.assertEqual(result.returncode, 1 if "could not" in expected else 0, result.stdout)
                     self.assertIn(["outdated", "--json"], self.calls(pm))
                     self.assertNotIn(["audit", "--json"], self.calls(pm))
 
@@ -377,7 +471,28 @@ class AuditRepoTests(unittest.TestCase):
         self.write("package.json", json.dumps(manifest))
         result = self.run_audit("--skip-security")
         self.assertIn("Test framework(s): playwright", result.stdout)
-        self.assertIn("test script is a placeholder", result.stdout)
+        self.assertIn("🔴 test script is a placeholder", result.stdout)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        for script in ('echo "Error: no test specified" && exit 1 || true', 'echo "Error: no test specified"'):
+            with self.subTest(script=script):
+                manifest["scripts"]["test"] = script
+                self.write("package.json", json.dumps(manifest))
+                result = self.run_audit("--skip-security")
+                self.assertNotIn("placeholder", result.stdout)
+                self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_history_and_test_discovery_heuristics_warn_without_failing(self):
+        commits = ["c%d fix" % i for i in range(10)]
+        self.state.update(commits=commits, authors="10 Solo", changed_files=["app.py"] * 10,
+                          bug_commits=commits, fire_commits=commits[:6])
+        self.write("app.py", "pass\n")
+        result = self.run_audit("--skip-security")
+        for finding in ("Top churn: app.py changed in 100%", "Solo wrote 100% of all commits",
+                        "10 fix-labelled commits (100% of total)", "Firefighting: 6 hotfix",
+                        "No test files found"):
+            self.assertRegex(result.stdout, "🟡 [^\n]*" + re.escape(finding))
+        self.assertNotIn("🔴", result.stdout)
+        self.assertEqual(result.returncode, 0, result.stdout)
 
     def test_git_read_failure_is_explicit(self):
         for command in ("log", "shortlog", "ls-files"):
