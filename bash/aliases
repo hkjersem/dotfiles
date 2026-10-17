@@ -64,6 +64,9 @@ alias dotfiles-defaults='bash ~/.dotfiles/macos/osxdefaults.sh'
 alias dotfiles-audit='bash ~/.dotfiles/scripts/audit.sh'
 alias dotfiles-profile='bash ~/.dotfiles/scripts/machine-profile.sh'
 
+# Schedule a one-time Codex submission using local 24-hour HH:MM, HH.MM, or HHMM time.
+codex-resume() { python3 "$HOME/.dotfiles/scripts/codex-resume.py" "$@"; }
+
 # Flush Directory Service cache
 alias flush="dscacheutil -flushcache && killall -HUP mDNSResponder"
 

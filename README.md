@@ -39,6 +39,22 @@ commit or another install. Shell settings may require a new shell.
 | `dotfiles-audit` | Check for drift between repo and installed state (includes skills) |
 | `dotfiles-profile` | Show or choose the machine's personal/work profile |
 
+## Resume Codex later
+
+`codex-resume --time 15.03` submits the open Codex conversation's draft three
+seconds after the next occurrence of that local time, or inserts `continue`
+if empty. Accepts `15:03`, `15.03`, or `1503`. Use `--status`, `--cancel`,
+`--now`, or `--help`; `--inspect` reads the draft and `--check` checks controls.
+If the input field isn't recognised, sends only Enter to Codex's existing focus,
+without typing text or retrying afterward.
+
+Keeps the Mac awake while waiting, briefly takes app focus to submit, and
+requires an unlocked session and Accessibility permission. The first scheduled
+attempt runs regardless of recent activity; up to ten one-minute retries require
+one minute of inactivity and no previous input sent. Logs:
+`~/Library/Logs/codex-resume.log`. Requirements and implementation notes are in
+[`scripts/codex-resume.py`](scripts/codex-resume.py).
+
 `dotfiles-update` updates installed software, not this Git checkout. To get new
 dotfiles and reapply their symlinks:
 
