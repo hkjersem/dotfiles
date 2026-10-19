@@ -237,7 +237,8 @@ files, source sizes, test-file conventions, and build configuration. Run it
 inside a repository or select one explicitly; a subdirectory is resolved to
 the Git root. It also lists what `prune_branches` would delete, review, or
 keep, based on remote-tracking refs from the last fetch; it never fetches or
-deletes branches itself.
+deletes branches itself. In a repository without a remote, the stale-branch
+and CI checks are skipped.
 
 ```sh
 audit-repo

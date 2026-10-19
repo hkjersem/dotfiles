@@ -425,10 +425,11 @@ section_start "Stale Branches & Worktrees"
 SB_TMP=$AUDIT_TMP
 # shellcheck disable=SC2034  # read by lib/stale-branches.sh
 SB_INVOKING_TOP=$(pwd -P)
-if ! SB_GIT_DIR=$(sb_common_dir "$GIT_ROOT"); then
-  fail "Could not resolve the Git directory — stale branch check skipped"
-elif ! sb_has_remote; then
+if [[ -z "$(git -C "$GIT_ROOT" remote 2>/dev/null)" ]]; then
   info "No remote — stale branch check skipped"
+elif ! SB_GIT_DIR=$(sb_common_dir "$GIT_ROOT"); then
+  SB_ERR=$(git -C "$GIT_ROOT" rev-parse --path-format=absolute --git-common-dir 2>&1 >/dev/null | head -1)
+  fail "Could not resolve the Git directory${SB_ERR:+ ($SB_ERR)} — stale branch check skipped"
 else
   STALE_PLAN=$(sb_classify "$SB_GIT_DIR/$SB_SNAPSHOT_FILE")
   stale_rows() {
@@ -1010,8 +1011,10 @@ section_end
 # ══════════════════════════════════════════════════════════════════════════════
 section_start "Build Signals"
 
-# CI config — always check regardless of language
-if [[ -d ".github/workflows" ]] && git ls-files ".github/workflows/*.yml" ".github/workflows/*.yaml" 2>/dev/null | grep -q .; then
+# CI config — regardless of language; hosted CI needs a remote, so local-only repos skip it
+if [[ -z "$(git -C "$GIT_ROOT" remote 2>/dev/null)" ]]; then
+  info "No remote — CI check skipped"
+elif [[ -d ".github/workflows" ]] && git ls-files ".github/workflows/*.yml" ".github/workflows/*.yaml" 2>/dev/null | grep -q .; then
   CI_COUNT=$(git ls-files ".github/workflows/*.yml" ".github/workflows/*.yaml" 2>/dev/null | wc -l | tr -d ' ')
   ok "GitHub Actions: ${CI_COUNT} workflow(s)"
 elif [[ -f ".travis.yml" || -f ".circleci/config.yml" || -f "Jenkinsfile" || -f ".gitlab-ci.yml" ]]; then

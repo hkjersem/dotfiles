@@ -272,6 +272,19 @@ class AuditRepoTests(unittest.TestCase):
         self.assertNotIn("has no design tokens", out)
         self.assertEqual(result.stderr, "")
 
+    def test_ci_check_needs_a_remote(self):
+        self.write("app.py", "pass\n")
+        result = self.run_audit("--skip-security")
+        self.assertIn("No remote — CI check skipped", result.stdout)
+        self.assertNotIn("No CI config found", result.stdout)
+        subprocess.run([self.git, "-C", str(self.project), "remote", "add", "origin", "https://example.invalid/x.git"],
+                       env=self.env, check=True, capture_output=True)
+        result = self.run_audit("--skip-security")
+        self.assertIn("🟡 No CI config found", result.stdout)
+        self.write(".github/workflows/ci.yml", "on: push\n")
+        result = self.run_audit("--skip-security")
+        self.assertIn("GitHub Actions: 1 workflow(s)", result.stdout)
+
     def test_documentation_names_placement_and_link_casing(self):
         self.state.update(commits=[], authors="")
         self.write("AGENTS.md", "# Rules\n")
