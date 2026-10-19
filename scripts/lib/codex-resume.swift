@@ -562,9 +562,11 @@ func submitSteps<N: UINode>(
         expected = typed
     }
 
-    // Last check immediately before the keystroke.
-    let final = try verifiedTarget(app: app, window: window, composer: composer, expected: expected)
-    guard let send = final.send, try send.flag("AXEnabled") == true else {
+    // Last check before the keystroke. Send can be disabled briefly while the window takes focus.
+    let sendReady = try poll(enableAttempts, sleep) {
+        try verifiedTarget(app: app, window: window, composer: composer, expected: expected).send?.flag("AXEnabled") == true
+    }
+    guard sendReady else {
         throw Failure("Send became disabled or unavailable; not pressing Return.", retryable: true)
     }
     try requireForeground(composer, foreground)
@@ -1200,6 +1202,24 @@ func selfTest() -> Int32 {
         try expect(f.host.returns.count == 1, "pressed Return \(f.host.returns.count) times")
         let press = f.host.returns[0]
         try expect(press.frontmost && press.focused && press.text == "please continue the refactor", "Return not sent to the verified composer")
+    }
+    test("waits for Send disabled briefly by activation, then presses Return once") {
+        let f = fixture(draft: "keep going")
+        f.host.onActivate = { f.send.attributes["AXEnabled"] = false }
+        var sleeps = 0
+        let result = try run(f, sleep: { _ in
+            sleeps += 1
+            if sleeps == 3 { f.send.attributes["AXEnabled"] = true }
+        })
+        try expect(result.outcome == .confirmed, "unexpected result \(result)")
+        try expect(f.host.returns.count == 1 && f.host.returns[0].text == "keep going", "draft not sent once")
+    }
+    test("skips Return when Send stays disabled after activation") {
+        let f = fixture(draft: "keep going")
+        f.host.onActivate = { f.send.attributes["AXEnabled"] = false }
+        try expectFailure("Send became disabled or unavailable") { _ = try run(f) }
+        try expectNoReturn(f)
+        try expect(f.composer.attributes["AXValue"] as? String == "keep going", "draft changed")
     }
     test("leaves typed continue in place and skips Return when Send stays disabled") {
         let f = fixture(draft: "", sendEnabled: false)
