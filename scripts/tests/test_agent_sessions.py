@@ -337,8 +337,11 @@ class AgentSessionsTest(unittest.TestCase):
         os.write(fd, b"cplt --repo-dir 'a b'\n")
         self.wait_for_calls(fd, 1)
         session_id = self.calls()[0][-1]
+        # Wait for the follower, so the hang-up cannot race its first poll.
+        records = [session_id, f"{session_id}.current"]
+        self.drain(fd, lambda _: self.recorded() == records)
         self.hang_up(pid, fd)
-        self.assertEqual(self.recorded(), [session_id])
+        self.assertEqual(self.recorded(), records)
 
         self.open_and_close(self.other)
         self.assertEqual(len(self.calls()), 1)
