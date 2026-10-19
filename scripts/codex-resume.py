@@ -50,6 +50,13 @@ Codex's web view builds its Accessibility tree only on request, so the helper
 turns AXEnhancedUserInterface on while it runs (about two seconds to appear) and
 off again afterwards, unless it was already on.
 App updates or UI language changes can affect control discovery.
+
+--list shows your own unarchived chats from Codex's local state database,
+newest first, without subagent or review threads. --chat picks one by id, id
+prefix, or name: the whole name, part of it, or the starts of its words in any
+order; several matches are listed with their last activity instead of
+guessing. The helper opens it through its codex://threads/<id> link only after
+any idle check passes, then waits for the window title to show the chat's name.
 """
 
 from datetime import datetime, timedelta
@@ -59,6 +66,7 @@ from pathlib import Path
 import plistlib
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -72,6 +80,8 @@ LOG_PATH = Path.home() / "Library/Logs/codex-resume.log"
 SCRIPT_PATH = Path(__file__).resolve()
 TIME_PATTERN = re.compile(r"([01][0-9]|2[0-3])[:.]?([0-5][0-9])\Z")
 SCHEDULE_DELAY_SECONDS = 3
+CODEX_HOME = Path.home() / ".codex"
+LIST_LIMIT = 20
 RETRY_INTERVAL_SECONDS = 60
 MAX_SCHEDULED_RETRIES = 10
 HELPER_PATH = SCRIPT_PATH.parent / "lib/codex-resume.swift"
@@ -116,6 +126,109 @@ def validate_message(text):
     return message
 
 
+def format_time(moment):
+    return moment.strftime("%Y-%m-%d %H:%M")
+
+
+def chats_database():
+    def version(path):
+        suffix = path.stem.rpartition("_")[2]
+        return int(suffix) if suffix.isdigit() else -1
+
+    candidates = sorted(CODEX_HOME.glob("state_*.sqlite"), key=version)
+    if not candidates:
+        raise RuntimeError(f"No Codex state database found in {CODEX_HOME}.")
+    return candidates[-1]
+
+
+def load_chats():
+    # Subagent, guardian and review threads store JSON in source; your own chats do not.
+    query = """
+        SELECT id, COALESCE(NULLIF(name, ''), title), cwd,
+               COALESCE(NULLIF(recency_at_ms, 0), updated_at_ms, updated_at * 1000)
+        FROM threads
+        WHERE archived = 0 AND source NOT LIKE '{%'
+        ORDER BY 4 DESC
+    """
+    path = chats_database()
+    try:
+        connection = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)
+        try:
+            rows = connection.execute(query).fetchall()
+        finally:
+            connection.close()
+    except sqlite3.Error as error:
+        raise RuntimeError(f"Could not read Codex chats from {path}: {error}") from error
+    return [
+        {
+            "id": chat_id,
+            "name": " ".join((name or "").split()),
+            "cwd": cwd,
+            "updated": datetime.fromtimestamp(updated_ms / 1000).astimezone(),
+        }
+        for chat_id, name, cwd, updated_ms in rows
+    ]
+
+
+def describe_chats(chats):
+    width = max((len(chat["name"]) for chat in chats), default=0)
+    width = min(width, 60)
+    lines = []
+    for chat in chats:
+        name = chat["name"] if len(chat["name"]) <= width else chat["name"][:width - 1] + "…"
+        folder = Path(chat["cwd"]).name if chat["cwd"] else ""
+        lines.append(f"{format_time(chat['updated'])}  {chat['id']}  {name:<{width}}  {folder}".rstrip())
+    return "\n".join(lines)
+
+
+def name_words(name):
+    return re.findall(r"\w+", name.casefold())
+
+
+def matching_chats(query, chats):
+    needle = query.strip().casefold()
+    typed = name_words(needle)
+    for match in (
+        lambda chat: chat["id"] == query.strip(),
+        lambda chat: chat["id"].startswith(needle),
+        lambda chat: chat["name"].casefold() == needle,
+        lambda chat: needle in chat["name"].casefold(),
+        # Each typed word starts a word in the name, in any order: "explore pwa", "exp prod".
+        lambda chat: bool(typed) and all(
+            any(word.startswith(part) for word in name_words(chat["name"])) for part in typed
+        ),
+    ):
+        found = [chat for chat in chats if match(chat)]
+        if found:
+            return found
+    return []
+
+
+def resolve_chat(query):
+    chats = load_chats()
+    found = matching_chats(query, chats)
+    if not found:
+        raise RuntimeError(f"No chat matches {query!r}; run codex-resume --list to see your chats.")
+    if len(found) > 1:
+        raise RuntimeError(
+            f"{len(found)} chats match {query!r}; pass --chat with one of these ids:\n"
+            + describe_chats(found)
+        )
+    return found[0]
+
+
+def list_chats(query=None):
+    chats = load_chats()
+    if query:
+        chats = matching_chats(query, chats)
+    if not chats:
+        print("No matching chats." if query else "No chats found.")
+        return
+    print(describe_chats(chats[:LIST_LIMIT]))
+    if len(chats) > LIST_LIMIT:
+        print(f"… and {len(chats) - LIST_LIMIT} older; add a search term to narrow the list.")
+
+
 def wait_until_scheduled_time(timestamp, now=None):
     scheduled = datetime.fromisoformat(timestamp) + timedelta(seconds=SCHEDULE_DELAY_SECONDS)
     now = now or datetime.now(scheduled.tzinfo)
@@ -147,8 +260,7 @@ def remove_agent():
     return True
 
 
-def schedule(clock_text, message=None):
-    scheduled = next_occurrence(clock_text)
+def schedule(scheduled, message=None, chat=None):
     if PLIST_PATH.exists():
         remove_agent()
 
@@ -162,6 +274,7 @@ def schedule(clock_text, message=None):
             sys.executable,
             str(SCRIPT_PATH),
             *(["--message", message] if message is not None else []),
+            *(["--chat", chat["id"]] if chat is not None else []),
             "--scheduled",
             scheduled.isoformat(),
         ],
@@ -183,11 +296,13 @@ def schedule(clock_text, message=None):
         PLIST_PATH.unlink(missing_ok=True)
         raise
 
-    print(scheduled_summary(scheduled, message))
+    print(scheduled_summary(scheduled, message, chat["name"] if chat is not None else None))
 
 
-def scheduled_summary(scheduled, message):
-    summary = f"Codex resume scheduled for {scheduled.strftime('%Y-%m-%d %H:%M')}"
+def scheduled_summary(scheduled, message, chat_name=None):
+    summary = f"Codex resume scheduled for {format_time(scheduled)}"
+    if chat_name is not None:
+        summary += f" in chat {chat_name!r}"
     return f"{summary} with message: {message}" if message is not None else f"{summary}."
 
 
@@ -201,7 +316,14 @@ def status():
     scheduled_at = arguments[arguments.index("--scheduled") + 1]
     scheduled = datetime.fromisoformat(scheduled_at)
     message = arguments[arguments.index("--message") + 1] if "--message" in arguments else None
-    print(scheduled_summary(scheduled, message))
+    chat_name = None
+    if "--chat" in arguments:
+        chat_id = arguments[arguments.index("--chat") + 1]
+        try:
+            chat_name = next((chat["name"] for chat in load_chats() if chat["id"] == chat_id), chat_id)
+        except RuntimeError:
+            chat_name = chat_id
+    print(scheduled_summary(scheduled, message, chat_name))
 
 
 def swift_version(executable):
@@ -215,7 +337,7 @@ def swift_version(executable):
     return tuple(int(part) for part in match.groups()) if match else None
 
 
-def run_automation(action, message=None):
+def run_automation(action, message=None, chat=None):
     executable = shutil.which("swift")
     if executable is None:
         raise RuntimeError(
@@ -224,6 +346,8 @@ def run_automation(action, message=None):
     command = [executable, str(HELPER_PATH), action]
     if message is not None:
         command += ["--message", message]
+    if chat is not None:
+        command += ["--chat", chat["id"], "--chat-title", chat["name"]]
     try:
         result = subprocess.run(
             command,
@@ -256,8 +380,8 @@ def run_automation(action, message=None):
     print(result.stdout, end="", flush=True)
 
 
-def submit(action="--submit", message=None):
-    run_automation(action, message)
+def submit(action="--submit", message=None, chat=None):
+    run_automation(action, message, chat)
 
 
 def scheduled_action(attempt):
@@ -268,7 +392,7 @@ def scheduled_action(attempt):
     return "--scheduled-submit"
 
 
-def submit_scheduled(message=None):
+def submit_scheduled(message=None, chat=None):
     for attempt in range(MAX_SCHEDULED_RETRIES + 1):
         started = time.monotonic()
         print(
@@ -278,7 +402,7 @@ def submit_scheduled(message=None):
             flush=True,
         )
         try:
-            submit(scheduled_action(attempt), message)
+            submit(scheduled_action(attempt), message, chat)
             return
         except RetryableAutomationError as error:
             print(f"codex-resume: {error}", file=sys.stderr, flush=True)
@@ -316,6 +440,10 @@ def argument_parser():
     actions.add_argument(
         "--time", metavar="HH:MM", help="schedule the next occurrence of this local time"
     )
+    actions.add_argument(
+        "--list", nargs="?", const="", metavar="QUERY",
+        help="list your recent chats, optionally only those matching QUERY",
+    )
     actions.add_argument("--status", action="store_true", help="show the scheduled resume")
     actions.add_argument("--cancel", action="store_true", help="cancel the scheduled resume")
     actions.add_argument(
@@ -335,6 +463,11 @@ def argument_parser():
         "--message", metavar="TEXT",
         help="with --time or --now, type this single-line message instead of 'continue'",
     )
+    parser.add_argument(
+        "--chat", metavar="QUERY",
+        help="open this chat (id, id prefix or name) first; works with --time, --now, "
+             "--check and --inspect",
+    )
     return parser
 
 
@@ -346,6 +479,14 @@ def main(arguments):
         if not (options.time or options.now or options.scheduled):
             parser.error("--message requires --time or --now")
         message = validate_message(options.message)
+    if options.chat is not None and not (
+        options.time or options.now or options.check or options.inspect or options.scheduled
+    ):
+        parser.error("--chat requires --time, --now, --check or --inspect")
+    if options.list is not None:
+        list_chats(options.list)
+        return 0
+    chat = resolve_chat(options.chat) if options.chat is not None else None
     if options.status:
         status()
         return 0
@@ -356,18 +497,18 @@ def main(arguments):
             print("No Codex resume is scheduled.")
         return 0
     if options.now:
-        submit(message=message)
+        submit(message=message, chat=chat)
         return 0
     if options.inspect:
-        run_automation("--inspect")
+        run_automation("--inspect", chat=chat)
         return 0
     if options.check:
-        run_automation("--check")
+        run_automation("--check", chat=chat)
         return 0
     if options.scheduled:
         try:
             wait_until_scheduled_time(options.scheduled)
-            submit_scheduled(message)
+            submit_scheduled(message, chat)
         except (OSError, RuntimeError, ValueError) as error:
             # bootout can terminate us before the outer error handler runs.
             print(f"codex-resume: {error}", file=sys.stderr, flush=True)
@@ -377,7 +518,7 @@ def main(arguments):
                 PLIST_PATH.unlink()
                 launchctl("bootout", f"{agent_domain()}/{LABEL}")
         return 0
-    schedule(options.time, message)
+    schedule(next_occurrence(options.time), message, chat)
     return 0
 
 

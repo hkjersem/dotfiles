@@ -8,6 +8,7 @@ from pathlib import Path
 import plistlib
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -20,6 +21,23 @@ SCRIPT = REPO / "scripts/codex-resume.py"
 SPEC = importlib.util.spec_from_file_location("codex_resume", SCRIPT)
 codex_resume = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(codex_resume)
+
+THREAD_COLUMNS = (
+    "id TEXT, name TEXT, title TEXT, cwd TEXT, source TEXT, archived INTEGER, "
+    "recency_at_ms INTEGER, updated_at_ms INTEGER, updated_at INTEGER"
+)
+
+
+def write_threads(path, rows):
+    connection = sqlite3.connect(path)
+    connection.execute(f"CREATE TABLE threads ({THREAD_COLUMNS})")
+    connection.executemany("INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+    connection.commit()
+    connection.close()
+
+
+def ms(text):
+    return int(datetime.fromisoformat(text).timestamp() * 1000)
 
 
 class CodexResumeTests(unittest.TestCase):
@@ -151,7 +169,7 @@ class CodexResumeTests(unittest.TestCase):
         ):
             codex_resume.submit_scheduled()
         self.assertEqual(submit.call_args_list, [
-            call("--scheduled-initial-submit", None), call("--scheduled-submit", None),
+            call("--scheduled-initial-submit", None, None), call("--scheduled-submit", None, None),
         ])
         sleep.assert_called_once_with(50)
 
@@ -199,8 +217,8 @@ class CodexResumeTests(unittest.TestCase):
         self.assertEqual(submit.call_count, 11)
         self.assertEqual(
             submit.call_args_list,
-            [call("--scheduled-initial-submit", None)] + [call("--scheduled-submit", None)] * 9
-            + [call("--scheduled-final-submit", None)],
+            [call("--scheduled-initial-submit", None, None)] + [call("--scheduled-submit", None, None)] * 9
+            + [call("--scheduled-final-submit", None, None)],
         )
         self.assertEqual(sleep.call_args_list, [call(60)] * 10)
 
@@ -219,7 +237,7 @@ class CodexResumeTests(unittest.TestCase):
                     with self.assertRaises(RuntimeError) as raised:
                         codex_resume.submit_scheduled()
                 self.assertIs(raised.exception, error)
-                submit.assert_called_once_with("--scheduled-initial-submit", None)
+                submit.assert_called_once_with("--scheduled-initial-submit", None, None)
                 sleep.assert_not_called()
 
     def test_schedule_stops_retrying_if_a_later_attempt_may_have_sent_input(self):
@@ -272,8 +290,8 @@ class CodexResumeTests(unittest.TestCase):
 
     def test_inspect_check_and_now_dispatch_separate_actions(self):
         for flag, expected in (
-            ("--inspect", call("--inspect")), ("--check", call("--check")),
-            ("--now", call("--submit", None)),
+            ("--inspect", call("--inspect", chat=None)), ("--check", call("--check", chat=None)),
+            ("--now", call("--submit", None, None)),
         ):
             with self.subTest(flag=flag):
                 with patch.object(codex_resume, "run_automation") as run:
@@ -288,12 +306,10 @@ class CodexResumeTests(unittest.TestCase):
             with (
                 patch.object(codex_resume, "PLIST_PATH", plist_path),
                 patch.object(codex_resume, "LOG_PATH", log_path),
-                patch.object(codex_resume, "next_occurrence",
-                              return_value=codex_resume.next_occurrence("16:30", now)),
                 patch.object(codex_resume, "launchctl") as launchctl,
                 patch("builtins.print"),
             ):
-                codex_resume.schedule("16:30")
+                codex_resume.schedule(codex_resume.next_occurrence("16:30", now))
 
             with plist_path.open("rb") as agent_file:
                 plist = plistlib.load(agent_file)
@@ -319,7 +335,7 @@ class CodexResumeTests(unittest.TestCase):
                 patch.object(codex_resume, "launchctl") as launchctl,
             ):
                 with self.assertRaises(ValueError):
-                    codex_resume.schedule("25:00")
+                    codex_resume.main(["--time", "25:00"])
             self.assertFalse(plist_path.exists())
             launchctl.assert_not_called()
 
@@ -348,7 +364,7 @@ class CodexResumeTests(unittest.TestCase):
                              side_effect=RuntimeError("bootstrap failed")),
             ):
                 with self.assertRaisesRegex(RuntimeError, "bootstrap failed"):
-                    codex_resume.schedule("16:30")
+                    codex_resume.schedule(datetime.fromisoformat("2026-10-16T16:30:00+02:00"))
             self.assertFalse(plist_path.exists())
 
     def test_scheduled_run_submits_and_unloads_agent(self):
@@ -366,7 +382,7 @@ class CodexResumeTests(unittest.TestCase):
                     0,
                 )
             wait.assert_called_once_with("2026-10-16T16:30:00+02:00")
-            submit.assert_called_once_with("--scheduled-initial-submit", None)
+            submit.assert_called_once_with("--scheduled-initial-submit", None, None)
             launchctl.assert_called_once_with(
                 "bootout", f"{codex_resume.agent_domain()}/{codex_resume.LABEL}"
             )
@@ -490,9 +506,121 @@ class CodexResumeTests(unittest.TestCase):
             ):
                 self.assertEqual(codex_resume.main(arguments[4:]), 0)
             self.assertEqual(submit.call_args_list, [
-                call("--scheduled-initial-submit", "Resume now"),
-                call("--scheduled-submit", "Resume now"),
+                call("--scheduled-initial-submit", "Resume now", None),
+                call("--scheduled-submit", "Resume now", None),
             ])
+
+    def chat_rows(self):
+        return [
+            ("01a1-mine", "Find current project status", "where are we", "/work/myntr", "vscode", 0,
+             ms("2026-09-04T13:56:00+02:00"), 0, 0),
+            ("01a2-new", None, "  Fresh\n  prompt  ", "/work/dash", "cli", 0,
+             0, ms("2026-10-18T09:00:00+02:00"), 0),
+            ("01a3-guard", "Guardian review", "Guardian review", "/work", '{"subagent":{"other":"guardian"}}', 0,
+             ms("2026-10-19T11:29:00+02:00"), 0, 0),
+            ("01a4-old", "Find current project status", "x", "/work/old", "vscode", 0,
+             ms("2026-08-01T10:00:00+02:00"), 0, 0),
+            ("01a5-arch", "Archived plan", "x", "/work", "vscode", 1,
+             ms("2026-10-19T10:00:00+02:00"), 0, 0),
+            ("01a6-status", "Status board", "x", "/work", "vscode", 0,
+             ms("2026-07-01T10:00:00+02:00"), 0, 0),
+        ]
+
+    def with_chats(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        home = Path(temporary.name)
+        write_threads(home / "state_5.sqlite", self.chat_rows())
+        write_threads(home / "state_4.sqlite", [])
+        patcher = patch.object(codex_resume, "CODEX_HOME", home)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return home
+
+    def test_chat_list_shows_only_own_unarchived_chats_newest_first(self):
+        self.with_chats()
+        chats = codex_resume.load_chats()
+        self.assertEqual([chat["id"] for chat in chats], ["01a2-new", "01a1-mine", "01a4-old", "01a6-status"])
+        self.assertEqual(chats[0]["name"], "Fresh prompt")
+        output = io.StringIO()
+        with redirect_stdout(output):
+            codex_resume.list_chats("status")
+        lines = output.getvalue().splitlines()
+        self.assertEqual(len(lines), 3)
+        self.assertRegex(lines[0], r"^2026-09-04 \d\d:56  01a1-mine  Find current project status\s+myntr$")
+        self.assertNotIn("Guardian", output.getvalue())
+
+    def test_missing_state_database_is_reported(self):
+        with tempfile.TemporaryDirectory() as temporary, \
+                patch.object(codex_resume, "CODEX_HOME", Path(temporary)):
+            with self.assertRaisesRegex(RuntimeError, "No Codex state database"):
+                codex_resume.load_chats()
+
+    def test_chat_is_resolved_by_id_prefix_or_name_and_never_guessed(self):
+        self.with_chats()
+        self.assertEqual(codex_resume.resolve_chat("01a4")["id"], "01a4-old")
+        self.assertEqual(codex_resume.resolve_chat("01a2-new")["id"], "01a2-new")
+        self.assertEqual(codex_resume.resolve_chat("status board")["id"], "01a6-status")
+        for query, expected in (
+            ("stat boa", "01a6-status"), ("board status", "01a6-status"),
+            ("fre pro", "01a2-new"), ("pro fre", "01a2-new"),
+        ):
+            with self.subTest(query=query):
+                self.assertEqual(codex_resume.resolve_chat(query)["id"], expected)
+        with self.assertRaisesRegex(RuntimeError, "No chat matches"):
+            codex_resume.resolve_chat("status zebra")
+        with self.assertRaises(RuntimeError) as ambiguous:
+            codex_resume.resolve_chat("find current")
+        message = str(ambiguous.exception)
+        self.assertIn("2 chats match", message)
+        self.assertRegex(message, r"2026-09-04 \d\d:56  01a1-mine")
+        self.assertRegex(message, r"2026-08-01 \d\d:00  01a4-old")
+        for query in ("guardian", "archived", "nothing like this"):
+            with self.subTest(query=query), self.assertRaisesRegex(RuntimeError, "No chat matches"):
+                codex_resume.resolve_chat(query)
+
+    def test_chat_is_passed_to_the_helper_and_stored_for_scheduled_runs(self):
+        self.with_chats()
+        result = subprocess.CompletedProcess([], 0, "", "")
+        with (
+            patch.object(codex_resume.shutil, "which", return_value="/usr/bin/swift"),
+            patch.object(codex_resume.subprocess, "run", return_value=result) as run,
+        ):
+            self.assertEqual(codex_resume.main(["--now", "--chat", "01a1"]), 0)
+        self.assertEqual(run.call_args.args[0][2:], [
+            "--submit", "--chat", "01a1-mine", "--chat-title", "Find current project status",
+        ])
+        with tempfile.TemporaryDirectory() as temporary:
+            plist_path = Path(temporary) / "job.plist"
+            output = io.StringIO()
+            with (
+                patch.object(codex_resume, "PLIST_PATH", plist_path),
+                patch.object(codex_resume, "LOG_PATH", Path(temporary) / "log"),
+                patch.object(codex_resume, "launchctl"),
+                redirect_stdout(output),
+            ):
+                codex_resume.main(["--time", "16:30", "--chat", "status board"])
+                codex_resume.main(["--status"])
+            with plist_path.open("rb") as agent_file:
+                arguments = plistlib.load(agent_file)["ProgramArguments"]
+            self.assertEqual(arguments[-4:-2], ["--chat", "01a6-status"])
+            self.assertEqual(output.getvalue().count("in chat 'Status board'"), 2)
+            with (
+                patch.object(codex_resume, "PLIST_PATH", plist_path),
+                patch.object(codex_resume, "wait_until_scheduled_time"),
+                patch.object(codex_resume, "submit") as submit,
+                patch.object(codex_resume, "launchctl"),
+                redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(codex_resume.main(arguments[4:]), 0)
+            self.assertEqual(submit.call_args.args[2]["name"], "Status board")
+
+    def test_chat_needs_an_action_that_uses_it(self):
+        for arguments in (["--status", "--chat", "x"], ["--list", "--chat", "x"]):
+            with self.subTest(arguments=arguments), redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as error:
+                    codex_resume.main(arguments)
+                self.assertEqual(error.exception.code, 2)
 
     def test_compile_error_on_old_swift_explains_the_update(self):
         compile_error = subprocess.CompletedProcess(

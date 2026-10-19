@@ -49,6 +49,12 @@ If the input field isn't recognised, sends only Enter to Codex's existing focus,
 without typing text or retrying afterward. Scheduled runs that find no input
 field at all retry first and send that Enter only on the last attempt.
 
+Add `--chat` to `--time`, `--now`, `--check` or `--inspect` to
+open a specific chat first, by id, id prefix or name; the starts of the name's
+words in any order also work, such as `explore pwa`. `--list [text]` shows your
+recent chats with their ids and last activity. When several chats match, they
+are listed instead of guessing.
+
 Add `--message "text"` to `--time` or `--now` to send that text instead. It
 must be one line and not start with `/`. A custom message is only sent into a
 recognised, empty input field; otherwise nothing is sent.

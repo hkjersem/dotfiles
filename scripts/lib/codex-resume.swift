@@ -57,6 +57,7 @@ let maxAncestorLevels = 6
 let pollInterval: TimeInterval = 0.1
 let enableAttempts = 30
 let treeAttempts = 100
+let chatAttempts = 100
 let treeAttribute = "AXEnhancedUserInterface"
 let foregroundAttempts = 20
 let confirmAttempts = 50
@@ -276,6 +277,65 @@ func exposeTree<N: UINode>(of app: N, sleep: (TimeInterval) -> Void) throws -> (
         return try !collect(window, roles: ["AXTextArea"]).isEmpty
     }
     return { try? app.set(treeAttribute, to: false) }
+}
+
+struct Chat {
+    let id: String
+    let title: String
+
+    var url: URL {
+        get throws {
+            let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+            guard !id.isEmpty, id.unicodeScalars.allSatisfy(allowed.contains),
+                  let url = URL(string: "codex://threads/\(id)") else {
+                throw Failure("Invalid chat id \(id.debugDescription).")
+            }
+            return url
+        }
+    }
+}
+
+// The window title shows the chat name, which either side may shorten with an ellipsis.
+func titleMatches(_ shown: String?, _ expected: String) -> Bool {
+    func clean(_ text: String) -> String { text.split(whereSeparator: \.isWhitespace).joined(separator: " ") }
+    func stem(_ text: String) -> String? {
+        guard text.hasSuffix("…") else { return nil }
+        let stem = String(text.dropLast()).trimmingCharacters(in: .whitespaces)
+        return stem.isEmpty ? nil : stem
+    }
+    guard let shown else { return false }
+    let (a, b) = (clean(shown), clean(expected))
+    if a == b { return true }
+    if let stem = stem(b), a.hasPrefix(stem) { return true }
+    if let stem = stem(a), b.hasPrefix(stem) { return true }
+    return false
+}
+
+// Switches the app to the chat through its link and waits for the window to show it; nothing is typed.
+// beforeOpening runs only when a switch is needed, so scheduled retries can require idle time first.
+func openChat<N: UINode>(
+    _ chat: Chat, in app: N, beforeOpening: () throws -> Void, open: (URL) throws -> Void,
+    sleep: (TimeInterval) -> Void
+) throws {
+    func shown() throws -> String? { try app.node("AXFocusedWindow")?.text("AXTitle") }
+    if titleMatches(try shown(), chat.title) { return }
+    try beforeOpening()
+    try open(try chat.url)
+    guard try poll(chatAttempts, sleep, { titleMatches(try shown(), chat.title) }) else {
+        throw Failure("Opened chat \(chat.title.debugDescription), but the window shows "
+            + "\((try shown() ?? "no title").debugDescription); nothing was typed or sent.", retryable: true)
+    }
+}
+
+func openLive(_ url: URL) throws {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+    process.arguments = ["-g", url.absoluteString]
+    try process.run()
+    process.waitUntilExit()
+    guard process.terminationStatus == 0 else {
+        throw Failure("Could not open \(url.absoluteString) (open exited \(process.terminationStatus)).", retryable: true)
+    }
 }
 
 func liveSleep(_ seconds: TimeInterval) { RunLoop.current.run(until: Date(timeIntervalSinceNow: seconds)) }
@@ -515,8 +575,9 @@ func jsonValue(_ flag: Bool?) -> Any {
     return NSNull()
 }
 
-func check() throws {
+func check(chat: Chat?) throws {
     let (app, node) = try liveApp()
+    if let chat { try openChat(chat, in: node, beforeOpening: {}, open: openLive, sleep: liveSleep) }
     let restoreTree = try exposeTree(of: node, sleep: liveSleep)
     defer { restoreTree() }
     let target = try findTarget(in: try focusedWindow(of: node))
@@ -545,8 +606,9 @@ func check() throws {
     ])
 }
 
-func inspect() throws {
+func inspect(chat: Chat?) throws {
     let (_, node) = try liveApp()
+    if let chat { try openChat(chat, in: node, beforeOpening: {}, open: openLive, sleep: liveSleep) }
     let restoreTree = try exposeTree(of: node, sleep: liveSleep)
     defer { restoreTree() }
     let text = try composerText(try findTarget(in: try focusedWindow(of: node)))
@@ -620,13 +682,11 @@ func postReturn() throws {
     for event in try keyEvents(source, key: 0x24) { event.post(tap: .cgSessionEventTap) }
 }
 
-func submitLive(mode: SubmissionMode, message: String?) throws -> Int32 {
+func submitLive(mode: SubmissionMode, message: String?, chat: Chat?) throws -> Int32 {
     let requiredIdle = mode.requiredIdle
     let (runningApp, node) = try liveApp()
     let pid = runningApp.processIdentifier
     let previous = frontmostPid()
-    let restoreTree = try exposeTree(of: node, sleep: liveSleep)
-    defer { restoreTree() }
     let foreground = Foreground(
         idleSeconds: hardwareIdleSeconds,
         now: { Date().timeIntervalSinceReferenceDate },
@@ -656,6 +716,13 @@ func submitLive(mode: SubmissionMode, message: String?) throws -> Int32 {
             }
         }
     }
+    if let chat {
+        try openChat(chat, in: node, beforeOpening: {
+            if let requiredIdle { try requireIdle(foreground, required: requiredIdle, injectedAt: nil) }
+        }, open: openLive, sleep: liveSleep)
+    }
+    let restoreTree = try exposeTree(of: node, sleep: liveSleep)
+    defer { restoreTree() }
     let result = try submit(app: node, foreground: foreground, requiredIdle: requiredIdle, message: message,
                             blindReturnWhenEmpty: mode.blindReturnWhenEmpty, sleep: liveSleep)
     let typed = message == nil ? "typed \"\(continueText)\"" : "typed the custom message"
@@ -893,6 +960,46 @@ func selfTest() -> Int32 {
             && !SubmissionMode.scheduledInitial.blindReturnWhenEmpty && !SubmissionMode.scheduledRetry.blindReturnWhenEmpty,
             "wrong blind-Return modes")
         try expect(SubmissionMode.scheduledFinal.requiredIdle == scheduledIdleSeconds, "final attempt ignores idle")
+    }
+    test("opens a chat through its link once idle and waits for its title") {
+        let f = fixture()
+        f.window.attributes["AXTitle"] = "Other chat"
+        let chat = Chat(id: "01a1-x", title: "Target chat")
+        var opened: [URL] = []
+        var checks = 0
+        var naps = 0
+        try openChat(chat, in: f.app, beforeOpening: { checks += 1 }, open: { opened.append($0) }) { _ in
+            naps += 1
+            if naps == 2 { f.window.attributes["AXTitle"] = "Target chat" }
+        }
+        try expect(opened.map(\.absoluteString) == ["codex://threads/01a1-x"] && checks == 1, "did not open once: \(opened)")
+        try openChat(chat, in: f.app, beforeOpening: { checks += 1 }, open: { opened.append($0) }) { _ in }
+        try expect(opened.count == 1 && checks == 1, "reopened a chat that was already shown")
+    }
+    test("does not switch chats while the idle check fails, and stops on the wrong title") {
+        let f = fixture()
+        f.window.attributes["AXTitle"] = "Other chat"
+        var opened = 0
+        let busy = try failure("activity") {
+            try openChat(Chat(id: "a", title: "Target"), in: f.app,
+                         beforeOpening: { throw Failure("Keyboard or mouse activity 3 s ago", retryable: true) },
+                         open: { _ in opened += 1 }) { _ in }
+        }
+        try expect(opened == 0 && busy.retryable, "switched chats while the user was active")
+        var naps = 0
+        let wrong = try failure("window shows \"Other chat\"") {
+            try openChat(Chat(id: "a", title: "Target"), in: f.app, beforeOpening: {}, open: { _ in opened += 1 }) { _ in naps += 1 }
+        }
+        try expect(opened == 1 && naps == chatAttempts && wrong.retryable, "did not give up after the wait")
+        try expectNoReturn(f)
+        try expectFailure("Invalid chat id") { _ = try Chat(id: "a/../b", title: "x").url }
+    }
+    test("matches window titles shortened with an ellipsis") {
+        try expect(titleMatches("Find  current\nstatus", "Find current status"), "whitespace")
+        try expect(titleMatches("im thinking of introducing light", "im thinking of introducing…"), "expected shortened")
+        try expect(titleMatches("im thinking…", "im thinking of introducing light"), "shown shortened")
+        try expect(!titleMatches("Guardian review", "Find current status") && !titleMatches(nil, "x")
+            && !titleMatches("anything", "…"), "false match")
     }
     test("exposes the Accessibility tree on demand and turns it off again") {
         let window = FakeNode("AXWindow")
@@ -1456,30 +1563,37 @@ func selfTest() -> Int32 {
 
 // MARK: - Entry point
 
-let arguments = Array(CommandLine.arguments.dropFirst())
-let submissionMode = arguments.first.flatMap { SubmissionMode(rawValue: $0) }
-let hasMessage = arguments.count == 3 && arguments[1] == "--message" && submissionMode != nil
-guard arguments.count == 1 || hasMessage else {
-    FileHandle.standardError.write(Data(("usage: codex-resume.swift --check | --inspect | --self-test | "
-        + "(--submit | --scheduled-initial-submit | --scheduled-submit | --scheduled-final-submit) [--message TEXT]\n").utf8))
+func usageError(_ detail: String? = nil) -> Never {
+    if let detail { FileHandle.standardError.write(Data("\(detail)\n".utf8)) }
+    FileHandle.standardError.write(Data(("usage: codex-resume.swift --self-test | (--check | --inspect) [--chat ID --chat-title TITLE] | "
+        + "(--submit | --scheduled-initial-submit | --scheduled-submit | --scheduled-final-submit) "
+        + "[--message TEXT] [--chat ID --chat-title TITLE]\n").utf8))
     exit(2)
 }
-var message: String?
-if hasMessage {
-    do {
-        message = try validatedMessage(arguments[2])
-    } catch {
-        FileHandle.standardError.write(Data("\(error)\n".utf8))
-        exit(2)
-    }
+
+let arguments = Array(CommandLine.arguments.dropFirst())
+guard let action = arguments.first, arguments.count % 2 == 1 else { usageError() }
+let submissionMode = SubmissionMode(rawValue: action)
+var options: [String: String] = [:]
+for index in stride(from: 1, to: arguments.count, by: 2) {
+    let name = arguments[index]
+    let allowed = ["--chat", "--chat-title"] + (submissionMode != nil ? ["--message"] : [])
+    guard action != "--self-test", allowed.contains(name), options[name] == nil else { usageError() }
+    options[name] = arguments[index + 1]
 }
+guard (options["--chat"] == nil) == (options["--chat-title"] == nil) else { usageError("--chat and --chat-title go together.") }
+var message: String?
+if let text = options["--message"] {
+    do { message = try validatedMessage(text) } catch { usageError("\(error)") }
+}
+let chat = options["--chat"].map { Chat(id: $0, title: options["--chat-title"] ?? "") }
 do {
     if let mode = submissionMode {
-        exit(try submitLive(mode: mode, message: message))
+        exit(try submitLive(mode: mode, message: message, chat: chat))
     }
-    switch arguments[0] {
-    case "--check": try check()
-    case "--inspect": try inspect()
+    switch action {
+    case "--check": try check(chat: chat)
+    case "--inspect": try inspect(chat: chat)
     case "--self-test": exit(selfTest())
     default:
         FileHandle.standardError.write(Data("unknown option: \(arguments[0])\n".utf8))
