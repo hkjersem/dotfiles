@@ -55,6 +55,11 @@ turns AXEnhancedUserInterface on while it runs (about two seconds to appear) and
 off again afterwards, unless it was already on.
 App updates or UI language changes can affect control discovery.
 
+--start-window reads the limits when the run starts and sends nothing while a
+5-hour window is running or ordinary usage is blocked. A 5-hour window counts
+as not running when it is absent, has reset, or reports 0% with a reset a full
+window ahead; the live response without a running window is unverified.
+
 --list shows your unarchived chats from the Codex app's sidebar catalogue,
 newest first, without subagent or review threads. It includes chats on another
 Mac the app reaches through remote control, marked (remote): they run on that
@@ -111,6 +116,9 @@ CODEX_CLI_PATHS = (
 APP_SERVER_TIMEOUT_SECONDS = 20
 LIST_LIMIT = 20
 LIMIT_NAMES = {300: "5-hour", 10080: "weekly"}
+FIVE_HOUR_MINUTES = 300
+# An unused window may report 0% with a reset a full window ahead; allow for clock and rounding drift.
+IDLE_WINDOW_TOLERANCE_SECONDS = 120
 RETRY_INTERVAL_SECONDS = 60
 MAX_SCHEDULED_RETRIES = 10
 HELPER_PATH = SCRIPT_PATH.parent / "lib/codex-resume.swift"
@@ -393,6 +401,26 @@ def usage_limits():
     return windows
 
 
+def start_window_skip_reason(now=None):
+    """Return why --start-window should not send now, or None when sending starts a new 5-hour window."""
+    result = app_server_request("account/rateLimits/read")
+    limits = result.get("rateLimits") or {}
+    now = now or datetime.now().astimezone()
+    for key in ("primary", "secondary"):
+        window = limits.get(key) or {}
+        if window.get("windowDurationMins") != FIVE_HOUR_MINUTES or window.get("resetsAt") is None:
+            continue
+        resets = datetime.fromtimestamp(window["resetsAt"]).astimezone()
+        used = window.get("usedPercent", 0)
+        unused = used == 0 and resets >= now + timedelta(
+            minutes=FIVE_HOUR_MINUTES, seconds=-IDLE_WINDOW_TOLERANCE_SECONDS)
+        if resets > now and not unused:
+            return f"a 5-hour window is already running ({used:g}% used, resets {format_time(resets)})"
+    if result.get("ordinaryUsageAllowed") is False:
+        return "a usage limit is used up, so a message cannot start a window"
+    return None
+
+
 def describe_limits(windows):
     return "\n".join(
         f"{window['name']}: {window['used']:g}% used, resets {format_time(window['resets'])}"
@@ -439,7 +467,7 @@ def remove_agent():
     return True
 
 
-def schedule(scheduled, message=None, chat=None, project=None):
+def schedule(scheduled, message=None, chat=None, project=None, start_window=False):
     if PLIST_PATH.exists():
         remove_agent()
 
@@ -456,6 +484,7 @@ def schedule(scheduled, message=None, chat=None, project=None):
             # A project keeps its folder, so the latest chat is chosen when the run starts.
             *(["--project", project["cwd"]] if project is not None
               else ["--chat", chat["id"]] if chat is not None else []),
+            *(["--start-window"] if start_window else []),
             "--scheduled",
             scheduled.isoformat(),
         ],
@@ -477,19 +506,21 @@ def schedule(scheduled, message=None, chat=None, project=None):
         PLIST_PATH.unlink(missing_ok=True)
         raise
 
-    print(scheduled_summary(scheduled, message, None if project is not None else chat, project))
+    print(scheduled_summary(scheduled, message, None if project is not None else chat, project, start_window))
 
 
 def chat_label(chat):
     return f"{chat['name']!r}" + (" (remote)" if chat["host"] is not None else "")
 
 
-def scheduled_summary(scheduled, message, chat=None, project=None):
+def scheduled_summary(scheduled, message, chat=None, project=None, start_window=False):
     summary = f"Codex resume scheduled for {format_time(scheduled)}"
     if project is not None:
         summary += f" in the latest chat in project {project_label(project)}"
     elif chat is not None:
         summary += f" in chat {chat_label(chat)}"
+    if start_window:
+        summary += ", only if no 5-hour window is running"
     return f"{summary} with message: {message}" if message is not None else f"{summary}."
 
 
@@ -518,7 +549,7 @@ def status():
             chat = next((chat for chat in load_chats() if chat["id"] == chat_id), unknown)
         except RuntimeError:
             chat = unknown
-    print(scheduled_summary(scheduled, message, chat, project))
+    print(scheduled_summary(scheduled, message, chat, project, "--start-window" in arguments))
 
 
 def swift_version(executable):
@@ -609,12 +640,16 @@ def scheduled_action(attempt):
     return "--scheduled-submit"
 
 
+def log_stamp():
+    return f"[{datetime.now():%d.%m.%Y kl. %H.%M.%S}] "
+
+
 def submit_scheduled(message=None, chat=None):
     for attempt in range(MAX_SCHEDULED_RETRIES + 1):
         started = time.monotonic()
         print(
-            f"[{datetime.now():%d.%m.%Y kl. %H.%M.%S}] "
-            f"Scheduled Codex submission attempt {attempt + 1}/"
+            log_stamp()
+            + f"Scheduled Codex submission attempt {attempt + 1}/"
             f"{MAX_SCHEDULED_RETRIES + 1}"
             + (f" in chat {chat_label(chat)}." if chat is not None else "."),
             flush=True,
@@ -698,6 +733,11 @@ def argument_parser():
         help="like --chat, but open the latest chat in this project (folder name), "
              "chosen when the message is sent",
     )
+    parser.add_argument(
+        "--start-window", action="store_true",
+        help="with --time or --now, send only when no 5-hour window is running, "
+             "so the message starts a new one",
+    )
     return parser
 
 
@@ -717,6 +757,19 @@ def main(arguments):
             parser.error(f"{name} requires --time, --reset, --now, --check or --inspect")
     if options.chat is not None and options.project is not None:
         parser.error("use either --chat or --project, not both")
+    if options.start_window and not (options.time or options.now or options.scheduled):
+        parser.error("--start-window requires --time or --now")
+
+    def skip_start_window():
+        if not options.start_window:
+            return False
+        reason = start_window_skip_reason()
+        stamp = log_stamp() if options.scheduled else ""
+        if reason is not None:
+            print(f"{stamp}Not sending: {reason}.", flush=True)
+            return True
+        print(f"{stamp}No 5-hour window is running; sending to start one.", flush=True)
+        return False
 
     def target():
         if options.project is not None:
@@ -741,6 +794,8 @@ def main(arguments):
     if options.scheduled:
         try:
             wait_until_scheduled_time(options.scheduled)
+            if skip_start_window():
+                return 0
             # Resolved at run time, so a project gets its latest chat and a failure still unloads the job.
             _, chat = target()
             submit_scheduled(message, chat)
@@ -755,6 +810,8 @@ def main(arguments):
         return 0
     project, chat = target()
     if options.now:
+        if skip_start_window():
+            return 0
         if chat is not None:
             where = f" in project {project_label(project)}" if project is not None else ""
             print(f"Resuming in chat {chat_label(chat)}{where}.", flush=True)
@@ -772,7 +829,7 @@ def main(arguments):
         print(describe_limits(windows))
     else:
         scheduled = next_occurrence(options.time)
-    schedule(scheduled, message, chat, project)
+    schedule(scheduled, message, chat, project, options.start_window)
     return 0
 
 

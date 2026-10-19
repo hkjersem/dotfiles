@@ -53,6 +53,11 @@ field at all retry first and send that Enter only on the last attempt.
 or the later one if both are, and submits a minute after it resets.
 `--limits` shows both limits, read live through the Codex CLI.
 
+Add `--start-window` to `--time` or `--now` to send only when no 5-hour window
+is running, so the message starts a new one, for example at midnight to get an
+earlier reset. When the run starts, it checks the limits; if a window is
+already running or a limit is used up, it logs why and sends nothing.
+
 Add `--chat` to `--time`, `--reset`, `--now`, `--check` or `--inspect` to
 open a specific chat first, by id, id prefix or name; the starts of the name's
 words in any order also work, such as `explore pwa`. `--list [text]` shows your

@@ -861,6 +861,91 @@ class CodexResumeTests(unittest.TestCase):
         self.assertEqual(arguments[4:-2], ["--message", "Resume now", "--chat", "01a1-mine"])
         self.assertIn("5-hour: 100% used", output.getvalue())
 
+    def window_limits(self, used, resets, allowed=True):
+        return {"ordinaryUsageAllowed": allowed, "rateLimits": {
+            "primary": {"usedPercent": used, "windowDurationMins": 300,
+                        "resetsAt": None if resets is None else int(resets.timestamp())},
+            "secondary": {"usedPercent": 10, "windowDurationMins": 10080,
+                          "resetsAt": int(datetime.fromisoformat("2026-10-25T02:55:00+02:00").timestamp())},
+        }}
+
+    def test_start_window_sends_only_when_no_five_hour_window_is_running(self):
+        now = datetime.fromisoformat("2026-10-20T00:00:00+02:00")
+        for used, resets, allowed, fragment in (
+            (55, now + timedelta(hours=2), False, "already running (55% used, resets 2026-10-20 02:00)"),
+            (1, now + timedelta(hours=4, minutes=59), True, "already running"),
+            (0, now + timedelta(hours=3), True, "already running"),
+            (0, now + timedelta(hours=5), True, None),
+            (0, now + timedelta(hours=4, minutes=59), True, None),
+            (80, now - timedelta(minutes=5), True, None),
+            (0, None, True, None),
+            (0, now + timedelta(hours=5), False, "a usage limit is used up"),
+        ):
+            with self.subTest(used=used, resets=resets, allowed=allowed):
+                with patch.object(codex_resume, "app_server_request",
+                                  return_value=self.window_limits(used, resets, allowed)):
+                    reason = codex_resume.start_window_skip_reason(now)
+                if fragment is None:
+                    self.assertIsNone(reason)
+                else:
+                    self.assertIn(fragment, reason)
+
+    def test_start_window_skips_or_sends_scheduled_and_now_runs(self):
+        for reason, sends in (("a 5-hour window is already running", False), (None, True)):
+            with self.subTest(reason=reason), tempfile.TemporaryDirectory() as temporary:
+                plist_path = Path(temporary) / "job.plist"
+                plist_path.write_text("scheduled")
+                output = io.StringIO()
+                with (
+                    patch.object(codex_resume, "PLIST_PATH", plist_path),
+                    patch.object(codex_resume, "wait_until_scheduled_time"),
+                    patch.object(codex_resume, "start_window_skip_reason", return_value=reason),
+                    patch.object(codex_resume, "submit") as submit,
+                    patch.object(codex_resume, "launchctl") as launchctl,
+                    redirect_stdout(output),
+                ):
+                    self.assertEqual(codex_resume.main(
+                        ["--start-window", "--scheduled", "2026-10-20T00:00:00+02:00"]), 0)
+                    self.assertEqual(codex_resume.main(["--now", "--start-window"]), 0)
+                self.assertEqual(submit.call_count, 2 if sends else 0)
+                self.assertFalse(plist_path.exists())
+                launchctl.assert_called_once()
+                expected = ("No 5-hour window is running; sending to start one." if sends
+                            else "Not sending: a 5-hour window is already running.")
+                lines = output.getvalue().splitlines()
+                self.assertRegex(lines[0], r"^\[\d\d\.\d\d\.\d{4} kl\. \d\d\.\d\d\.\d\d\] " + re.escape(expected) + "$")
+                self.assertEqual(lines[-1], expected)
+                self.assertEqual(len(lines), 3 if sends else 2)
+
+    def test_start_window_is_stored_shown_and_needs_time_or_now(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            plist_path = Path(temporary) / "job.plist"
+            now = datetime.fromisoformat("2026-10-19T20:00:00+02:00")
+            output = io.StringIO()
+            with (
+                patch.object(codex_resume, "PLIST_PATH", plist_path),
+                patch.object(codex_resume, "LOG_PATH", Path(temporary) / "log"),
+                patch.object(codex_resume, "next_occurrence",
+                             return_value=codex_resume.next_occurrence("00:00", now)),
+                patch.object(codex_resume, "launchctl"),
+                patch.object(codex_resume, "start_window_skip_reason") as check,
+                redirect_stdout(output),
+            ):
+                codex_resume.main(["--time", "00:00", "--start-window"])
+                codex_resume.main(["--status"])
+            check.assert_not_called()
+            with plist_path.open("rb") as agent_file:
+                arguments = plistlib.load(agent_file)["ProgramArguments"]
+        self.assertEqual(arguments[-3:], ["--start-window", "--scheduled", "2026-10-20T00:00:00+02:00"])
+        self.assertEqual(output.getvalue().splitlines(), [
+            "Codex resume scheduled for 2026-10-20 00:00, only if no 5-hour window is running.",
+        ] * 2)
+        for action in (["--reset"], ["--status"], ["--check"]):
+            with self.subTest(action=action), redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as error:
+                    codex_resume.main([*action, "--start-window"])
+                self.assertEqual(error.exception.code, 2)
+
     def test_compile_error_on_old_swift_explains_the_update(self):
         compile_error = subprocess.CompletedProcess(
             [], 1, "", "codex-resume.swift:280:23: error: variable binding in a condition",
