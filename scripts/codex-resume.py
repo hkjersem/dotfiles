@@ -44,6 +44,9 @@ Scheduled output/errors go to ~/Library/Logs/codex-resume.log, without drafts
 or custom messages. A scheduled message is stored in the LaunchAgent plist.
 The helper uses current Swift syntax; when it fails to compile on Swift older
 than 6.2, the error says to update the Command Line Tools.
+Codex's web view builds its Accessibility tree only on request, so the helper
+turns AXEnhancedUserInterface on while it runs (about two seconds to appear) and
+off again afterwards, unless it was already on.
 App updates or UI language changes can affect control discovery.
 """
 

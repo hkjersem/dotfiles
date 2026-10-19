@@ -54,6 +54,8 @@ let maxDepth = 64
 let maxAncestorLevels = 6
 let pollInterval: TimeInterval = 0.1
 let enableAttempts = 30
+let treeAttempts = 100
+let treeAttribute = "AXEnhancedUserInterface"
 let foregroundAttempts = 20
 let confirmAttempts = 50
 let scheduledIdleSeconds: TimeInterval = 60
@@ -257,6 +259,21 @@ func verifiedTarget<N: UINode>(app: N, window: N, composer: N, expected: String)
     }
     return target
 }
+
+// Chromium builds a web view's Accessibility tree only while an assistive client requests it.
+// Setting the attribute reports kAXErrorNotImplemented yet takes effect (about 2 s), so its result is ignored.
+// Returns a closure that turns it off again when this call turned it on.
+func exposeTree<N: UINode>(of app: N, sleep: (TimeInterval) -> Void) throws -> () -> Void {
+    if try app.flag(treeAttribute) == true { return {} }
+    try? app.set(treeAttribute, to: true)
+    _ = try poll(treeAttempts, sleep) {
+        guard let window = try app.node("AXFocusedWindow") else { return false }
+        return try !collect(window, roles: ["AXTextArea"]).isEmpty
+    }
+    return { try? app.set(treeAttribute, to: false) }
+}
+
+func liveSleep(_ seconds: TimeInterval) { RunLoop.current.run(until: Date(timeIntervalSinceNow: seconds)) }
 
 func poll(_ attempts: Int, _ sleep: (TimeInterval) -> Void, _ condition: () throws -> Bool) rethrows -> Bool {
     for attempt in 0...attempts {
@@ -491,6 +508,8 @@ func jsonValue(_ flag: Bool?) -> Any {
 
 func check() throws {
     let (app, node) = try liveApp()
+    let restoreTree = try exposeTree(of: node, sleep: liveSleep)
+    defer { restoreTree() }
     let target = try findTarget(in: try focusedWindow(of: node))
     let sendEnabled = try target.send?.flag("AXEnabled") == true
     let idle = try hardwareIdleSeconds()
@@ -519,6 +538,8 @@ func check() throws {
 
 func inspect() throws {
     let (_, node) = try liveApp()
+    let restoreTree = try exposeTree(of: node, sleep: liveSleep)
+    defer { restoreTree() }
     let text = try composerText(try findTarget(in: try focusedWindow(of: node)))
     try printJSON(["empty": isBlank(text), "value": text])
 }
@@ -594,6 +615,8 @@ func submitLive(requiredIdle: TimeInterval?, message: String?) throws -> Int32 {
     let (runningApp, node) = try liveApp()
     let pid = runningApp.processIdentifier
     let previous = frontmostPid()
+    let restoreTree = try exposeTree(of: node, sleep: liveSleep)
+    defer { restoreTree() }
     let foreground = Foreground(
         idleSeconds: hardwareIdleSeconds,
         now: { Date().timeIntervalSinceReferenceDate },
@@ -624,7 +647,7 @@ func submitLive(requiredIdle: TimeInterval?, message: String?) throws -> Int32 {
         }
     }
     let result = try submit(app: node, foreground: foreground, requiredIdle: requiredIdle, message: message,
-                            sleep: { RunLoop.current.run(until: Date(timeIntervalSinceNow: $0)) })
+                            sleep: liveSleep)
     let typed = message == nil ? "typed \"\(continueText)\"" : "typed the custom message"
     let draft = result.inserted ? typed : "kept the existing draft"
     switch result.outcome {
@@ -836,6 +859,34 @@ func selfTest() -> Int32 {
         let f = fixture()
         f.composer.attributes["AXDescription"] = "Notes"
         try expectFailure("found text areas labelled \"\", \"Notes\").") { _ = try findTarget(in: f.window) }
+    }
+    test("exposes the Accessibility tree on demand and turns it off again") {
+        let window = FakeNode("AXWindow")
+        let app = FakeNode("AXApplication", ["AXFocusedWindow": window, treeAttribute: false], [window])
+        app.settable = [treeAttribute]
+        var naps = 0
+        app.onSet = { _, value in
+            if value as? Bool == false { window.kids.removeAll() }
+        }
+        let restore = try exposeTree(of: app) { _ in
+            naps += 1
+            if naps == 3 { window.add([FakeNode("AXTextArea")]) }
+        }
+        try expect(app.sets == ["\(treeAttribute)=true"] && naps == 3, "did not wait for the tree: \(app.sets), \(naps)")
+        restore()
+        try expect(app.sets.last == "\(treeAttribute)=false" && window.kids.isEmpty, "did not turn it off")
+    }
+    test("leaves an already exposed tree alone and gives up after the wait") {
+        let window = FakeNode("AXWindow")
+        let on = FakeNode("AXApplication", ["AXFocusedWindow": window, treeAttribute: true], [window])
+        on.settable = [treeAttribute]
+        try exposeTree(of: on) { _ in }()
+        try expect(on.sets.isEmpty, "changed an exposed tree")
+        let off = FakeNode("AXApplication", ["AXFocusedWindow": window, treeAttribute: false], [window])
+        off.settable = [treeAttribute]
+        var naps = 0
+        try exposeTree(of: off) { _ in naps += 1 }()
+        try expect(naps == treeAttempts && off.sets.count == 2, "unexpected wait \(naps) or sets \(off.sets)")
     }
     test("refuses two Send buttons next to the composer") {
         let f = fixture()
