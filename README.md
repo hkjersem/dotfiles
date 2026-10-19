@@ -57,7 +57,20 @@ Add `--chat` to `--time`, `--reset`, `--now`, `--check` or `--inspect` to
 open a specific chat first, by id, id prefix or name; the starts of the name's
 words in any order also work, such as `explore pwa`. `--list [text]` shows your
 recent chats with their ids and last activity. When several chats match, they
-are listed instead of guessing.
+are listed instead of guessing. The chat is confirmed by its name in the window
+title, checked again just before typing and before Return, so a chat whose
+name another chat shares is refused until one is renamed. Chats on another Mac
+that the app reaches through remote control are listed as `(remote)` and can
+be chosen the same way; they run on that Mac, but this Mac must be awake and
+unlocked. If that Mac is disconnected, scheduled attempts retry without typing
+anything.
+
+Use `--project name` instead of `--chat` to open the most recently active chat
+in a project, matched by its folder name the same way, such as `local-relay`
+for a remote project. A scheduled run picks that chat when it starts, so a chat
+started after scheduling is used. `--check` and `--inspect` also report the
+window title and, when exactly one Codex chat has that name, the chat's id,
+project and folder.
 
 Add `--message "text"` to `--time`, `--reset` or `--now` to send that text
 instead. It must be one line and not start with `/`. A custom message is only

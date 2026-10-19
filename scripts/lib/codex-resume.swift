@@ -282,14 +282,24 @@ func exposeTree<N: UINode>(of app: N, sleep: (TimeInterval) -> Void) throws -> (
 struct Chat {
     let id: String
     let title: String
+    // Set for a chat on another Mac the app reaches through remote control.
+    var host: String? = nil
 
     var url: URL {
         get throws {
             let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
-            guard !id.isEmpty, id.unicodeScalars.allSatisfy(allowed.contains),
-                  let url = URL(string: "codex://threads/\(id)") else {
+            guard !id.isEmpty, id.unicodeScalars.allSatisfy(allowed.contains) else {
                 throw Failure("Invalid chat id \(id.debugDescription).")
             }
+            var link = "codex://threads/\(id)"
+            if let host {
+                guard !host.isEmpty, host.unicodeScalars.allSatisfy(allowed.union(CharacterSet(charactersIn: ":")).contains),
+                      let encoded = host.addingPercentEncoding(withAllowedCharacters: allowed) else {
+                    throw Failure("Invalid chat host \(host.debugDescription).")
+                }
+                link += "?hostId=\(encoded)"
+            }
+            guard let url = URL(string: link) else { throw Failure("Invalid chat id \(id.debugDescription).") }
             return url
         }
     }
@@ -403,8 +413,18 @@ func activateForeground(_ foreground: Foreground, requiredIdle: TimeInterval?, s
     }
 }
 
+// A chosen chat must still be the one shown, since the user may have switched chats while the helper waited.
+func requireChat<N: UINode>(_ window: N, _ title: String?) throws {
+    guard let title else { return }
+    let shown = try window.text("AXTitle")
+    guard titleMatches(shown, title) else {
+        throw Failure("The window shows \((shown ?? "no title").debugDescription) instead of chat "
+            + "\(title.debugDescription); not typing or pressing Return.", retryable: true)
+    }
+}
+
 func submitUnverifiedReturn<N: UINode>(
-    app: N, window: N, foreground: Foreground, requiredIdle: TimeInterval?,
+    app: N, window: N, foreground: Foreground, requiredIdle: TimeInterval?, chatTitle: String?,
     sleep: (TimeInterval) -> Void, injected: inout Bool
 ) throws -> (inserted: Bool, outcome: Outcome) {
     try activateForeground(foreground, requiredIdle: requiredIdle, sleep: sleep)
@@ -416,6 +436,7 @@ func submitUnverifiedReturn<N: UINode>(
     guard try foreground.isFrontmost() else {
         throw Failure("Another app came to the front; not pressing Return.", retryable: true)
     }
+    try requireChat(window, chatTitle)
     injected = true
     try foreground.pressReturn()
     return (false, .unverifiedReturn)
@@ -425,20 +446,21 @@ func submitUnverifiedReturn<N: UINode>(
 // After the first injected key, every failure is permanent so a retry can never duplicate or erase input.
 func submit<N: UINode>(
     app: N, foreground: Foreground, requiredIdle: TimeInterval? = nil, message: String? = nil,
-    blindReturnWhenEmpty: Bool = true, sleep: (TimeInterval) -> Void
+    chatTitle: String? = nil, blindReturnWhenEmpty: Bool = true, sleep: (TimeInterval) -> Void
 ) throws -> (inserted: Bool, outcome: Outcome) {
     var injected = false
     do {
         return try submitSteps(app: app, foreground: foreground, requiredIdle: requiredIdle, message: message,
-                               blindReturnWhenEmpty: blindReturnWhenEmpty, sleep: sleep, injected: &injected)
+                               chatTitle: chatTitle, blindReturnWhenEmpty: blindReturnWhenEmpty, sleep: sleep,
+                               injected: &injected)
     } catch let failure as Failure where injected && failure.retryable {
         throw Failure(failure.description)
     }
 }
 
 func submitSteps<N: UINode>(
-    app: N, foreground: Foreground, requiredIdle: TimeInterval?, message: String?, blindReturnWhenEmpty: Bool,
-    sleep: (TimeInterval) -> Void, injected: inout Bool
+    app: N, foreground: Foreground, requiredIdle: TimeInterval?, message: String?, chatTitle: String?,
+    blindReturnWhenEmpty: Bool, sleep: (TimeInterval) -> Void, injected: inout Bool
 ) throws -> (inserted: Bool, outcome: Outcome) {
     let text = message ?? continueText
     let window = try focusedWindow(of: app)
@@ -455,8 +477,11 @@ func submitSteps<N: UINode>(
             throw Failure(failure.description + " Retrying before pressing Return without a recognised composer.",
                           retryable: true)
         }
-        return try submitUnverifiedReturn(app: app, window: window, foreground: foreground,
-                                          requiredIdle: requiredIdle, sleep: sleep, injected: &injected)
+        return try submitUnverifiedReturn(app: app, window: window, foreground: foreground, requiredIdle: requiredIdle,
+                                          chatTitle: chatTitle, sleep: sleep, injected: &injected)
+    }
+    guard try initial.composer.flag("AXEnabled") != false else {
+        throw Failure("The composer is disabled (a remote Mac may be disconnected); not submitting.", retryable: true)
     }
     guard initial.send != nil else {
         throw Failure(initial.stop != nil
@@ -493,6 +518,7 @@ func submitSteps<N: UINode>(
         _ = try verifiedTarget(app: app, window: window, composer: composer, expected: original)
         try requireForeground(composer, foreground)
         if let requiredIdle { try requireIdle(foreground, required: requiredIdle, injectedAt: nil) }
+        try requireChat(window, chatTitle)
         injected = true
         try foreground.typeText(text)
         injectedAt = foreground.now()
@@ -523,6 +549,7 @@ func submitSteps<N: UINode>(
     }
     try requireForeground(composer, foreground)
     if let requiredIdle { try requireIdle(foreground, required: requiredIdle, injectedAt: injectedAt) }
+    try requireChat(window, chatTitle)
     injected = true
     try foreground.pressReturn()
 
@@ -580,7 +607,8 @@ func check(chat: Chat?) throws {
     if let chat { try openChat(chat, in: node, beforeOpening: {}, open: openLive, sleep: liveSleep) }
     let restoreTree = try exposeTree(of: node, sleep: liveSleep)
     defer { restoreTree() }
-    let target = try findTarget(in: try focusedWindow(of: node))
+    let window = try focusedWindow(of: node)
+    let target = try findTarget(in: window)
     let sendEnabled = try target.send?.flag("AXEnabled") == true
     let idle = try hardwareIdleSeconds()
     try printJSON([
@@ -603,6 +631,7 @@ func check(chat: Chat?) throws {
         "secureInputOwner": secureInputOwner() ?? NSNull(),
         "idleSeconds": Int(idle),
         "idleEligible": idle >= scheduledIdleSeconds,
+        "windowTitle": try window.text("AXTitle") ?? NSNull(),
     ])
 }
 
@@ -611,8 +640,9 @@ func inspect(chat: Chat?) throws {
     if let chat { try openChat(chat, in: node, beforeOpening: {}, open: openLive, sleep: liveSleep) }
     let restoreTree = try exposeTree(of: node, sleep: liveSleep)
     defer { restoreTree() }
-    let text = try composerText(try findTarget(in: try focusedWindow(of: node)))
-    try printJSON(["empty": isBlank(text), "value": text])
+    let window = try focusedWindow(of: node)
+    let text = try composerText(try findTarget(in: window))
+    try printJSON(["empty": isBlank(text), "value": text, "windowTitle": try window.text("AXTitle") ?? NSNull()])
 }
 
 // The session dictionary names the app responsible for Secure Event Input; the Carbon flag covers a missing key.
@@ -724,7 +754,7 @@ func submitLive(mode: SubmissionMode, message: String?, chat: Chat?) throws -> I
     let restoreTree = try exposeTree(of: node, sleep: liveSleep)
     defer { restoreTree() }
     let result = try submit(app: node, foreground: foreground, requiredIdle: requiredIdle, message: message,
-                            blindReturnWhenEmpty: mode.blindReturnWhenEmpty, sleep: liveSleep)
+                            chatTitle: chat?.title, blindReturnWhenEmpty: mode.blindReturnWhenEmpty, sleep: liveSleep)
     let typed = message == nil ? "typed \"\(continueText)\"" : "typed the custom message"
     let draft = result.inserted ? typed : "kept the existing draft"
     switch result.outcome {
@@ -993,6 +1023,9 @@ func selfTest() -> Int32 {
         try expect(opened == 1 && naps == chatAttempts && wrong.retryable, "did not give up after the wait")
         try expectNoReturn(f)
         try expectFailure("Invalid chat id") { _ = try Chat(id: "a/../b", title: "x").url }
+        try expectFailure("Invalid chat host") { _ = try Chat(id: "a", title: "x", host: "h&x=1").url }
+        let remote = try Chat(id: "01a1-x", title: "x", host: "remote-control:env_e_1").url.absoluteString
+        try expect(remote == "codex://threads/01a1-x?hostId=remote-control%3Aenv_e_1", "remote link: \(remote)")
     }
     test("matches window titles shortened with an ellipsis") {
         try expect(titleMatches("Find  current\nstatus", "Find current status"), "whitespace")
@@ -1147,6 +1180,39 @@ func selfTest() -> Int32 {
         let other = fixture()
         f.composer.onSet = { name, _ in if name == "AXFocused" { f.app.attributes["AXFocusedWindow"] = other.window } }
         try expectFailure("focused window changed") { _ = try run(f) }
+        try expectNoReturn(f)
+    }
+    test("rechecks the chosen chat before typing and before Return") {
+        func chosen(_ f: Fixture) throws -> (inserted: Bool, outcome: Outcome) {
+            try submit(app: f.app, foreground: f.host.foreground(f), requiredIdle: scheduledIdleSeconds,
+                       chatTitle: "Target", sleep: { f.host.clock += $0 })
+        }
+        let kept = fixture(draft: "", sendEnabled: false)
+        kept.window.attributes["AXTitle"] = "Target"
+        kept.host.userActivity(secondsAgo: 120)
+        try expect(try chosen(kept).outcome == .confirmed, "did not submit to the chosen chat")
+
+        let early = fixture(draft: "", sendEnabled: false)
+        early.window.attributes["AXTitle"] = "Target"
+        early.host.userActivity(secondsAgo: 120)
+        early.host.onActivate = { early.window.attributes["AXTitle"] = "Other chat" }
+        let before = try failure("instead of chat \"Target\"") { _ = try chosen(early) }
+        try expect(before.retryable && early.host.typed.isEmpty, "typed into another chat or not retryable")
+        try expectNoReturn(early)
+
+        let late = fixture(draft: "", sendEnabled: false)
+        late.window.attributes["AXTitle"] = "Target"
+        late.host.userActivity(secondsAgo: 120)
+        late.host.onType = { late.window.attributes["AXTitle"] = "Other chat" }
+        let after = try failure("instead of chat \"Target\"") { _ = try chosen(late) }
+        try expect(!after.retryable && late.host.typed.count == 1 && late.host.returns.isEmpty,
+                   "pressed Return in another chat or retryable after typing")
+    }
+    test("refuses a disabled composer before any input, retryably") {
+        let f = fixture(draft: nil)
+        f.composer.attributes["AXEnabled"] = false
+        let error = try failure("composer is disabled") { _ = try runScheduled(f) }
+        try expect(error.retryable && f.host.activateCalls == 0 && f.composer.sets.isEmpty, "not a clean retryable stop")
         try expectNoReturn(f)
     }
     test("refuses a disabled Send with a non-empty draft without activating") {
@@ -1565,9 +1631,10 @@ func selfTest() -> Int32 {
 
 func usageError(_ detail: String? = nil) -> Never {
     if let detail { FileHandle.standardError.write(Data("\(detail)\n".utf8)) }
-    FileHandle.standardError.write(Data(("usage: codex-resume.swift --self-test | (--check | --inspect) [--chat ID --chat-title TITLE] | "
+    let chatOptions = "[--chat ID --chat-title TITLE [--chat-host HOST]]"
+    FileHandle.standardError.write(Data(("usage: codex-resume.swift --self-test | (--check | --inspect) \(chatOptions) | "
         + "(--submit | --scheduled-initial-submit | --scheduled-submit | --scheduled-final-submit) "
-        + "[--message TEXT] [--chat ID --chat-title TITLE]\n").utf8))
+        + "[--message TEXT] \(chatOptions)\n").utf8))
     exit(2)
 }
 
@@ -1577,7 +1644,7 @@ let submissionMode = SubmissionMode(rawValue: action)
 var options: [String: String] = [:]
 for index in stride(from: 1, to: arguments.count, by: 2) {
     let name = arguments[index]
-    let allowed = ["--chat", "--chat-title"] + (submissionMode != nil ? ["--message"] : [])
+    let allowed = ["--chat", "--chat-title", "--chat-host"] + (submissionMode != nil ? ["--message"] : [])
     guard action != "--self-test", allowed.contains(name), options[name] == nil else { usageError() }
     options[name] = arguments[index + 1]
 }
@@ -1586,7 +1653,8 @@ var message: String?
 if let text = options["--message"] {
     do { message = try validatedMessage(text) } catch { usageError("\(error)") }
 }
-let chat = options["--chat"].map { Chat(id: $0, title: options["--chat-title"] ?? "") }
+guard options["--chat-host"] == nil || options["--chat"] != nil else { usageError("--chat-host needs --chat.") }
+let chat = options["--chat"].map { Chat(id: $0, title: options["--chat-title"] ?? "", host: options["--chat-host"]) }
 do {
     if let mode = submissionMode {
         exit(try submitLive(mode: mode, message: message, chat: chat))

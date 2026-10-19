@@ -51,12 +51,24 @@ turns AXEnhancedUserInterface on while it runs (about two seconds to appear) and
 off again afterwards, unless it was already on.
 App updates or UI language changes can affect control discovery.
 
---list shows your own unarchived chats from Codex's local state database,
-newest first, without subagent or review threads. --chat picks one by id, id
-prefix, or name: the whole name, part of it, or the starts of its words in any
-order; several matches are listed with their last activity instead of
-guessing. The helper opens it through its codex://threads/<id> link only after
-any idle check passes, then waits for the window title to show the chat's name.
+--list shows your unarchived chats from the Codex app's sidebar catalogue,
+newest first, without subagent or review threads. It includes chats on another
+Mac the app reaches through remote control, marked (remote): they run on that
+Mac, but this Mac must be awake and unlocked to type into them. --chat picks
+one by id, id prefix, or name: the whole name, part of it, or the starts of its
+words in any order; several matches are listed with their last activity
+instead of guessing. The helper opens it through its codex://threads/<id> link
+(with ?hostId= for a remote chat) only after any idle check passes, then waits
+for the window title to show the chat's name, and checks it again just before
+typing and before Return. A chat whose name another chat shares is refused,
+since the title could not tell them apart. A wrong title or a disabled
+composer, as when the remote Mac is disconnected, stops before any input and
+is retryable.
+--project picks a project by its folder name (or full path) with the same
+name matching, and opens its most recently active chat; a scheduled run stores
+the folder and picks that chat when it starts.
+--check and --inspect add the window title and, when exactly one chat in the
+catalogue has that name, the open chat's id, project and folder.
 --limits and --reset read the usage limits live through the Codex CLI's app
 server (account/rateLimits/read, read-only). --reset schedules a minute after
 the latest reset among the limits that are used up.
@@ -87,6 +99,7 @@ TIME_PATTERN = re.compile(r"([01][0-9]|2[0-3])[:.]?([0-5][0-9])\Z")
 SCHEDULE_DELAY_SECONDS = 3
 RESET_MARGIN_SECONDS = 60
 CODEX_HOME = Path.home() / ".codex"
+CHAT_CATALOG = "sqlite/codex-dev.db"
 CODEX_CLI_PATHS = (
     Path("/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex"),
     Path.home() / "Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex",
@@ -142,27 +155,20 @@ def format_time(moment):
     return moment.strftime("%Y-%m-%d %H:%M")
 
 
-def chats_database():
-    def version(path):
-        suffix = path.stem.rpartition("_")[2]
-        return int(suffix) if suffix.isdigit() else -1
-
-    candidates = sorted(CODEX_HOME.glob("state_*.sqlite"), key=version)
-    if not candidates:
-        raise RuntimeError(f"No Codex state database found in {CODEX_HOME}.")
-    return candidates[-1]
-
-
 def load_chats():
-    # Subagent, guardian and review threads store JSON in source; your own chats do not.
+    # The app's sidebar catalogue: unarchived chats on this Mac and on Macs it reaches by remote control.
     query = """
-        SELECT id, COALESCE(NULLIF(name, ''), title), cwd,
-               COALESCE(NULLIF(recency_at_ms, 0), updated_at_ms, updated_at * 1000)
-        FROM threads
-        WHERE archived = 0 AND source NOT LIKE '{%'
+        SELECT c.thread_id, c.display_title, c.cwd,
+               COALESCE(NULLIF(c.source_recency_at, 0), c.source_updated_at),
+               CASE h.host_kind WHEN 'local' THEN NULL ELSE c.host_id END
+        FROM local_thread_catalog c JOIN local_thread_catalog_hosts h USING (host_id)
+        WHERE h.host_kind IN ('local', 'remote-control') AND c.missing_candidate = 0
+          AND COALESCE(c.thread_source, '') NOT IN ('subagent', 'guardian_review')
         ORDER BY 4 DESC
     """
-    path = chats_database()
+    path = CODEX_HOME / CHAT_CATALOG
+    if not path.exists():
+        raise RuntimeError(f"Codex's chat list ({path}) was not found; open the Codex app first.")
     try:
         connection = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)
         try:
@@ -176,9 +182,10 @@ def load_chats():
             "id": chat_id,
             "name": " ".join((name or "").split()),
             "cwd": cwd,
-            "updated": datetime.fromtimestamp(updated_ms / 1000).astimezone(),
+            "updated": datetime.fromtimestamp(updated).astimezone(),
+            "host": host,
         }
-        for chat_id, name, cwd, updated_ms in rows
+        for chat_id, name, cwd, updated, host in rows
     ]
 
 
@@ -189,6 +196,8 @@ def describe_chats(chats):
     for chat in chats:
         name = chat["name"] if len(chat["name"]) <= width else chat["name"][:width - 1] + "…"
         folder = Path(chat["cwd"]).name if chat["cwd"] else ""
+        if chat["host"] is not None:
+            folder = f"{folder} (remote)".lstrip()
         lines.append(f"{format_time(chat['updated'])}  {chat['id']}  {name:<{width}}  {folder}".rstrip())
     return "\n".join(lines)
 
@@ -197,23 +206,45 @@ def name_words(name):
     return re.findall(r"\w+", name.casefold())
 
 
-def matching_chats(query, chats):
-    needle = query.strip().casefold()
-    typed = name_words(needle)
-    for match in (
-        lambda chat: chat["id"] == query.strip(),
-        lambda chat: chat["id"].startswith(needle),
-        lambda chat: chat["name"].casefold() == needle,
-        lambda chat: needle in chat["name"].casefold(),
-        # Each typed word starts a word in the name, in any order: "explore pwa", "exp prod".
-        lambda chat: bool(typed) and all(
-            any(word.startswith(part) for word in name_words(chat["name"])) for part in typed
-        ),
-    ):
-        found = [chat for chat in chats if match(chat)]
+def first_matches(items, rules):
+    for rule in rules:
+        found = [item for item in items if rule(item)]
         if found:
             return found
     return []
+
+
+def name_rules(query):
+    needle = query.strip().casefold()
+    typed = name_words(needle)
+    return (
+        lambda item: item["name"].casefold() == needle,
+        lambda item: needle in item["name"].casefold(),
+        # Each typed word starts a word in the name, in any order: "explore pwa", "exp prod".
+        lambda item: bool(typed) and all(
+            any(word.startswith(part) for word in name_words(item["name"])) for part in typed
+        ),
+    )
+
+
+def matching_chats(query, chats):
+    return first_matches(chats, (
+        lambda chat: chat["id"] == query.strip(),
+        lambda chat: chat["id"].startswith(query.strip().casefold()),
+        *name_rules(query),
+    ))
+
+
+def same_title(first, second):
+    """Mirror the helper's window-title check, where either name may be shortened with an ellipsis."""
+    first, second = " ".join(first.split()), " ".join(second.split())
+    if first == second:
+        return True
+    for shortened, full in ((first, second), (second, first)):
+        stem = shortened[:-1].rstrip() if shortened.endswith("…") else ""
+        if stem and full.startswith(stem):
+            return True
+    return False
 
 
 def resolve_chat(query):
@@ -226,7 +257,49 @@ def resolve_chat(query):
             f"{len(found)} chats match {query!r}; pass --chat with one of these ids:\n"
             + describe_chats(found)
         )
-    return found[0]
+    return confirmable(found[0], chats)
+
+
+def confirmable(chat, chats):
+    # The helper confirms the open chat by its window title, so a shared name could hide a wrong chat.
+    namesakes = [other for other in chats if other is not chat and same_title(other["name"], chat["name"])]
+    if namesakes:
+        raise RuntimeError(
+            f"Another chat has the same name as {chat['name']!r}, so the window title cannot confirm "
+            "which one is open; rename one of them in the app first:\n" + describe_chats([chat, *namesakes])
+        )
+    return chat
+
+
+def project_label(project):
+    return f"{project['name']!r}" + (" (remote)" if project["host"] is not None else "")
+
+
+def load_projects(chats):
+    """Group chats by the folder the app names their project after, newest activity first."""
+    projects = {}
+    for chat in chats:
+        if chat["cwd"]:
+            key = (chat["host"], chat["cwd"])
+            projects.setdefault(key, {
+                "name": Path(chat["cwd"]).name, "cwd": chat["cwd"], "host": chat["host"], "chats": [],
+            })["chats"].append(chat)
+    return list(projects.values())
+
+
+def resolve_project(query):
+    """Return the latest chat in the project matching query, by folder path or project name."""
+    chats = load_chats()
+    found = first_matches(load_projects(chats), (lambda project: project["cwd"] == query.strip(), *name_rules(query)))
+    if not found:
+        raise RuntimeError(f"No project matches {query!r}; run codex-resume --list to see your chats' projects.")
+    if len(found) > 1:
+        raise RuntimeError(
+            f"{len(found)} projects match {query!r}; pass --project with one of these folders:\n"
+            + "\n".join(f"{project['cwd']}  {project_label(project)}" for project in found)
+        )
+    project = found[0]
+    return project, confirmable(project["chats"][0], chats)
 
 
 def list_chats(query=None):
@@ -362,7 +435,7 @@ def remove_agent():
     return True
 
 
-def schedule(scheduled, message=None, chat=None):
+def schedule(scheduled, message=None, chat=None, project=None):
     if PLIST_PATH.exists():
         remove_agent()
 
@@ -376,7 +449,9 @@ def schedule(scheduled, message=None, chat=None):
             sys.executable,
             str(SCRIPT_PATH),
             *(["--message", message] if message is not None else []),
-            *(["--chat", chat["id"]] if chat is not None else []),
+            # A project keeps its folder, so the latest chat is chosen when the run starts.
+            *(["--project", project["cwd"]] if project is not None
+              else ["--chat", chat["id"]] if chat is not None else []),
             "--scheduled",
             scheduled.isoformat(),
         ],
@@ -398,13 +473,19 @@ def schedule(scheduled, message=None, chat=None):
         PLIST_PATH.unlink(missing_ok=True)
         raise
 
-    print(scheduled_summary(scheduled, message, chat["name"] if chat is not None else None))
+    print(scheduled_summary(scheduled, message, None if project is not None else chat, project))
 
 
-def scheduled_summary(scheduled, message, chat_name=None):
+def chat_label(chat):
+    return f"{chat['name']!r}" + (" (remote)" if chat["host"] is not None else "")
+
+
+def scheduled_summary(scheduled, message, chat=None, project=None):
     summary = f"Codex resume scheduled for {format_time(scheduled)}"
-    if chat_name is not None:
-        summary += f" in chat {chat_name!r}"
+    if project is not None:
+        summary += f" in the latest chat in project {project_label(project)}"
+    elif chat is not None:
+        summary += f" in chat {chat_label(chat)}"
     return f"{summary} with message: {message}" if message is not None else f"{summary}."
 
 
@@ -418,14 +499,22 @@ def status():
     scheduled_at = arguments[arguments.index("--scheduled") + 1]
     scheduled = datetime.fromisoformat(scheduled_at)
     message = arguments[arguments.index("--message") + 1] if "--message" in arguments else None
-    chat_name = None
+    chat = project = None
+    if "--project" in arguments:
+        folder = arguments[arguments.index("--project") + 1]
+        unknown = {"name": Path(folder).name, "cwd": folder, "host": None}
+        try:
+            project = next((project for project in load_projects(load_chats()) if project["cwd"] == folder), unknown)
+        except RuntimeError:
+            project = unknown
     if "--chat" in arguments:
         chat_id = arguments[arguments.index("--chat") + 1]
+        unknown = {"id": chat_id, "name": chat_id, "host": None}
         try:
-            chat_name = next((chat["name"] for chat in load_chats() if chat["id"] == chat_id), chat_id)
+            chat = next((chat for chat in load_chats() if chat["id"] == chat_id), unknown)
         except RuntimeError:
-            chat_name = chat_id
-    print(scheduled_summary(scheduled, message, chat_name))
+            chat = unknown
+    print(scheduled_summary(scheduled, message, chat, project))
 
 
 def swift_version(executable):
@@ -450,6 +539,8 @@ def run_automation(action, message=None, chat=None):
         command += ["--message", message]
     if chat is not None:
         command += ["--chat", chat["id"], "--chat-title", chat["name"]]
+        if chat["host"] is not None:
+            command += ["--chat-host", chat["host"]]
     try:
         result = subprocess.run(
             command,
@@ -479,7 +570,27 @@ def run_automation(action, message=None, chat=None):
                     "Line Tools (dotfiles-update does this), then try again. Nothing was sent."
                 )
         raise RuntimeError(f"Codex automation failed: {detail}")
+    if action in ("--check", "--inspect"):
+        report = json.loads(result.stdout)
+        report["chat"] = identify_open_chat(report.get("windowTitle"))
+        print(json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False), flush=True)
+        return
     print(result.stdout, end="", flush=True)
+
+
+def identify_open_chat(title):
+    """Identify the chat the window shows, when exactly one chat has that name."""
+    try:
+        found = [chat for chat in load_chats() if title and same_title(chat["name"], title)]
+    except RuntimeError:
+        return None
+    if len(found) != 1:
+        return None
+    chat = found[0]
+    return {
+        "id": chat["id"], "name": chat["name"], "remote": chat["host"] is not None,
+        "project": Path(chat["cwd"]).name if chat["cwd"] else None, "folder": chat["cwd"],
+    }
 
 
 def submit(action="--submit", message=None, chat=None):
@@ -500,7 +611,8 @@ def submit_scheduled(message=None, chat=None):
         print(
             f"[{datetime.now():%d.%m.%Y kl. %H.%M.%S}] "
             f"Scheduled Codex submission attempt {attempt + 1}/"
-            f"{MAX_SCHEDULED_RETRIES + 1}.",
+            f"{MAX_SCHEDULED_RETRIES + 1}"
+            + (f" in chat {chat_label(chat)}." if chat is not None else "."),
             flush=True,
         )
         try:
@@ -577,6 +689,11 @@ def argument_parser():
         help="open this chat (id, id prefix or name) first; works with --time, --reset, "
              "--now, --check and --inspect",
     )
+    parser.add_argument(
+        "--project", metavar="QUERY",
+        help="like --chat, but open the latest chat in this project (folder name), "
+             "chosen when the message is sent",
+    )
     return parser
 
 
@@ -588,18 +705,26 @@ def main(arguments):
         if not (options.time or options.reset or options.now or options.scheduled):
             parser.error("--message requires --time, --reset or --now")
         message = validate_message(options.message)
-    if options.chat is not None and not (
-        options.time or options.reset or options.now or options.check
-        or options.inspect or options.scheduled
-    ):
-        parser.error("--chat requires --time, --reset, --now, --check or --inspect")
+    for name, value in (("--chat", options.chat), ("--project", options.project)):
+        if value is not None and not (
+            options.time or options.reset or options.now or options.check
+            or options.inspect or options.scheduled
+        ):
+            parser.error(f"{name} requires --time, --reset, --now, --check or --inspect")
+    if options.chat is not None and options.project is not None:
+        parser.error("use either --chat or --project, not both")
+
+    def target():
+        if options.project is not None:
+            return resolve_project(options.project)
+        return None, resolve_chat(options.chat) if options.chat is not None else None
+
     if options.list is not None:
         list_chats(options.list)
         return 0
     if options.limits:
         print(describe_limits(usage_limits()))
         return 0
-    chat = resolve_chat(options.chat) if options.chat is not None else None
     if options.status:
         status()
         return 0
@@ -609,18 +734,11 @@ def main(arguments):
         else:
             print("No Codex resume is scheduled.")
         return 0
-    if options.now:
-        submit(message=message, chat=chat)
-        return 0
-    if options.inspect:
-        run_automation("--inspect", chat=chat)
-        return 0
-    if options.check:
-        run_automation("--check", chat=chat)
-        return 0
     if options.scheduled:
         try:
             wait_until_scheduled_time(options.scheduled)
+            # Resolved at run time, so a project gets its latest chat and a failure still unloads the job.
+            _, chat = target()
             submit_scheduled(message, chat)
         except (OSError, RuntimeError, ValueError) as error:
             # bootout can terminate us before the outer error handler runs.
@@ -631,13 +749,26 @@ def main(arguments):
                 PLIST_PATH.unlink()
                 launchctl("bootout", f"{agent_domain()}/{LABEL}")
         return 0
+    project, chat = target()
+    if options.now:
+        if chat is not None:
+            where = f" in project {project_label(project)}" if project is not None else ""
+            print(f"Resuming in chat {chat_label(chat)}{where}.", flush=True)
+        submit(message=message, chat=chat)
+        return 0
+    if options.inspect:
+        run_automation("--inspect", chat=chat)
+        return 0
+    if options.check:
+        run_automation("--check", chat=chat)
+        return 0
     if options.reset:
         windows = usage_limits()
         scheduled = reset_time(windows)
         print(describe_limits(windows))
     else:
         scheduled = next_occurrence(options.time)
-    schedule(scheduled, message, chat)
+    schedule(scheduled, message, chat, project)
     return 0
 
 

@@ -15,7 +15,7 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 | `zsh/zlogin` | Login shell config (runs after zshrc) — compiles compdump, propagates PATH to launchd |
 | `Brewfile` | Homebrew formula/cask declarations — source of truth for brew packages; used by `applications.sh` and `update.sh` via `brew bundle --file` |
 | `scripts/machine-profile.sh` | Read, choose, or change the machine-local personal/work profile; also sourced by setup, updates, and audit |
-| `scripts/codex-resume.py` | Schedule a one-time Codex desktop resume at a time or the next usage-limit reset, optionally in a chosen chat or with a custom message, through a user LaunchAgent and macOS accessibility automation; invoked by the `codex-resume` shell function |
+| `scripts/codex-resume.py` | Schedule a one-time Codex desktop resume at a time or the next usage-limit reset, optionally in a chosen chat or a project's latest chat (including on a remote-control Mac) or with a custom message, through a user LaunchAgent and macOS accessibility automation; invoked by the `codex-resume` shell function |
 | `scripts/lib/codex-resume.swift` | Native Accessibility helper for chat switching, read-only composer inspection and guarded foreground Return submission |
 | `scripts/lib/tool-updates.sh` | Shared custom update/sync routines for installed tools on either profile; standard Homebrew tools only need a Brewfile declaration |
 | `bash/aliases` | Shell aliases (sourced by zshrc) |

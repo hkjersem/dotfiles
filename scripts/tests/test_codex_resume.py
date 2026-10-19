@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from contextlib import redirect_stderr, redirect_stdout
 import importlib.util
 import io
+import json
 from pathlib import Path
 import plistlib
 import re
@@ -22,22 +23,28 @@ SPEC = importlib.util.spec_from_file_location("codex_resume", SCRIPT)
 codex_resume = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(codex_resume)
 
-THREAD_COLUMNS = (
-    "id TEXT, name TEXT, title TEXT, cwd TEXT, source TEXT, archived INTEGER, "
-    "recency_at_ms INTEGER, updated_at_ms INTEGER, updated_at INTEGER"
+REMOTE_HOST = "remote-control:env_e_mini"
+CATALOG_COLUMNS = (
+    "host_id TEXT, thread_id TEXT, display_title TEXT, cwd TEXT, thread_source TEXT, "
+    "missing_candidate INTEGER, source_updated_at REAL, source_recency_at REAL"
 )
 
 
-def write_threads(path, rows):
+def write_catalog(path, rows):
+    path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(path)
-    connection.execute(f"CREATE TABLE threads ({THREAD_COLUMNS})")
-    connection.executemany("INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+    connection.execute("CREATE TABLE local_thread_catalog_hosts (host_id TEXT PRIMARY KEY, host_kind TEXT)")
+    connection.executemany("INSERT INTO local_thread_catalog_hosts VALUES (?, ?)", [
+        ("local", "local"), (REMOTE_HOST, "remote-control"), ("chatgpt:account", "chatgpt"),
+    ])
+    connection.execute(f"CREATE TABLE local_thread_catalog ({CATALOG_COLUMNS})")
+    connection.executemany("INSERT INTO local_thread_catalog VALUES (?, ?, ?, ?, ?, ?, ?, ?)", rows)
     connection.commit()
     connection.close()
 
 
-def ms(text):
-    return int(datetime.fromisoformat(text).timestamp() * 1000)
+def seconds(text):
+    return datetime.fromisoformat(text).timestamp()
 
 
 FAKE_APP_SERVER = """#!/usr/bin/env python3
@@ -138,9 +145,9 @@ class CodexResumeTests(unittest.TestCase):
             patch.object(codex_resume.subprocess, "run", return_value=result) as run,
             redirect_stdout(output),
         ):
-            codex_resume.run_automation("--inspect")
+            codex_resume.run_automation("--submit")
         run.assert_called_once_with(
-            ["/usr/bin/swift", str(codex_resume.HELPER_PATH), "--inspect"],
+            ["/usr/bin/swift", str(codex_resume.HELPER_PATH), "--submit"],
             text=True, capture_output=True, timeout=60,
         )
         self.assertEqual(output.getvalue(), result.stdout)
@@ -531,48 +538,55 @@ class CodexResumeTests(unittest.TestCase):
 
     def chat_rows(self):
         return [
-            ("01a1-mine", "Find current project status", "where are we", "/work/myntr", "vscode", 0,
-             ms("2026-09-04T13:56:00+02:00"), 0, 0),
-            ("01a2-new", None, "  Fresh\n  prompt  ", "/work/dash", "cli", 0,
-             0, ms("2026-10-18T09:00:00+02:00"), 0),
-            ("01a3-guard", "Guardian review", "Guardian review", "/work", '{"subagent":{"other":"guardian"}}', 0,
-             ms("2026-10-19T11:29:00+02:00"), 0, 0),
-            ("01a4-old", "Find current project status", "x", "/work/old", "vscode", 0,
-             ms("2026-08-01T10:00:00+02:00"), 0, 0),
-            ("01a5-arch", "Archived plan", "x", "/work", "vscode", 1,
-             ms("2026-10-19T10:00:00+02:00"), 0, 0),
-            ("01a6-status", "Status board", "x", "/work", "vscode", 0,
-             ms("2026-07-01T10:00:00+02:00"), 0, 0),
+            ("local", "01a1-mine", "Find current project status", "/work/myntr", "user", 0,
+             0, seconds("2026-09-04T13:56:00+02:00")),
+            ("local", "01a2-new", "  Fresh\n  prompt  ", "/work/dash", None, 0,
+             seconds("2026-10-18T09:00:00+02:00"), 0),
+            ("local", "01a3-guard", "Guardian review", "/work", "guardian_review", 0,
+             0, seconds("2026-10-19T11:29:00+02:00")),
+            ("local", "01a4-old", "Find current project ideas", "/work/old", "user", 0,
+             0, seconds("2026-08-01T10:00:00+02:00")),
+            ("local", "01a5-gone", "Removed plan", "/work", "user", 1,
+             0, seconds("2026-10-19T10:00:00+02:00")),
+            ("local", "01a6-status", "Status board", "/work", "user", 0,
+             0, seconds("2026-07-01T10:00:00+02:00")),
+            (REMOTE_HOST, "01a7-mini", "Explore PWA roadmap", "/mini/local-relay", "user", 0,
+             0, seconds("2026-10-10T08:00:00+02:00")),
+            ("chatgpt:account", "6acf-web", "Plain ChatGPT chat", None, None, 0,
+             0, seconds("2026-10-19T11:00:00+02:00")),
         ]
 
     def with_chats(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         home = Path(temporary.name)
-        write_threads(home / "state_5.sqlite", self.chat_rows())
-        write_threads(home / "state_4.sqlite", [])
+        write_catalog(home / codex_resume.CHAT_CATALOG, self.chat_rows())
         patcher = patch.object(codex_resume, "CODEX_HOME", home)
         patcher.start()
         self.addCleanup(patcher.stop)
         return home
 
-    def test_chat_list_shows_only_own_unarchived_chats_newest_first(self):
+    def test_chat_list_shows_this_and_remote_macs_chats_newest_first(self):
         self.with_chats()
         chats = codex_resume.load_chats()
-        self.assertEqual([chat["id"] for chat in chats], ["01a2-new", "01a1-mine", "01a4-old", "01a6-status"])
+        self.assertEqual([chat["id"] for chat in chats],
+                         ["01a2-new", "01a7-mini", "01a1-mine", "01a4-old", "01a6-status"])
         self.assertEqual(chats[0]["name"], "Fresh prompt")
+        self.assertEqual([chat["host"] for chat in chats[:2]], [None, REMOTE_HOST])
         output = io.StringIO()
         with redirect_stdout(output):
             codex_resume.list_chats("status")
+            codex_resume.list_chats("pwa")
         lines = output.getvalue().splitlines()
         self.assertEqual(len(lines), 3)
         self.assertRegex(lines[0], r"^2026-09-04 \d\d:56  01a1-mine  Find current project status\s+myntr$")
+        self.assertRegex(lines[2], r"^2026-10-10 \d\d:00  01a7-mini  Explore PWA roadmap  local-relay \(remote\)$")
         self.assertNotIn("Guardian", output.getvalue())
 
-    def test_missing_state_database_is_reported(self):
+    def test_missing_chat_catalog_is_reported(self):
         with tempfile.TemporaryDirectory() as temporary, \
                 patch.object(codex_resume, "CODEX_HOME", Path(temporary)):
-            with self.assertRaisesRegex(RuntimeError, "No Codex state database"):
+            with self.assertRaisesRegex(RuntimeError, "chat list .* was not found"):
                 codex_resume.load_chats()
 
     def test_chat_is_resolved_by_id_prefix_or_name_and_never_guessed(self):
@@ -594,9 +608,23 @@ class CodexResumeTests(unittest.TestCase):
         self.assertIn("2 chats match", message)
         self.assertRegex(message, r"2026-09-04 \d\d:56  01a1-mine")
         self.assertRegex(message, r"2026-08-01 \d\d:00  01a4-old")
-        for query in ("guardian", "archived", "nothing like this"):
+        for query in ("guardian", "removed", "plain chatgpt", "nothing like this"):
             with self.subTest(query=query), self.assertRaisesRegex(RuntimeError, "No chat matches"):
                 codex_resume.resolve_chat(query)
+
+    def test_chat_sharing_its_window_title_with_another_is_refused(self):
+        def chat(chat_id, name):
+            return {"id": chat_id, "name": name, "cwd": None, "updated": datetime.now().astimezone(), "host": None}
+
+        for other in ("Plan the move", "Plan  the move", "Plan the…", "Plan the move and more"):
+            with self.subTest(other=other):
+                with patch.object(codex_resume, "load_chats", return_value=[chat("a", "Plan the move"), chat("b", other)]):
+                    clash = other != "Plan the move and more"
+                    if clash:
+                        with self.assertRaisesRegex(RuntimeError, "same name as 'Plan the move'.*\n.*  a  .*\n.*  b  "):
+                            codex_resume.resolve_chat("a")
+                    else:
+                        self.assertEqual(codex_resume.resolve_chat("a")["id"], "a")
 
     def test_chat_is_passed_to_the_helper_and_stored_for_scheduled_runs(self):
         self.with_chats()
@@ -604,10 +632,27 @@ class CodexResumeTests(unittest.TestCase):
         with (
             patch.object(codex_resume.shutil, "which", return_value="/usr/bin/swift"),
             patch.object(codex_resume.subprocess, "run", return_value=result) as run,
+            redirect_stdout(io.StringIO()) as output,
         ):
             self.assertEqual(codex_resume.main(["--now", "--chat", "01a1"]), 0)
-        self.assertEqual(run.call_args.args[0][2:], [
+            now_arguments = run.call_args.args[0][2:]
+            self.assertEqual(codex_resume.main(["--now", "--chat", "explore pwa"]), 0)
+        self.assertEqual(now_arguments, [
             "--submit", "--chat", "01a1-mine", "--chat-title", "Find current project status",
+        ])
+        self.assertEqual(output.getvalue().splitlines(), [
+            "Resuming in chat 'Find current project status'.",
+            "Resuming in chat 'Explore PWA roadmap' (remote).",
+        ])
+        report = subprocess.CompletedProcess([], 0, '{"windowTitle": "Explore PWA roadmap"}', "")
+        with (
+            patch.object(codex_resume.shutil, "which", return_value="/usr/bin/swift"),
+            patch.object(codex_resume.subprocess, "run", return_value=report) as run,
+            redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(codex_resume.main(["--check", "--chat", "explore pwa"]), 0)
+        self.assertEqual(run.call_args.args[0][2:], [
+            "--check", "--chat", "01a7-mini", "--chat-title", "Explore PWA roadmap", "--chat-host", REMOTE_HOST,
         ])
         with tempfile.TemporaryDirectory() as temporary:
             plist_path = Path(temporary) / "job.plist"
@@ -629,10 +674,112 @@ class CodexResumeTests(unittest.TestCase):
                 patch.object(codex_resume, "wait_until_scheduled_time"),
                 patch.object(codex_resume, "submit") as submit,
                 patch.object(codex_resume, "launchctl"),
-                redirect_stdout(io.StringIO()),
+                redirect_stdout(io.StringIO()) as log,
             ):
                 self.assertEqual(codex_resume.main(arguments[4:]), 0)
             self.assertEqual(submit.call_args.args[2]["name"], "Status board")
+            self.assertIn("attempt 1/11 in chat 'Status board'.", log.getvalue())
+
+    def test_check_and_inspect_identify_the_open_chat_and_its_project(self):
+        self.with_chats()
+        for title, chat in (
+            ("Explore PWA roadmap", {"id": "01a7-mini", "name": "Explore PWA roadmap", "remote": True,
+                                     "project": "local-relay", "folder": "/mini/local-relay"}),
+            ("Find current project…", None),
+            ("Codex", None),
+        ):
+            for action in ("--check", "--inspect"):
+                with self.subTest(title=title, action=action):
+                    result = subprocess.CompletedProcess([], 0, json.dumps({"windowTitle": title, "empty": True}), "")
+                    with (
+                        patch.object(codex_resume.shutil, "which", return_value="/usr/bin/swift"),
+                        patch.object(codex_resume.subprocess, "run", return_value=result),
+                        redirect_stdout(io.StringIO()) as output,
+                    ):
+                        codex_resume.run_automation(action)
+                    self.assertEqual(json.loads(output.getvalue()),
+                                     {"windowTitle": title, "empty": True, "chat": chat})
+
+    def test_project_matches_folder_names_and_picks_its_latest_chat(self):
+        self.with_chats()
+        for query, chat_id in (("myntr", "01a1-mine"), ("LOCAL rel", "01a7-mini"), ("/work", "01a6-status")):
+            with self.subTest(query=query):
+                self.assertEqual(codex_resume.resolve_project(query)[1]["id"], chat_id)
+        with self.assertRaisesRegex(RuntimeError, "projects match 'o'") as error:
+            codex_resume.resolve_project("o")
+        self.assertIn("/mini/local-relay  'local-relay' (remote)", str(error.exception))
+        with self.assertRaisesRegex(RuntimeError, "No project matches 'remote'"):
+            codex_resume.resolve_project("remote")
+
+    def test_scheduled_project_opens_the_chat_that_is_latest_when_it_runs(self):
+        home = self.with_chats()
+        result = subprocess.CompletedProcess([], 0, "", "")
+        with (
+            patch.object(codex_resume.shutil, "which", return_value="/usr/bin/swift"),
+            patch.object(codex_resume.subprocess, "run", return_value=result) as run,
+            redirect_stdout(io.StringIO()) as output,
+        ):
+            self.assertEqual(codex_resume.main(["--now", "--project", "local-relay"]), 0)
+        self.assertEqual(run.call_args.args[0][3:5], ["--chat", "01a7-mini"])
+        self.assertEqual(output.getvalue(),
+                         "Resuming in chat 'Explore PWA roadmap' (remote) in project 'local-relay' (remote).\n")
+        with tempfile.TemporaryDirectory() as temporary:
+            plist_path = Path(temporary) / "job.plist"
+            output = io.StringIO()
+            with (
+                patch.object(codex_resume, "PLIST_PATH", plist_path),
+                patch.object(codex_resume, "LOG_PATH", Path(temporary) / "log"),
+                patch.object(codex_resume, "launchctl"),
+                redirect_stdout(output),
+            ):
+                codex_resume.main(["--time", "16:30", "--project", "myntr"])
+                codex_resume.main(["--status"])
+            with plist_path.open("rb") as agent_file:
+                arguments = plistlib.load(agent_file)["ProgramArguments"]
+            self.assertEqual(arguments[-4:-2], ["--project", "/work/myntr"])
+            self.assertEqual(output.getvalue().count("in the latest chat in project 'myntr'"), 2)
+            self.assertNotIn("in chat", output.getvalue())
+            (home / codex_resume.CHAT_CATALOG).unlink()
+            write_catalog(home / codex_resume.CHAT_CATALOG, self.chat_rows() + [
+                ("local", "01a8-later", "Later myntr work", "/work/myntr", "user", 0,
+                 0, seconds("2026-10-19T12:00:00+02:00")),
+            ])
+            with (
+                patch.object(codex_resume, "PLIST_PATH", plist_path),
+                patch.object(codex_resume, "wait_until_scheduled_time"),
+                patch.object(codex_resume, "submit") as submit,
+                patch.object(codex_resume, "launchctl"),
+                redirect_stdout(io.StringIO()) as log,
+            ):
+                self.assertEqual(codex_resume.main(arguments[4:]), 0)
+            self.assertEqual(submit.call_args.args[2]["id"], "01a8-later")
+            self.assertIn("in chat 'Later myntr work'.", log.getvalue())
+
+    def test_scheduled_project_without_chats_fails_and_unloads(self):
+        self.with_chats()
+        with tempfile.TemporaryDirectory() as temporary:
+            plist_path = Path(temporary) / "job.plist"
+            plist_path.write_bytes(b"")
+            with (
+                patch.object(codex_resume, "PLIST_PATH", plist_path),
+                patch.object(codex_resume, "wait_until_scheduled_time"),
+                patch.object(codex_resume, "submit") as submit,
+                patch.object(codex_resume, "launchctl") as launchctl,
+                redirect_stderr(io.StringIO()) as errors,
+            ):
+                self.assertEqual(codex_resume.main(
+                    ["--project", "/work/deleted", "--scheduled", "2026-10-19T16:30:00+02:00"]), 1)
+            submit.assert_not_called()
+            launchctl.assert_called_once()
+            self.assertFalse(plist_path.exists())
+            self.assertIn("No project matches '/work/deleted'", errors.getvalue())
+
+    def test_project_and_chat_cannot_be_combined_and_need_an_action(self):
+        for arguments in (["--now", "--chat", "x", "--project", "y"], ["--status", "--project", "y"]):
+            with self.subTest(arguments=arguments), redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as error:
+                    codex_resume.main(arguments)
+                self.assertEqual(error.exception.code, 2)
 
     def test_chat_needs_an_action_that_uses_it(self):
         for arguments in (["--status", "--chat", "x"], ["--list", "--chat", "x"]):
