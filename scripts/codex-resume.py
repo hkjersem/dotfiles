@@ -16,18 +16,20 @@ Return prevents automatic retries to avoid duplicates.
 
 The helper locates the Codex app by bundle ID (even when named ChatGPT),
 excluding the separate ChatGPT chat app. It reads the composer and nearby Send
-control, preserving drafts or inserting continue when empty. --message replaces
-continue with a single-line custom message. That message is typed only into a
-recognised, empty composer: a draft or an unrecognised composer stops before any
-input, and such stops are retryable when scheduled. This app exposes
-its placeholder (sometimes with a newline) as AXValue when empty. A placeholder
-match ignoring surrounding whitespace is treated as empty, even if deliberately
-typed. If no composer label is recognised, it activates the app and sends only
-Return to its existing focus, without typing text. This fallback cannot verify
-what has focus or whether a message was sent, and never retries after Return.
-When the window exposes no text areas at all, scheduled runs retry first and
-use this fallback only on the final attempt; --now uses it immediately.
-Unreadable or ambiguous controls still fail; they do not use the fallback.
+control, preserving drafts or inserting continue when empty. An empty composer
+may show a voice chat button instead of Send; text is then typed, and Return
+waits for Send to replace it. --message replaces continue with a single-line
+custom message. That message is typed only into a recognised, empty composer: a
+draft or an unrecognised composer stops before any input, retryably when
+scheduled. This app exposes its placeholder (sometimes with a newline) as
+AXValue when empty. A placeholder match ignoring surrounding whitespace is
+treated as empty, even if deliberately typed. If no composer label is
+recognised, it activates the app and sends only Return to its existing focus,
+without typing text. This fallback cannot verify what has focus or whether a
+message was sent, and never retries after Return. When the window exposes no
+text areas at all, scheduled runs retry first and use this fallback only on the
+final attempt; --now uses it immediately. Unreadable or ambiguous controls still
+fail; they do not use the fallback.
 
 Submission activates the app and verifies composer focus and unchanged text.
 For an empty composer it types continue using keyboard events, since setting

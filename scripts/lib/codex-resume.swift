@@ -38,6 +38,8 @@ let excludedBundleIdentifiers: Set<String> = ["com.openai.chat"]
 let composerLabels: Set<String> = ["spør chatgpt", "ask chatgpt", "spør codex", "ask codex", "arbeid med chatgpt"]
 let sendLabels: Set<String> = ["send", "send prompt", "send message", "send melding"]
 let stopLabels: Set<String> = ["stop", "stopp", "stop generating", "stopp generering", "stop streaming"]
+// An empty composer shows this voice chat button where Send appears once text is typed.
+let voiceLabels: Set<String> = ["start voice chat", "start talechat", "start stemmechat"]
 let continueText = "continue"
 
 // Mirrors codex-resume.py: one trimmed line, since a typed newline would send early,
@@ -172,6 +174,7 @@ struct Target<N: UINode> {
     let placeholder: String
     let send: N?
     let stop: N?
+    var voice: N? = nil
 }
 
 func collect<N: UINode>(_ root: N, roles: Set<String>) throws -> [N] {
@@ -221,20 +224,27 @@ func findTarget<N: UINode>(in window: N) throws -> Target<N> {
     let placeholder = try composer.rawLabel()
 
     var current = composer
+    var nearby: [String] = []
     for _ in 0..<maxAncestorLevels {
         guard let parent = try current.node("AXParent"), !parent.same(as: window) else { break }
         let buttons = try collect(parent, roles: ["AXButton"])
+        nearby = try buttons.map { "\"" + (try $0.rawLabel()).trimmingCharacters(in: .whitespacesAndNewlines) + "\"" }
         let sends = try buttons.filter { sendLabels.contains(try $0.label()) }
         let stops = try buttons.filter { stopLabels.contains(try $0.label()) }
-        if !sends.isEmpty || !stops.isEmpty {
-            guard sends.count <= 1, stops.count <= 1 else {
-                throw Failure("Found several Send or Stop buttons next to the composer; refusing to guess.")
+        let voices = try buttons.filter { voiceLabels.contains(try $0.label()) }
+        if !sends.isEmpty || !stops.isEmpty || !voices.isEmpty {
+            guard sends.count <= 1, stops.count <= 1, voices.count <= 1 else {
+                throw Failure("Found several Send, Stop or voice chat buttons next to the composer; refusing to guess.")
             }
-            return Target(composer: composer, composerLabel: composerLabel, placeholder: placeholder, send: sends.first, stop: stops.first)
+            return Target(composer: composer, composerLabel: composerLabel, placeholder: placeholder,
+                          send: sends.first, stop: stops.first, voice: voices.first)
         }
         current = parent
     }
-    throw Failure("No Send or Stop button found next to the composer.", retryable: true)
+    // Button labels are interface text, not draft text, so they are safe to report.
+    throw Failure("No Send or Stop button found next to the composer (found "
+        + (nearby.isEmpty ? "no buttons" : "buttons labelled " + nearby.joined(separator: ", ")) + ").",
+        retryable: true)
 }
 
 func composerText<N: UINode>(_ target: Target<N>) throws -> String {
@@ -483,14 +493,15 @@ func submitSteps<N: UINode>(
     guard try initial.composer.flag("AXEnabled") != false else {
         throw Failure("The composer is disabled (a remote Mac may be disconnected); not submitting.", retryable: true)
     }
-    guard initial.send != nil else {
+    let composer = initial.composer
+    let original = try composerText(initial)
+    let inserted = isBlank(original)
+    // Send replaces the voice chat button once text is typed, which the wait after typing confirms.
+    guard initial.send != nil || (initial.voice != nil && initial.stop == nil && inserted) else {
         throw Failure(initial.stop != nil
             ? "A reply appears to be in progress (Stop is shown); not submitting."
             : "No Send button next to the composer; not submitting.", retryable: true)
     }
-    let composer = initial.composer
-    let original = try composerText(initial)
-    let inserted = isBlank(original)
     if message != nil && !inserted {
         throw Failure("The composer holds a draft; not adding the custom message to it or sending it.", retryable: true)
     }
@@ -627,6 +638,7 @@ func check(chat: Chat?) throws {
         ],
         "send": ["enabled": sendEnabled, "found": target.send != nil],
         "stop": ["found": target.stop != nil],
+        "voice": ["found": target.voice != nil],
         "readyToSubmit": target.send != nil && sendEnabled,
         "secureInputOwner": secureInputOwner() ?? NSNull(),
         "idleSeconds": Int(idle),
@@ -1072,6 +1084,26 @@ func selfTest() -> Int32 {
         f.send.attributes["AXDescription"] = "Other"
         f.sidebar.add([button("Send")])
         try expectFailure("No Send or Stop") { _ = try findTarget(in: f.window) }
+    }
+    test("types into an empty composer that shows the voice chat button instead of Send") {
+        let f = fixture(draft: "", sendEnabled: false)
+        f.send.attributes["AXDescription"] = "Start talechat"
+        f.host.onType = { f.send.attributes["AXDescription"] = "Send" }
+        let result = try run(f)
+        try expect(result.inserted && result.outcome == .confirmed, "unexpected result \(result)")
+        try expect(f.host.returns.count == 1, "Return not pressed once")
+    }
+    test("does not press Return when Send never replaces the voice chat button") {
+        let f = fixture(draft: "", sendEnabled: false)
+        f.send.attributes["AXDescription"] = "Start talechat"
+        try expectFailure("Send stayed disabled; left it in the composer") { _ = try run(f) }
+        try expectNoReturn(f, typed: 1)
+    }
+    test("refuses a draft next to the voice chat button") {
+        let f = fixture(draft: "my draft", sendEnabled: false)
+        f.send.attributes["AXDescription"] = "Start talechat"
+        try expectFailure("No Send button") { _ = try run(f) }
+        try expectNoReturn(f, typed: 0)
     }
     test("refuses oversized trees") {
         let f = fixture()
