@@ -189,6 +189,9 @@ class AgentSessionsTest(unittest.TestCase):
             if leader:
                 os.execve("/bin/sh", ["sh", "-c", f"{leader} /bin/zsh -d -i; :"], {**self.env, **env})
             os.execve("/bin/zsh", ["zsh", "-d", "-i"], {**self.env, **env})
+        # pty.fork leaves the master inheritable; a later shell holding it
+        # would keep this terminal open after hang_up closes it.
+        os.set_inheritable(fd, False)
         self.addCleanup(self._reap, pid, fd)
         return pid, fd
 
@@ -230,9 +233,13 @@ class AgentSessionsTest(unittest.TestCase):
         pid, fd = self.interactive_shell(cwd, **env)
         self.exit_shell(pid, fd)
 
-    def hang_up(self, pid, fd):
+    def hang_up(self, pid, fd, timeout=10):
         os.close(fd)
-        os.waitpid(pid, 0)
+        deadline = time.time() + timeout
+        while os.waitpid(pid, os.WNOHANG)[0] == 0:
+            if time.time() > deadline:
+                self.fail("shell did not exit after its terminal closed")
+            time.sleep(0.05)
 
     def write_marker(self, session_id, cwd, launcher="cplt", args="", age=0, pid=99999999, started="",
                      events=True, agent="copilot"):
@@ -518,7 +525,8 @@ class AgentSessionsTest(unittest.TestCase):
         self.wait_for_calls(fd, 1)
         session_id = self.args()[0][2]
         shell = int(subprocess.run(["pgrep", "-P", str(pid)], capture_output=True, text=True).stdout.split()[0])
-        self.hang_up(pid, fd)
+        # A leader that ignores HUP passes that on, so the agent finishes its 30-second hang.
+        self.hang_up(pid, fd, timeout=45)
         deadline = time.time() + 10
         while time.time() < deadline:
             try:
