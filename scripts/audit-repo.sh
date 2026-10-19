@@ -121,6 +121,9 @@ fi
 GIT_ROOT=$(git rev-parse --show-toplevel) || exit 1
 cd "$GIT_ROOT" || exit 1
 REPO_NAME=$(basename "$GIT_ROOT")
+# Hosted CI, other contributors and remote branches all need a remote.
+HAS_REMOTE=
+[[ -n "$(git remote 2>/dev/null)" ]] && HAS_REMOTE=1
 
 if [[ ! -f "package.json" ]]; then
   HAS_PACKAGE_JSON=false
@@ -305,7 +308,8 @@ else
 fi
 
 # Knowledge concentration — top committer's share of total commits; a high share means
-# most codebase knowledge lives with one person, which is a risk if they leave
+# most codebase knowledge lives with one person, which is a risk if they leave.
+# A repository without a remote has no other contributors, so it is skipped there.
 # alias: git stats [--since="6 months ago"]
 ALL_HISTORY=$(read_git log --no-merges --oneline) || exit 1
 TOTAL_COMMITS=$(printf '%s\n' "$ALL_HISTORY" | grep -c . || true)
@@ -314,13 +318,17 @@ if [[ "$TOTAL_COMMITS" -gt 0 ]]; then
   TOP_LINE=$(printf '%s\n' "$AUTHORS" | head -1)
   TOP_COUNT=$(echo "$TOP_LINE" | awk '{print $1}')
   TOP_NAME=$(echo "$TOP_LINE" | sed 's/^[[:space:]]*[0-9]*[[:space:]]*//')
-  PCT=$(( (TOP_COUNT * 100) / TOTAL_COMMITS ))
-  if [[ $PCT -ge 60 ]]; then
-    warn "Knowledge concentration: ${TOP_NAME} wrote ${PCT}% of all commits — single-author risk"
-  elif [[ $PCT -ge 40 ]]; then
-    warn "Knowledge concentration: ${TOP_NAME} at ${PCT}% (${TOP_COUNT}/${TOTAL_COMMITS} commits)"
+  if [[ -z "$HAS_REMOTE" ]]; then
+    info "No remote — knowledge concentration check skipped"
   else
-    ok "Knowledge concentration: ${TOP_NAME} at ${PCT}% — healthy spread"
+    PCT=$(( (TOP_COUNT * 100) / TOTAL_COMMITS ))
+    if [[ $PCT -ge 60 ]]; then
+      warn "Knowledge concentration: ${TOP_NAME} wrote ${PCT}% of all commits — single-author risk"
+    elif [[ $PCT -ge 40 ]]; then
+      warn "Knowledge concentration: ${TOP_NAME} at ${PCT}% (${TOP_COUNT}/${TOTAL_COMMITS} commits)"
+    else
+      ok "Knowledge concentration: ${TOP_NAME} at ${PCT}% — healthy spread"
+    fi
   fi
   info "Top 5 contributors"
   while IFS= read -r line; do row "$line"; done < <(printf '%s\n' "$AUTHORS" | head -5)
@@ -425,7 +433,7 @@ section_start "Stale Branches & Worktrees"
 SB_TMP=$AUDIT_TMP
 # shellcheck disable=SC2034  # read by lib/stale-branches.sh
 SB_INVOKING_TOP=$(pwd -P)
-if [[ -z "$(git -C "$GIT_ROOT" remote 2>/dev/null)" ]]; then
+if [[ -z "$HAS_REMOTE" ]]; then
   info "No remote — stale branch check skipped"
 elif ! SB_GIT_DIR=$(sb_common_dir "$GIT_ROOT"); then
   SB_ERR=$(git -C "$GIT_ROOT" rev-parse --path-format=absolute --git-common-dir 2>&1 >/dev/null | head -1)
@@ -1011,8 +1019,8 @@ section_end
 # ══════════════════════════════════════════════════════════════════════════════
 section_start "Build Signals"
 
-# CI config — regardless of language; hosted CI needs a remote, so local-only repos skip it
-if [[ -z "$(git -C "$GIT_ROOT" remote 2>/dev/null)" ]]; then
+# CI config — regardless of language
+if [[ -z "$HAS_REMOTE" ]]; then
   info "No remote — CI check skipped"
 elif [[ -d ".github/workflows" ]] && git ls-files ".github/workflows/*.yml" ".github/workflows/*.yaml" 2>/dev/null | grep -q .; then
   CI_COUNT=$(git ls-files ".github/workflows/*.yml" ".github/workflows/*.yaml" 2>/dev/null | wc -l | tr -d ' ')

@@ -113,6 +113,10 @@ class AuditRepoTests(unittest.TestCase):
                     "bun": "bun.lock", "yarn": "yarn.lock"}[pm], "{}")
         self.write("test_example.py", "pass\n")
 
+    def add_remote(self):
+        subprocess.run([self.git, "-C", str(self.project), "remote", "add", "origin", "https://example.invalid/x.git"],
+                       env=self.env, check=True, capture_output=True)
+
     def run_audit(self, *args, cwd=None):
         self.state_file.write_text(json.dumps(self.state))
         self.log.write_text("")
@@ -272,15 +276,18 @@ class AuditRepoTests(unittest.TestCase):
         self.assertNotIn("has no design tokens", out)
         self.assertEqual(result.stderr, "")
 
-    def test_ci_check_needs_a_remote(self):
+    def test_ci_and_single_author_checks_need_a_remote(self):
+        self.state.update(authors="2 Solo")
         self.write("app.py", "pass\n")
         result = self.run_audit("--skip-security")
         self.assertIn("No remote — CI check skipped", result.stdout)
         self.assertNotIn("No CI config found", result.stdout)
-        subprocess.run([self.git, "-C", str(self.project), "remote", "add", "origin", "https://example.invalid/x.git"],
-                       env=self.env, check=True, capture_output=True)
+        self.assertIn("No remote — knowledge concentration check skipped", result.stdout)
+        self.assertNotIn("single-author risk", result.stdout)
+        self.add_remote()
         result = self.run_audit("--skip-security")
         self.assertIn("🟡 No CI config found", result.stdout)
+        self.assertIn("🟡 Knowledge concentration: Solo wrote 100% of all commits", result.stdout)
         self.write(".github/workflows/ci.yml", "on: push\n")
         result = self.run_audit("--skip-security")
         self.assertIn("GitHub Actions: 1 workflow(s)", result.stdout)
@@ -499,6 +506,7 @@ class AuditRepoTests(unittest.TestCase):
         self.state.update(commits=commits, authors="10 Solo", changed_files=["app.py"] * 10,
                           bug_commits=commits, fire_commits=commits[:6])
         self.write("app.py", "pass\n")
+        self.add_remote()
         result = self.run_audit("--skip-security")
         for finding in ("Top churn: app.py changed in 100%", "Solo wrote 100% of all commits",
                         "10 fix-labelled commits (100% of total)", "Firefighting: 6 hotfix",
