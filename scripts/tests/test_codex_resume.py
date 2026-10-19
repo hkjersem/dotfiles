@@ -1,6 +1,6 @@
 """Offline regression tests for codex-resume scheduling."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from contextlib import redirect_stderr, redirect_stdout
 import importlib.util
 import io
@@ -38,6 +38,25 @@ def write_threads(path, rows):
 
 def ms(text):
     return int(datetime.fromisoformat(text).timestamp() * 1000)
+
+
+FAKE_APP_SERVER = """#!/usr/bin/env python3
+import json, sys
+mode = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] != "app-server" else "{mode}"
+for line in sys.stdin:
+    request = json.loads(line)
+    if request.get("id") == 1:
+        print(json.dumps({{"id": 1, "result": {{}}}}), flush=True)
+    elif request.get("id") == 2 and mode == "exit":
+        sys.exit(0)
+    elif request.get("id") == 2 and mode != "silent":
+        if mode == "error":
+            reply = {{"id": 2, "error": {{"message": "not signed in"}}}}
+        else:
+            reply = {{"id": 2, "result": {{"method": request["method"]}}}}
+        print("not json", flush=True)
+        print(json.dumps(reply), flush=True)
+"""
 
 
 class CodexResumeTests(unittest.TestCase):
@@ -621,6 +640,79 @@ class CodexResumeTests(unittest.TestCase):
                 with self.assertRaises(SystemExit) as error:
                     codex_resume.main(arguments)
                 self.assertEqual(error.exception.code, 2)
+
+    def fake_cli(self, mode):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        cli = Path(temporary.name) / "codex"
+        cli.write_text(FAKE_APP_SERVER.format(mode=mode))
+        cli.chmod(0o755)
+        patcher = patch.object(codex_resume, "CODEX_CLI_PATHS", (cli,))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_app_server_request_waits_for_the_reply_before_closing_input(self):
+        self.fake_cli("answer")
+        self.assertEqual(
+            codex_resume.app_server_request("account/rateLimits/read"),
+            {"method": "account/rateLimits/read"},
+        )
+
+    def test_app_server_errors_and_silence_are_reported(self):
+        self.fake_cli("error")
+        with self.assertRaisesRegex(RuntimeError, "rejected account/rateLimits/read: not signed in"):
+            codex_resume.app_server_request("account/rateLimits/read")
+        self.fake_cli("exit")
+        with self.assertRaisesRegex(RuntimeError, "exited without answering"):
+            codex_resume.app_server_request("account/rateLimits/read")
+        self.fake_cli("silent")
+        with patch.object(codex_resume, "APP_SERVER_TIMEOUT_SECONDS", 0.5):
+            with self.assertRaisesRegex(RuntimeError, "did not answer"):
+                codex_resume.app_server_request("account/rateLimits/read")
+
+    def limits(self, primary_used, secondary_used):
+        return {"rateLimits": {
+            "primary": {"usedPercent": primary_used, "windowDurationMins": 300,
+                        "resetsAt": int(datetime.fromisoformat("2026-10-19T11:51:00+02:00").timestamp())},
+            "secondary": {"usedPercent": secondary_used, "windowDurationMins": 10080,
+                          "resetsAt": int(datetime.fromisoformat("2026-10-25T02:55:00+02:00").timestamp())},
+        }}
+
+    def test_reset_waits_for_the_latest_used_up_limit(self):
+        five_hour = datetime.fromisoformat("2026-10-19T11:52:00+02:00")
+        weekly = datetime.fromisoformat("2026-10-25T02:56:00+02:00")
+        for used, expected in (((100, 76), five_hour), ((40, 100), weekly), ((100, 100), weekly)):
+            with self.subTest(used=used):
+                with patch.object(codex_resume, "app_server_request", return_value=self.limits(*used)):
+                    windows = codex_resume.usage_limits()
+                self.assertEqual(codex_resume.reset_time(windows), expected)
+        with patch.object(codex_resume, "app_server_request", return_value=self.limits(98, 76)):
+            windows = codex_resume.usage_limits()
+        with self.assertRaisesRegex(RuntimeError, "No Codex usage limit is used up") as error:
+            codex_resume.reset_time(windows)
+        self.assertIn("5-hour: 98% used, resets 2026-10-19", str(error.exception))
+        self.assertIn("weekly: 76% used, resets 2026-10-25", str(error.exception))
+
+    def test_reset_schedules_the_job_with_message_and_chat(self):
+        self.with_chats()
+        with tempfile.TemporaryDirectory() as temporary:
+            plist_path = Path(temporary) / "job.plist"
+            output = io.StringIO()
+            with (
+                patch.object(codex_resume, "PLIST_PATH", plist_path),
+                patch.object(codex_resume, "LOG_PATH", Path(temporary) / "log"),
+                patch.object(codex_resume, "launchctl"),
+                patch.object(codex_resume, "app_server_request", return_value=self.limits(100, 76)),
+                redirect_stdout(output),
+            ):
+                self.assertEqual(codex_resume.main(
+                    ["--reset", "--message", "Resume now", "--chat", "01a1"]), 0)
+            with plist_path.open("rb") as agent_file:
+                arguments = plistlib.load(agent_file)["ProgramArguments"]
+        scheduled = datetime.fromisoformat(arguments[-1])
+        self.assertEqual(scheduled - datetime.fromisoformat("2026-10-19T11:51:00+02:00"), timedelta(minutes=1))
+        self.assertEqual(arguments[4:-2], ["--message", "Resume now", "--chat", "01a1-mine"])
+        self.assertIn("5-hour: 100% used", output.getvalue())
 
     def test_compile_error_on_old_swift_explains_the_update(self):
         compile_error = subprocess.CompletedProcess(

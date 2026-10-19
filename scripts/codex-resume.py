@@ -57,10 +57,14 @@ prefix, or name: the whole name, part of it, or the starts of its words in any
 order; several matches are listed with their last activity instead of
 guessing. The helper opens it through its codex://threads/<id> link only after
 any idle check passes, then waits for the window title to show the chat's name.
+--limits and --reset read the usage limits live through the Codex CLI's app
+server (account/rateLimits/read, read-only). --reset schedules a minute after
+the latest reset among the limits that are used up.
 """
 
 from datetime import datetime, timedelta
 import argparse
+import json
 import os
 from pathlib import Path
 import plistlib
@@ -70,6 +74,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unicodedata
 
@@ -80,8 +85,15 @@ LOG_PATH = Path.home() / "Library/Logs/codex-resume.log"
 SCRIPT_PATH = Path(__file__).resolve()
 TIME_PATTERN = re.compile(r"([01][0-9]|2[0-3])[:.]?([0-5][0-9])\Z")
 SCHEDULE_DELAY_SECONDS = 3
+RESET_MARGIN_SECONDS = 60
 CODEX_HOME = Path.home() / ".codex"
+CODEX_CLI_PATHS = (
+    Path("/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex"),
+    Path.home() / "Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex",
+)
+APP_SERVER_TIMEOUT_SECONDS = 20
 LIST_LIMIT = 20
+LIMIT_NAMES = {300: "5-hour", 10080: "weekly"}
 RETRY_INTERVAL_SECONDS = 60
 MAX_SCHEDULED_RETRIES = 10
 HELPER_PATH = SCRIPT_PATH.parent / "lib/codex-resume.swift"
@@ -227,6 +239,96 @@ def list_chats(query=None):
     print(describe_chats(chats[:LIST_LIMIT]))
     if len(chats) > LIST_LIMIT:
         print(f"… and {len(chats) - LIST_LIMIT} older; add a search term to narrow the list.")
+
+
+def codex_cli():
+    for path in CODEX_CLI_PATHS:
+        if os.access(path, os.X_OK):
+            return str(path)
+    found = shutil.which("codex")
+    if found is None:
+        raise RuntimeError("The Codex CLI is unavailable, so the usage limits cannot be read.")
+    return found
+
+
+def app_server_request(method):
+    """Send one JSON-RPC request to a short-lived app server and return its result."""
+    process = subprocess.Popen(
+        [codex_cli(), "app-server"],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+    )
+    replies = {}
+    received = threading.Event()
+
+    def read():
+        try:
+            for line in process.stdout:
+                try:
+                    reply = json.loads(line)
+                except ValueError:
+                    continue
+                if reply.get("id") == 2:
+                    replies["reply"] = reply
+                    return
+        finally:
+            received.set()
+
+    reader = threading.Thread(target=read, daemon=True)
+    reader.start()
+    try:
+        # The server exits at end of input before answering, so stdin stays open until the reply.
+        for request in (
+            {"id": 1, "method": "initialize",
+             "params": {"clientInfo": {"name": "codex-resume", "version": "1"}}},
+            {"method": "initialized"},
+            {"id": 2, "method": method},
+        ):
+            process.stdin.write(json.dumps(request) + "\n")
+        process.stdin.flush()
+        if not received.wait(APP_SERVER_TIMEOUT_SECONDS):
+            raise RuntimeError(f"The Codex app server did not answer {method} in time.")
+    finally:
+        process.kill()
+        process.wait()
+    reply = replies.get("reply")
+    if reply is None:
+        raise RuntimeError(f"The Codex app server exited without answering {method}.")
+    if "error" in reply:
+        raise RuntimeError(f"The Codex app server rejected {method}: {reply['error'].get('message', reply['error'])}")
+    return reply["result"]
+
+
+def usage_limits():
+    limits = app_server_request("account/rateLimits/read").get("rateLimits") or {}
+    windows = []
+    for key in ("primary", "secondary"):
+        window = limits.get(key)
+        if not window or window.get("resetsAt") is None:
+            continue
+        minutes = window.get("windowDurationMins")
+        windows.append({
+            "name": LIMIT_NAMES.get(minutes, f"{minutes}-minute"),
+            "used": window.get("usedPercent", 0),
+            "resets": datetime.fromtimestamp(window["resetsAt"]).astimezone(),
+        })
+    if not windows:
+        raise RuntimeError("Codex reported no usage limits.")
+    return windows
+
+
+def describe_limits(windows):
+    return "\n".join(
+        f"{window['name']}: {window['used']:g}% used, resets {format_time(window['resets'])}"
+        for window in windows
+    )
+
+
+def reset_time(windows):
+    exhausted = [window for window in windows if window["used"] >= 100]
+    if not exhausted:
+        raise RuntimeError("No Codex usage limit is used up, so there is no reset to wait for.\n"
+                           + describe_limits(windows))
+    return max(window["resets"] for window in exhausted) + timedelta(seconds=RESET_MARGIN_SECONDS)
 
 
 def wait_until_scheduled_time(timestamp, now=None):
@@ -441,6 +543,13 @@ def argument_parser():
         "--time", metavar="HH:MM", help="schedule the next occurrence of this local time"
     )
     actions.add_argument(
+        "--reset", action="store_true",
+        help="schedule a minute after the used-up usage limit resets (the later one if both are)",
+    )
+    actions.add_argument(
+        "--limits", action="store_true", help="show the 5-hour and weekly usage limits",
+    )
+    actions.add_argument(
         "--list", nargs="?", const="", metavar="QUERY",
         help="list your recent chats, optionally only those matching QUERY",
     )
@@ -461,12 +570,12 @@ def argument_parser():
     actions.add_argument("--scheduled", metavar="TIMESTAMP", help=argparse.SUPPRESS)
     parser.add_argument(
         "--message", metavar="TEXT",
-        help="with --time or --now, type this single-line message instead of 'continue'",
+        help="with --time, --reset or --now, type this single-line message instead of 'continue'",
     )
     parser.add_argument(
         "--chat", metavar="QUERY",
-        help="open this chat (id, id prefix or name) first; works with --time, --now, "
-             "--check and --inspect",
+        help="open this chat (id, id prefix or name) first; works with --time, --reset, "
+             "--now, --check and --inspect",
     )
     return parser
 
@@ -476,15 +585,19 @@ def main(arguments):
     options = parser.parse_args(arguments)
     message = None
     if options.message is not None:
-        if not (options.time or options.now or options.scheduled):
-            parser.error("--message requires --time or --now")
+        if not (options.time or options.reset or options.now or options.scheduled):
+            parser.error("--message requires --time, --reset or --now")
         message = validate_message(options.message)
     if options.chat is not None and not (
-        options.time or options.now or options.check or options.inspect or options.scheduled
+        options.time or options.reset or options.now or options.check
+        or options.inspect or options.scheduled
     ):
-        parser.error("--chat requires --time, --now, --check or --inspect")
+        parser.error("--chat requires --time, --reset, --now, --check or --inspect")
     if options.list is not None:
         list_chats(options.list)
+        return 0
+    if options.limits:
+        print(describe_limits(usage_limits()))
         return 0
     chat = resolve_chat(options.chat) if options.chat is not None else None
     if options.status:
@@ -518,7 +631,13 @@ def main(arguments):
                 PLIST_PATH.unlink()
                 launchctl("bootout", f"{agent_domain()}/{LABEL}")
         return 0
-    schedule(next_occurrence(options.time), message, chat)
+    if options.reset:
+        windows = usage_limits()
+        scheduled = reset_time(windows)
+        print(describe_limits(windows))
+    else:
+        scheduled = next_occurrence(options.time)
+    schedule(scheduled, message, chat)
     return 0
 
 
