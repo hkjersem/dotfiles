@@ -48,6 +48,10 @@ if empty. Accepts `15:03`, `15.03`, or `1503`. Use `--status`, `--cancel`,
 If the input field isn't recognised, sends only Enter to Codex's existing focus,
 without typing text or retrying afterward.
 
+Add `--message "text"` to `--time` or `--now` to send that text instead. It
+must be one line and not start with `/`. A custom message is only sent into a
+recognised, empty input field; otherwise nothing is sent.
+
 Keeps the Mac awake while waiting, briefly takes app focus to submit, and
 requires an unlocked session and Accessibility permission. The first scheduled
 attempt runs regardless of recent activity; up to ten one-minute retries require

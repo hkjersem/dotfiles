@@ -16,7 +16,10 @@ Return prevents automatic retries to avoid duplicates.
 
 The helper locates the Codex app by bundle ID (even when named ChatGPT),
 excluding the separate ChatGPT chat app. It reads the composer and nearby Send
-control, preserving drafts or inserting continue when empty. This app exposes
+control, preserving drafts or inserting continue when empty. --message replaces
+continue with a single-line custom message. That message is typed only into a
+recognised, empty composer: a draft or an unrecognised composer stops before any
+input, and such stops are retryable when scheduled. This app exposes
 its placeholder (sometimes with a newline) as AXValue when empty. A placeholder
 match ignoring surrounding whitespace is treated as empty, even if deliberately
 typed. If no composer label is recognised, it activates the app and sends only
@@ -37,7 +40,10 @@ The helper reports its owner and refuses rather than bypassing that protection.
 
 UI confirmation is not proof of server acceptance or a reset usage limit.
 An unconfirmed attempt may have sent the message: check before retrying.
-Scheduled output/errors go to ~/Library/Logs/codex-resume.log, without drafts.
+Scheduled output/errors go to ~/Library/Logs/codex-resume.log, without drafts
+or custom messages. A scheduled message is stored in the LaunchAgent plist.
+The helper uses current Swift syntax; when it fails to compile on Swift older
+than 6.2, the error says to update the Command Line Tools.
 App updates or UI language changes can affect control discovery.
 """
 
@@ -52,6 +58,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import unicodedata
 
 
 LABEL = "com.hkjersem.codex-resume"
@@ -63,6 +70,9 @@ SCHEDULE_DELAY_SECONDS = 3
 RETRY_INTERVAL_SECONDS = 60
 MAX_SCHEDULED_RETRIES = 10
 HELPER_PATH = SCRIPT_PATH.parent / "lib/codex-resume.swift"
+MIN_SWIFT_VERSION = (6, 2)
+SWIFT_VERSION_PATTERN = re.compile(r"Swift version (\d+)\.(\d+)")
+SWIFT_COMPILE_ERROR_PATTERN = re.compile(r"\.swift:\d+:\d+: error:")
 
 
 class RetryableAutomationError(RuntimeError):
@@ -82,6 +92,20 @@ def next_occurrence(clock_text, now=None):
     if scheduled <= now:
         scheduled += timedelta(days=1)
     return scheduled
+
+
+def validate_message(text):
+    message = text.strip()
+    if not message:
+        raise ValueError("--message must not be empty.")
+    if any(unicodedata.category(character) == "Cc" for character in message):
+        raise ValueError(
+            "--message must be a single line without control characters, "
+            "since a typed newline would send it early."
+        )
+    if message.startswith("/"):
+        raise ValueError("--message must not start with '/', which opens the app's command menu.")
+    return message
 
 
 def wait_until_scheduled_time(timestamp, now=None):
@@ -115,7 +139,7 @@ def remove_agent():
     return True
 
 
-def schedule(clock_text):
+def schedule(clock_text, message=None):
     scheduled = next_occurrence(clock_text)
     if PLIST_PATH.exists():
         remove_agent()
@@ -129,6 +153,7 @@ def schedule(clock_text):
             "-di",
             sys.executable,
             str(SCRIPT_PATH),
+            *(["--message", message] if message is not None else []),
             "--scheduled",
             scheduled.isoformat(),
         ],
@@ -150,7 +175,12 @@ def schedule(clock_text):
         PLIST_PATH.unlink(missing_ok=True)
         raise
 
-    print(f"Codex resume scheduled for {scheduled.strftime('%Y-%m-%d %H:%M')}.")
+    print(scheduled_summary(scheduled, message))
+
+
+def scheduled_summary(scheduled, message):
+    summary = f"Codex resume scheduled for {scheduled.strftime('%Y-%m-%d %H:%M')}"
+    return f"{summary} with message: {message}" if message is not None else f"{summary}."
 
 
 def status():
@@ -162,18 +192,33 @@ def status():
     arguments = plist.get("ProgramArguments", [])
     scheduled_at = arguments[arguments.index("--scheduled") + 1]
     scheduled = datetime.fromisoformat(scheduled_at)
-    print(f"Codex resume scheduled for {scheduled.strftime('%Y-%m-%d %H:%M')}.")
+    message = arguments[arguments.index("--message") + 1] if "--message" in arguments else None
+    print(scheduled_summary(scheduled, message))
 
 
-def run_automation(action):
+def swift_version(executable):
+    try:
+        result = subprocess.run(
+            [executable, "--version"], text=True, capture_output=True, timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    match = SWIFT_VERSION_PATTERN.search(result.stdout + result.stderr)
+    return tuple(int(part) for part in match.groups()) if match else None
+
+
+def run_automation(action, message=None):
     executable = shutil.which("swift")
     if executable is None:
         raise RuntimeError(
             "Swift is unavailable; install Apple's Xcode Command Line Tools."
         )
+    command = [executable, str(HELPER_PATH), action]
+    if message is not None:
+        command += ["--message", message]
     try:
         result = subprocess.run(
-            [executable, str(HELPER_PATH), action],
+            command,
             text=True, capture_output=True, timeout=60,
         )
     except subprocess.TimeoutExpired as error:
@@ -193,15 +238,23 @@ def run_automation(action):
         raise RetryableAutomationError((result.stderr or result.stdout).strip())
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip()
+        if SWIFT_COMPILE_ERROR_PATTERN.search(detail):
+            version = swift_version(executable)
+            if version is not None and version < MIN_SWIFT_VERSION:
+                raise RuntimeError(
+                    f"Swift {version[0]}.{version[1]} cannot compile the helper; it needs Swift "
+                    f"{MIN_SWIFT_VERSION[0]}.{MIN_SWIFT_VERSION[1]} or newer. Update the Command "
+                    "Line Tools (dotfiles-update does this), then try again. Nothing was sent."
+                )
         raise RuntimeError(f"Codex automation failed: {detail}")
     print(result.stdout, end="", flush=True)
 
 
-def submit(action="--submit"):
-    run_automation(action)
+def submit(action="--submit", message=None):
+    run_automation(action, message)
 
 
-def submit_scheduled():
+def submit_scheduled(message=None):
     for attempt in range(MAX_SCHEDULED_RETRIES + 1):
         started = time.monotonic()
         print(
@@ -211,7 +264,10 @@ def submit_scheduled():
             flush=True,
         )
         try:
-            submit("--scheduled-initial-submit" if attempt == 0 else "--scheduled-submit")
+            submit(
+                "--scheduled-initial-submit" if attempt == 0 else "--scheduled-submit",
+                message,
+            )
             return
         except RetryableAutomationError as error:
             print(f"codex-resume: {error}", file=sys.stderr, flush=True)
@@ -236,7 +292,8 @@ def argument_parser():
             "when recognised. If unrecognised, it sends only Return to the app's "
             "existing focus, without typing text or retrying after Return. "
             "Inspection does not activate the app. "
-            "An empty composer is filled with 'continue'; existing drafts are preserved. "
+            "An empty composer is filled with 'continue', or with --message; existing "
+            "drafts are preserved, and --message never adds to or sends a draft. "
             "Scheduled jobs inhibit idle system/display sleep while waiting, "
             "but cannot prevent manual or policy-enforced locking. "
             "The first scheduled attempt ignores recent activity. Up to ten "
@@ -263,11 +320,21 @@ def argument_parser():
         help="check Accessibility controls without printing or changing the draft",
     )
     actions.add_argument("--scheduled", metavar="TIMESTAMP", help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--message", metavar="TEXT",
+        help="with --time or --now, type this single-line message instead of 'continue'",
+    )
     return parser
 
 
 def main(arguments):
-    options = argument_parser().parse_args(arguments)
+    parser = argument_parser()
+    options = parser.parse_args(arguments)
+    message = None
+    if options.message is not None:
+        if not (options.time or options.now or options.scheduled):
+            parser.error("--message requires --time or --now")
+        message = validate_message(options.message)
     if options.status:
         status()
         return 0
@@ -278,7 +345,7 @@ def main(arguments):
             print("No Codex resume is scheduled.")
         return 0
     if options.now:
-        submit()
+        submit(message=message)
         return 0
     if options.inspect:
         run_automation("--inspect")
@@ -289,7 +356,7 @@ def main(arguments):
     if options.scheduled:
         try:
             wait_until_scheduled_time(options.scheduled)
-            submit_scheduled()
+            submit_scheduled(message)
         except (OSError, RuntimeError, ValueError) as error:
             # bootout can terminate us before the outer error handler runs.
             print(f"codex-resume: {error}", file=sys.stderr, flush=True)
@@ -299,7 +366,7 @@ def main(arguments):
                 PLIST_PATH.unlink()
                 launchctl("bootout", f"{agent_domain()}/{LABEL}")
         return 0
-    schedule(options.time)
+    schedule(options.time, message)
     return 0
 
 

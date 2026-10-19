@@ -151,7 +151,7 @@ class CodexResumeTests(unittest.TestCase):
         ):
             codex_resume.submit_scheduled()
         self.assertEqual(submit.call_args_list, [
-            call("--scheduled-initial-submit"), call("--scheduled-submit"),
+            call("--scheduled-initial-submit", None), call("--scheduled-submit", None),
         ])
         sleep.assert_called_once_with(50)
 
@@ -199,7 +199,7 @@ class CodexResumeTests(unittest.TestCase):
         self.assertEqual(submit.call_count, 11)
         self.assertEqual(
             submit.call_args_list,
-            [call("--scheduled-initial-submit")] + [call("--scheduled-submit")] * 10,
+            [call("--scheduled-initial-submit", None)] + [call("--scheduled-submit", None)] * 10,
         )
         self.assertEqual(sleep.call_args_list, [call(60)] * 10)
 
@@ -218,7 +218,7 @@ class CodexResumeTests(unittest.TestCase):
                     with self.assertRaises(RuntimeError) as raised:
                         codex_resume.submit_scheduled()
                 self.assertIs(raised.exception, error)
-                submit.assert_called_once_with("--scheduled-initial-submit")
+                submit.assert_called_once_with("--scheduled-initial-submit", None)
                 sleep.assert_not_called()
 
     def test_schedule_stops_retrying_if_a_later_attempt_may_have_sent_input(self):
@@ -270,13 +270,14 @@ class CodexResumeTests(unittest.TestCase):
         self.assertEqual(multiple_actions.exception.code, 2)
 
     def test_inspect_check_and_now_dispatch_separate_actions(self):
-        for flag, action in (
-            ("--inspect", "--inspect"), ("--check", "--check"), ("--now", "--submit"),
+        for flag, expected in (
+            ("--inspect", call("--inspect")), ("--check", call("--check")),
+            ("--now", call("--submit", None)),
         ):
             with self.subTest(flag=flag):
                 with patch.object(codex_resume, "run_automation") as run:
                     self.assertEqual(codex_resume.main([flag]), 0)
-                run.assert_called_once_with(action)
+                self.assertEqual(run.call_args_list, [expected])
 
     def test_schedule_starts_caffeinate_immediately_until_submission_finishes(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -364,7 +365,7 @@ class CodexResumeTests(unittest.TestCase):
                     0,
                 )
             wait.assert_called_once_with("2026-10-16T16:30:00+02:00")
-            submit.assert_called_once_with("--scheduled-initial-submit")
+            submit.assert_called_once_with("--scheduled-initial-submit", None)
             launchctl.assert_called_once_with(
                 "bootout", f"{codex_resume.agent_domain()}/{codex_resume.LABEL}"
             )
@@ -413,6 +414,102 @@ class CodexResumeTests(unittest.TestCase):
             launchctl.assert_called_once_with(
                 "bootout", f"{codex_resume.agent_domain()}/{codex_resume.LABEL}"
             )
+
+    def test_message_is_validated_and_passed_to_the_helper(self):
+        result = subprocess.CompletedProcess([], 0, "Sent.\n", "")
+        with (
+            patch.object(codex_resume.shutil, "which", return_value="/usr/bin/swift"),
+            patch.object(codex_resume.subprocess, "run", return_value=result) as run,
+            redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(codex_resume.main(["--now", "--message", "  Resume if cut off  "]), 0)
+        run.assert_called_once_with(
+            ["/usr/bin/swift", str(codex_resume.HELPER_PATH), "--submit",
+             "--message", "Resume if cut off"],
+            text=True, capture_output=True, timeout=60,
+        )
+
+    def test_invalid_messages_are_rejected_before_any_automation(self):
+        for value, fragment in (
+            ("   ", "must not be empty"), ("one\ntwo", "single line"),
+            ("tab\there", "single line"), ("/compact", "must not start with '/'"),
+        ):
+            with self.subTest(value=value):
+                with patch.object(codex_resume, "run_automation") as run:
+                    with self.assertRaisesRegex(ValueError, fragment):
+                        codex_resume.main(["--now", "--message", value])
+                run.assert_not_called()
+
+    def test_message_requires_time_or_now(self):
+        for action in (["--status"], ["--cancel"], ["--check"], ["--inspect"]):
+            with self.subTest(action=action):
+                with (
+                    patch.object(codex_resume, "run_automation") as run,
+                    redirect_stderr(io.StringIO()),
+                ):
+                    with self.assertRaises(SystemExit) as error:
+                        codex_resume.main([*action, "--message", "resume"])
+                self.assertEqual(error.exception.code, 2)
+                run.assert_not_called()
+
+    def test_scheduled_message_is_stored_shown_and_used_for_every_attempt(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            plist_path = Path(temporary) / "com.hkjersem.codex-resume.plist"
+            now = datetime.fromisoformat("2026-10-16T13:00:00+02:00")
+            output = io.StringIO()
+            with (
+                patch.object(codex_resume, "PLIST_PATH", plist_path),
+                patch.object(codex_resume, "LOG_PATH", Path(temporary) / "log"),
+                patch.object(codex_resume, "next_occurrence",
+                              return_value=codex_resume.next_occurrence("16:30", now)),
+                patch.object(codex_resume, "launchctl"),
+                redirect_stdout(output),
+            ):
+                codex_resume.main(["--time", "16:30", "--message", "Resume now"])
+                codex_resume.main(["--status"])
+            with plist_path.open("rb") as agent_file:
+                arguments = plistlib.load(agent_file)["ProgramArguments"]
+            self.assertEqual(arguments[-4:], [
+                "--message", "Resume now", "--scheduled", "2026-10-16T16:30:00+02:00",
+            ])
+            self.assertEqual(output.getvalue().splitlines(), [
+                "Codex resume scheduled for 2026-10-16 16:30 with message: Resume now",
+            ] * 2)
+
+            with (
+                patch.object(codex_resume, "PLIST_PATH", plist_path),
+                patch.object(codex_resume, "wait_until_scheduled_time"),
+                patch.object(codex_resume, "submit", side_effect=[
+                    codex_resume.RetryableAutomationError("The composer holds a draft"), None,
+                ]) as submit,
+                patch.object(codex_resume.time, "monotonic", return_value=0),
+                patch.object(codex_resume.time, "sleep"),
+                patch.object(codex_resume, "launchctl"),
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()),
+            ):
+                self.assertEqual(codex_resume.main(arguments[4:]), 0)
+            self.assertEqual(submit.call_args_list, [
+                call("--scheduled-initial-submit", "Resume now"),
+                call("--scheduled-submit", "Resume now"),
+            ])
+
+    def test_compile_error_on_old_swift_explains_the_update(self):
+        compile_error = subprocess.CompletedProcess(
+            [], 1, "", "codex-resume.swift:280:23: error: variable binding in a condition",
+        )
+        for version_output, fragment in (
+            ("Apple Swift version 5.4 (swiftlang-1205.0.26.9)", "Swift 5.4 cannot compile"),
+            ("Apple Swift version 6.4 (swiftlang-6.4.0.34.1)", "Codex automation failed"),
+        ):
+            with self.subTest(version=version_output):
+                version = subprocess.CompletedProcess([], 0, version_output, "")
+                with (
+                    patch.object(codex_resume.shutil, "which", return_value="/usr/bin/swift"),
+                    patch.object(codex_resume.subprocess, "run",
+                                 side_effect=[compile_error, version]),
+                ):
+                    with self.assertRaisesRegex(RuntimeError, fragment):
+                        codex_resume.run_automation("--submit")
 
 
 if __name__ == "__main__":

@@ -1,12 +1,13 @@
 // Accessibility helper for scripts/codex-resume.py.
-// Usage: swift codex-resume.swift --check | --inspect | --submit | --self-test
+// Usage: swift codex-resume.swift --check | --inspect | --submit [--message TEXT] | --self-test
 //
 // Talks to the Codex desktop app (shipped as ChatGPT.app, bundle id
 // com.openai.codex) through native AXUIElement calls. --check and --inspect never
 // activate the app. --submit brings the verified app to the front and focuses the
-// verified composer, types "continue" if it is empty, then posts one Return.
+// verified composer, types "continue" (or --message) if it is empty, then posts one Return.
 // If no composer label is recognised, sends only Return to the app's existing
-// focus, without typing or claiming confirmation. All other discovery failures stop.
+// focus, without typing or claiming confirmation. With --message, a draft or an
+// unrecognised composer stops before any input instead. All other discovery failures stop.
 // AXPress on Send and setting AXValue both leave the app's own editor state unchanged.
 // While any app holds Secure Event Input, the window server refuses automated activation,
 // so --submit stops before activating instead of trying to work around it.
@@ -36,6 +37,18 @@ let composerLabels: Set<String> = ["spør chatgpt", "ask chatgpt", "spør codex"
 let sendLabels: Set<String> = ["send", "send prompt", "send message", "send melding"]
 let stopLabels: Set<String> = ["stop", "stopp", "stop generating", "stopp generering", "stop streaming"]
 let continueText = "continue"
+
+// Mirrors codex-resume.py: one trimmed line, since a typed newline would send early,
+// and no leading slash, which opens the app's command menu.
+func validatedMessage(_ text: String) throws -> String {
+    let message = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !message.isEmpty else { throw Failure("The message is empty.") }
+    guard !message.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
+        throw Failure("The message must be a single line without control characters.")
+    }
+    guard !message.hasPrefix("/") else { throw Failure("The message must not start with '/'.") }
+    return message
+}
 let maxNodes = 5000
 let maxDepth = 64
 let maxAncestorLevels = 6
@@ -324,24 +337,33 @@ func submitUnverifiedReturn<N: UINode>(
 // requiredIdle gates activation, typing and Return on seconds without keyboard or mouse input (scheduled retries).
 // After the first injected key, every failure is permanent so a retry can never duplicate or erase input.
 func submit<N: UINode>(
-    app: N, foreground: Foreground, requiredIdle: TimeInterval? = nil, sleep: (TimeInterval) -> Void
+    app: N, foreground: Foreground, requiredIdle: TimeInterval? = nil, message: String? = nil,
+    sleep: (TimeInterval) -> Void
 ) throws -> (inserted: Bool, outcome: Outcome) {
     var injected = false
     do {
-        return try submitSteps(app: app, foreground: foreground, requiredIdle: requiredIdle, sleep: sleep, injected: &injected)
+        return try submitSteps(app: app, foreground: foreground, requiredIdle: requiredIdle, message: message,
+                               sleep: sleep, injected: &injected)
     } catch let failure as Failure where injected && failure.retryable {
         throw Failure(failure.description)
     }
 }
 
 func submitSteps<N: UINode>(
-    app: N, foreground: Foreground, requiredIdle: TimeInterval?, sleep: (TimeInterval) -> Void, injected: inout Bool
+    app: N, foreground: Foreground, requiredIdle: TimeInterval?, message: String?, sleep: (TimeInterval) -> Void,
+    injected: inout Bool
 ) throws -> (inserted: Bool, outcome: Outcome) {
+    let text = message ?? continueText
     let window = try focusedWindow(of: app)
     let initial: Target<N>
     do {
         initial = try findTarget(in: window)
     } catch let failure as Failure where failure.missingComposer {
+        // The Return-only fallback cannot type, so it would drop a custom message.
+        guard message == nil else {
+            throw Failure(failure.description + " A custom message needs a recognised composer; nothing was typed or sent.",
+                          retryable: true)
+        }
         return try submitUnverifiedReturn(app: app, window: window, foreground: foreground,
                                           requiredIdle: requiredIdle, sleep: sleep, injected: &injected)
     }
@@ -353,6 +375,9 @@ func submitSteps<N: UINode>(
     let composer = initial.composer
     let original = try composerText(initial)
     let inserted = isBlank(original)
+    if message != nil && !inserted {
+        throw Failure("The composer holds a draft; not adding the custom message to it or sending it.", retryable: true)
+    }
 
     // An empty composer keeps Send disabled until text is typed, so only a draft waits for it here.
     if !inserted {
@@ -378,7 +403,7 @@ func submitSteps<N: UINode>(
         try requireForeground(composer, foreground)
         if let requiredIdle { try requireIdle(foreground, required: requiredIdle, injectedAt: nil) }
         injected = true
-        try foreground.typeText(continueText)
+        try foreground.typeText(text)
         injectedAt = foreground.now()
         // Typed characters arrive asynchronously; never undo them, since the editor may hold user edits by now.
         var typed = ""
@@ -386,15 +411,15 @@ func submitSteps<N: UINode>(
             let target = try currentTarget(app: app, window: window, composer: composer)
             typed = try composerText(target)
             let trimmed = typed.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed == continueText { return try target.send?.flag("AXEnabled") == true }
-            guard trimmed.isEmpty || continueText.hasPrefix(trimmed) else {
+            if trimmed == text { return try target.send?.flag("AXEnabled") == true }
+            guard trimmed.isEmpty || text.hasPrefix(trimmed) else {
                 throw Failure("The composer holds unexpected text after typing; left it as is and did not press Return.")
             }
             return false
         }
         guard ready else {
-            throw Failure(typed.trimmingCharacters(in: .whitespacesAndNewlines) == continueText
-                ? "Typed \"\(continueText)\" but Send stayed disabled; left it in the composer and did not press Return."
+            throw Failure(typed.trimmingCharacters(in: .whitespacesAndNewlines) == text
+                ? "Typed \(message == nil ? "\"\(continueText)\"" : "the custom message") but Send stayed disabled; left it in the composer and did not press Return."
                 : "The typed text did not fully appear in the composer; left it as is and did not press Return.")
         }
         expected = typed
@@ -560,7 +585,7 @@ func postReturn() throws {
     for event in try keyEvents(source, key: 0x24) { event.post(tap: .cgSessionEventTap) }
 }
 
-func submitLive(requiredIdle: TimeInterval?) throws -> Int32 {
+func submitLive(requiredIdle: TimeInterval?, message: String?) throws -> Int32 {
     let (runningApp, node) = try liveApp()
     let pid = runningApp.processIdentifier
     let previous = frontmostPid()
@@ -593,8 +618,10 @@ func submitLive(requiredIdle: TimeInterval?) throws -> Int32 {
             }
         }
     }
-    let result = try submit(app: node, foreground: foreground, requiredIdle: requiredIdle, sleep: { RunLoop.current.run(until: Date(timeIntervalSinceNow: $0)) })
-    let draft = result.inserted ? "typed \"\(continueText)\"" : "kept the existing draft"
+    let result = try submit(app: node, foreground: foreground, requiredIdle: requiredIdle, message: message,
+                            sleep: { RunLoop.current.run(until: Date(timeIntervalSinceNow: $0)) })
+    let typed = message == nil ? "typed \"\(continueText)\"" : "typed the custom message"
+    let draft = result.inserted ? typed : "kept the existing draft"
     switch result.outcome {
     case .confirmed:
         print("Pressed Return in the composer (\(draft)); the composer cleared or a reply started.")
@@ -1276,6 +1303,54 @@ func selfTest() -> Int32 {
             try expectNoReturn(f)
         }
     }
+    test("custom message: typed into an empty composer and sent once") {
+        let f = fixture(draft: "Spør ChatGPT\n", sendEnabled: false)
+        f.host.onReturn = { f.composer.attributes["AXValue"] = "Spør ChatGPT\n" }
+        let message = "If the usage limit stopped you, continue; otherwise do nothing."
+        let result = try submit(app: f.app, foreground: f.host.foreground(f), message: message, sleep: { _ in })
+        try expect(result.inserted && result.outcome == .confirmed, "unexpected result \(result)")
+        try expect(f.host.typed.count == 1 && f.host.typed[0].text == message, "did not type the message once")
+        try expect(f.host.returns.count == 1 && f.host.returns[0].text == message, "Return not sent with the message")
+    }
+    test("custom message: a draft stops before activation, retryably, and is kept") {
+        for scheduled in [true, false] {
+            let f = fixture(draft: "my draft")
+            let error = try failure("holds a draft") {
+                _ = try submit(app: f.app, foreground: f.host.foreground(f), requiredIdle: scheduled ? scheduledIdleSeconds : nil,
+                               message: "resume", sleep: { _ in })
+            }
+            try expect(exitCode(for: error, scheduled: scheduled) == (scheduled ? 4 : 1), "exit code")
+            try expect(f.host.activateCalls == 0 && f.composer.sets.isEmpty, "activated or focused")
+            try expect(f.composer.attributes["AXValue"] as? String == "my draft", "draft changed")
+            try expectNoReturn(f)
+        }
+    }
+    test("custom message: an unrecognised composer never gets the Return-only fallback") {
+        let f = fixture(draft: "")
+        f.composer.attributes["AXDescription"] = "Other"
+        let error = try failure("needs a recognised composer") {
+            _ = try submit(app: f.app, foreground: f.host.foreground(f), requiredIdle: scheduledIdleSeconds,
+                           message: "resume", sleep: { _ in })
+        }
+        try expect(exitCode(for: error, scheduled: true) == 4, "not retryable")
+        try expect(f.host.activateCalls == 0, "activated the app")
+        try expectNoReturn(f)
+    }
+    test("custom message: partial or altered text is never sent") {
+        let f = fixture(draft: "", sendEnabled: false)
+        f.host.onType = { f.composer.attributes["AXValue"] = "resume “now”" }
+        let error = try failure("unexpected text") {
+            _ = try submit(app: f.app, foreground: f.host.foreground(f), message: "resume \"now\"", sleep: { _ in })
+        }
+        try expect(!error.retryable, "retryable after typing")
+        try expectNoReturn(f, typed: 1)
+    }
+    test("custom message validation trims and rejects multi-line, control and slash messages") {
+        try expect(try validatedMessage("  keep going \n") == "keep going", "did not trim")
+        for bad in ["", "  \n", "line one\nline two", "tab\there", "/compact"] {
+            try expectFailure("message") { _ = try validatedMessage(bad) }
+        }
+    }
     test("exit 4 only for retryable failures in scheduled mode") {
         let transient = Failure("x", retryable: true)
         try expect(exitCode(for: transient, scheduled: true) == 4, "scheduled transient")
@@ -1292,13 +1367,25 @@ func selfTest() -> Int32 {
 // MARK: - Entry point
 
 let arguments = Array(CommandLine.arguments.dropFirst())
-guard arguments.count == 1 else {
-    FileHandle.standardError.write(Data("usage: codex-resume.swift --check | --inspect | --submit | --scheduled-initial-submit | --scheduled-submit | --self-test\n".utf8))
+let submissionMode = arguments.first.flatMap { SubmissionMode(rawValue: $0) }
+let hasMessage = arguments.count == 3 && arguments[1] == "--message" && submissionMode != nil
+guard arguments.count == 1 || hasMessage else {
+    FileHandle.standardError.write(Data(("usage: codex-resume.swift --check | --inspect | --self-test | "
+        + "(--submit | --scheduled-initial-submit | --scheduled-submit) [--message TEXT]\n").utf8))
     exit(2)
 }
+var message: String?
+if hasMessage {
+    do {
+        message = try validatedMessage(arguments[2])
+    } catch {
+        FileHandle.standardError.write(Data("\(error)\n".utf8))
+        exit(2)
+    }
+}
 do {
-    if let mode = SubmissionMode(rawValue: arguments[0]) {
-        exit(try submitLive(requiredIdle: mode.requiredIdle))
+    if let mode = submissionMode {
+        exit(try submitLive(requiredIdle: mode.requiredIdle, message: message))
     }
     switch arguments[0] {
     case "--check": try check()
@@ -1310,5 +1397,5 @@ do {
     }
 } catch {
     FileHandle.standardError.write(Data("\(error)\n".utf8))
-    exit(exitCode(for: error, scheduled: SubmissionMode(rawValue: arguments[0])?.scheduled == true))
+    exit(exitCode(for: error, scheduled: submissionMode?.scheduled == true))
 }
