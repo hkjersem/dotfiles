@@ -195,7 +195,7 @@ section_end
 section_start "Command Line Tools"
 clt_finding=$(command_line_tools_outdated 2>/dev/null)
 case $? in
-    0) warn "$(printf '%s\n' "$clt_finding" | sed -n 's/^Warning: //; /[^[:space:]]/{p;q;}') (run dotfiles-update)" ;;
+    0) warn "$clt_finding (run dotfiles-update)" ;;
     1) ok "Command Line Tools are current" ;;
     *) warn "Could not check the Command Line Tools with Homebrew" ;;
 esac

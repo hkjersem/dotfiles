@@ -39,6 +39,7 @@ if name == "brew" and args[:1] == ["doctor"]:
         print()
         print("Warning: Your Command Line Tools are too outdated.")
         print("Update them from Software Update in System Settings.")
+        print("Warning: An unrelated finding.")
         sys.exit(1)
     print("Your system is ready to brew.")
     sys.exit(0)
@@ -122,12 +123,13 @@ class CommandLineToolsTests(unittest.TestCase):
         result = self.run_update()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("too outdated", result.stdout)
+        self.assertNotIn("Software Update in System Settings", result.stdout)
         self.assertIn(f"Installing {NEWEST}", result.stdout)
         self.assertEqual(self.calls("softwareupdate"), [
             ["softwareupdate", ["--list"], True],
-            ["softwareupdate", ["--install", NEWEST], True],
+            ["softwareupdate", ["--install", "--verbose", NEWEST], True],
         ])
-        self.assertEqual(self.calls("sudo"), [["sudo", ["softwareupdate", "--install", NEWEST], True]])
+        self.assertEqual(self.calls("sudo"), [["sudo", ["softwareupdate", "--install", "--verbose", NEWEST], True]])
         self.assertFalse(self.marker.exists())
         self.assertNotIn(["--switch", "/Library/Developer/CommandLineTools"],
                          [call[1] for call in self.calls("xcode-select")])
@@ -138,7 +140,7 @@ class CommandLineToolsTests(unittest.TestCase):
         result = self.run_update()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("not installed", result.stdout)
-        self.assertIn(["sudo", ["softwareupdate", "--install", NEWEST], True], self.calls("sudo"))
+        self.assertIn(["sudo", ["softwareupdate", "--install", "--verbose", NEWEST], True], self.calls("sudo"))
         self.assertNotIn(["--switch", "/Library/Developer/CommandLineTools"],
                          [call[1] for call in self.calls("xcode-select")])
         self.assertTrue((self.state / "installed").exists())
@@ -196,8 +198,7 @@ class CommandLineToolsTests(unittest.TestCase):
                 )
                 self.assertEqual(result.returncode, expected, result.stderr)
                 if setup.get("outdated") and not env:
-                    self.assertTrue(result.stdout.startswith("Warning: Your Command Line Tools are too outdated."),
-                                    result.stdout)
+                    self.assertEqual(result.stdout, "Your Command Line Tools are too outdated.\n")
 
 
 if __name__ == "__main__":

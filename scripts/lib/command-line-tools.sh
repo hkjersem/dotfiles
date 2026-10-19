@@ -8,7 +8,7 @@ CLT_DIR=/Library/Developer/CommandLineTools
 CLT_ON_DEMAND_MARKER="${DOTFILES_CLT_MARKER:-/tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress}"
 CLT_REINSTALL_HINT="sudo rm -rf $CLT_DIR && sudo xcode-select --install"
 
-# Prints the finding and returns 0 when the tools are missing or outdated,
+# Prints a one-line finding and returns 0 when the tools are missing or outdated,
 # 1 when they are current, and 2 when Homebrew cannot tell.
 command_line_tools_outdated() {
     local output
@@ -21,8 +21,8 @@ command_line_tools_outdated() {
         return 1
     fi
     if printf '%s\n' "$output" | grep -q 'Command Line Tools'; then
-        # Skip brew doctor's leading disclaimer; the finding starts at "Warning:".
-        printf '%s\n' "$output" | sed -n '/^Warning:/,$p'
+        # brew doctor prints a disclaimer first and advice after the headline.
+        printf '%s\n' "$output" | sed -n '/^Warning: /{s///p;q;}'
         return 0
     fi
     printf '%s\n' "$output" >&2
@@ -58,7 +58,8 @@ update_command_line_tools() {
     label=$(_command_line_tools_label)
     if [[ -n "$label" ]]; then
         echo "Installing $label..."
-        sudo softwareupdate --install "$label" && installed=true
+        # --verbose shows download progress.
+        sudo softwareupdate --install --verbose "$label" && installed=true
     fi
     rm -f "$CLT_ON_DEMAND_MARKER"
 
