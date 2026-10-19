@@ -62,6 +62,7 @@ while [[ $# -gt 0 ]]; do
     --depth|--stale-days|--jobs|--timeout)
       [[ $# -ge 2 ]] || { echo "Missing value for $1" >&2; exit 1; }
       need_number "$1" "$2"
+      # shellcheck disable=SC2034  # SB_* settings are read by lib/stale-branches.sh
       case "$1" in
         --depth) DEPTH=$2 ;;
         --stale-days) SB_STALE_DAYS=$2 ;;
@@ -100,6 +101,7 @@ trap 'rm -rf -- "$TMP"' EXIT
 SB_TMP=$TMP
 mkdir -p "$TMP/scratch"
 
+# shellcheck disable=SC2034  # read by lib/stale-branches.sh
 invoking_top=$(git rev-parse --show-toplevel 2>/dev/null) && SB_INVOKING_TOP=$(cd "$invoking_top" && pwd -P)
 
 # ── Discover repositories ─────────────────────────────────────────────────────
@@ -282,6 +284,7 @@ DELETED=0; REMOVED_WT=0; FAILED=0
 for i in "${!REPOS[@]}"; do
   [[ "${STATUS[$i]}" == ok && -s "$TMP/$i.plan" ]] || continue
   SB_GIT_DIR=${REPOS[$i]}
+  # shellcheck disable=SC2034  # read by lib/stale-branches.sh
   SB_TMP=$TMP/scratch
   name=$(repo_name "${REPOS[$i]}")
   while IFS="$SB_SEP" read -r kind branch sha detail wt; do

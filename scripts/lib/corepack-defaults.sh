@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2034  # globals set here are read by corepack-defaults.sh and audit.sh
 # Shared package-manager version helpers, sourced by corepack-defaults.sh and audit.sh.
 #
 # Outside projects with a packageManager field, corepack runs the version in

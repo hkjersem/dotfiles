@@ -34,5 +34,13 @@ jobs:
           while IFS= read -r -d '' file; do
             /bin/zsh -f -n "$file"
           done < <(git ls-files -z -- 'zsh/*')
+      - name: Lint shell scripts
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+          HOMEBREW_NO_INSTALL_CLEANUP: 1
+        run: |
+          brew install shellcheck
+          git ls-files -z -- install '*.sh' bash/aliases bash/bashrc \
+            | xargs -0 shellcheck -S warning -x
       - name: Run isolated regression tests
         run: python3 -B -m unittest discover -s scripts/tests -v

@@ -16,6 +16,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC2034  # read by _update-lib.sh
 PM_NAME="pnpm"
 # shellcheck source=_update-lib.sh
 source "$SCRIPT_DIR/_update-lib.sh"

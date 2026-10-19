@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2034  # globals set here are read by sync-agent-instructions.sh and audit.sh
 #
 # Shared global agent instruction targets and state detection.
 # Sourced by scripts/sync-agent-instructions.sh and scripts/audit.sh.

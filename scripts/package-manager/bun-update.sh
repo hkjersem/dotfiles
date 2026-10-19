@@ -14,6 +14,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC2034  # read by _update-lib.sh
 PM_NAME="bun"
 # shellcheck source=_update-lib.sh
 source "$SCRIPT_DIR/_update-lib.sh"
@@ -29,6 +30,7 @@ done
 # ── Find project root ─────────────────────────────────────────────────────────
 COOLDOWN_MINUTES="${COOLDOWN_MINUTES:-}"
 COOLDOWN_SOURCE="${COOLDOWN_SOURCE:-}"
+# shellcheck disable=SC2034  # read by _update-lib.sh
 COOLDOWN_EXCLUDE=()
 CONFIG_RELEASE_AGE=""
 
@@ -70,6 +72,7 @@ _pm_install() {
 # bun outdated uses plain ASCII pipes; format: | Package | Current | Update | Latest |
 # Separator rows (|------|) are excluded by checking that cur starts with a digit.
 _bun_raw=$(bun outdated 2>/dev/null || true)
+# shellcheck disable=SC2034  # read by _update-lib.sh
 OUTDATED=$(echo "$_bun_raw" | awk -F'|' '
   NF > 4 {
     pkg = $2; gsub(/^[[:space:]]+|[[:space:]]+$/, "", pkg)

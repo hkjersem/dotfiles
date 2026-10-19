@@ -306,9 +306,18 @@ when the environment blocks them; skipped checks are not verified passes.
 `test_repo_rules.py` adds static checks for repository rules; see
 [AGENTS.md](AGENTS.md#enforced-rules).
 
-GitHub Actions runs shell syntax checks and the full regression suite on an
-Apple Silicon macOS runner for pushes and pull requests. The workflow uses the
-runner's preinstalled tools and does not run machine setup or live updates.
+GitHub Actions runs shell syntax checks, ShellCheck, and the full regression
+suite on an Apple Silicon macOS runner for pushes and pull requests. Apart from
+installing ShellCheck, the workflow uses the runner's preinstalled tools and
+does not run machine setup or live updates. Run the same lint locally:
+
+```sh
+git ls-files -z -- install '*.sh' bash/aliases bash/bashrc | xargs -0 shellcheck -S warning -x
+```
+
+Warnings must stay at zero. When a warning is a false positive, such as a
+variable read by a script that sources the file, silence it on that line with
+`# shellcheck disable=SCxxxx  # reason`.
 
 ## Global agent instructions
 

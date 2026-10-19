@@ -112,5 +112,6 @@ These rules have been broken before and are checked by `scripts/tests/test_repo_
 ## Testing
 
 - See [README testing instructions](README.md#testing) for prerequisites and suite commands. Run relevant suites from the repository root; shell regression tests must exercise `/bin/bash`, not only a newer Homebrew Bash.
+- Keep ShellCheck at zero warnings (CI enforces it; command in the [README](README.md#testing)). Fix real findings; silence a false positive only on its line, with a reason.
 - For configuration-writing tests, isolate `HOME`, XDG configuration, and Git configuration as needed. Mock package-manager/network calls and destructive operations; do not use live setup, update, defaults, or cleanup commands as automated test runners.
 - Keep success, error, and cancellation cases together. A sandbox- or PTY-related skip is an unverified case, not a passing check; report it without bypassing restrictions.

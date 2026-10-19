@@ -15,7 +15,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC2034  # read by _update-lib.sh
 PM_NAME="npm"
+# shellcheck disable=SC2034  # read by _update-lib.sh
 AUGMENT_ALWAYS=true  # npm outdated --json omits exact-pinned packages where wanted === current
 # shellcheck source=_update-lib.sh
 source "$SCRIPT_DIR/_update-lib.sh"
@@ -31,7 +33,9 @@ done
 # ── Find project root ─────────────────────────────────────────────────────────
 COOLDOWN_MINUTES="${COOLDOWN_MINUTES:-}"
 COOLDOWN_SOURCE="${COOLDOWN_SOURCE:-}"
+# shellcheck disable=SC2034  # read by _update-lib.sh
 COOLDOWN_EXCLUDE=()
+# shellcheck disable=SC2034  # read by _update-lib.sh
 CONFIG_RELEASE_AGE=""
 
 _find_root "package-lock.json"

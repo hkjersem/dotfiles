@@ -421,7 +421,9 @@ section_end
 # ── Stale branches and worktrees (read-only; uses the last fetch) ────────────
 section_start "Stale Branches & Worktrees"
 
+# shellcheck disable=SC2034  # read by lib/stale-branches.sh
 SB_TMP=$AUDIT_TMP
+# shellcheck disable=SC2034  # read by lib/stale-branches.sh
 SB_INVOKING_TOP=$(pwd -P)
 if ! SB_GIT_DIR=$(sb_common_dir "$GIT_ROOT"); then
   fail "Could not resolve the Git directory — stale branch check skipped"
@@ -430,8 +432,8 @@ elif ! sb_has_remote; then
 else
   STALE_PLAN=$(sb_classify "$SB_GIT_DIR/$SB_SNAPSHOT_FILE")
   stale_rows() {
-    local kind name sha detail wt
-    while IFS="$SB_SEP" read -r kind name sha detail wt; do
+    local kind name _ detail wt
+    while IFS="$SB_SEP" read -r kind name _ detail wt; do
       [[ "$kind" == "$1" ]] || continue
       [[ "$name" == /* ]] && name=$(sb_short_path "$name")
       row "${name} — ${detail}"
@@ -648,6 +650,7 @@ if [[ "$PM" == "bun" ]]; then
   MRA_SRC="bunfig.toml"
   if [[ -z "$MRA_VAL" ]]; then
     MRA_VAL=$(read_bunfig_mra "$HOME/.bunfig.toml" 2>/dev/null || true)
+    # shellcheck disable=SC2088  # display label
     MRA_SRC="~/.bunfig.toml"
   fi
   if [[ -n "$MRA_VAL" ]]; then
@@ -679,6 +682,7 @@ elif [[ "$PM" == "npm" ]]; then
   MRA_SRC=".npmrc"
   if [[ -z "$MRA_VAL" ]]; then
     MRA_VAL=$(grep -E "$MRA_PAT" "$HOME/.npmrc" 2>/dev/null | head -1 | sed 's/.*=[[:space:]]*//' || true)
+    # shellcheck disable=SC2088  # display label
     MRA_SRC="~/.npmrc"
   fi
   if [[ -n "$MRA_VAL" ]]; then

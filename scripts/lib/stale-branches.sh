@@ -19,6 +19,7 @@ SB_INVOKING_TOP=""
 sb_git() { GIT_OPTIONAL_LOCKS=0 git --git-dir="$SB_GIT_DIR" "$@"; }
 
 sb_short_path() {
+  # shellcheck disable=SC2088  # abbreviates the path for display
   case "$1" in
     "$HOME") printf '~\n' ;;
     "$HOME"/*) printf '~/%s\n' "${1#"$HOME"/}" ;;
@@ -226,7 +227,8 @@ sb_worktree_history() {
   wt_oids=$(GIT_OPTIONAL_LOCKS=0 git -C "$1" reflog show --format=%H HEAD 2>/dev/null | sort -u)
   branch_oids=$(sb_git reflog show --format=%H "refs/heads/$2" 2>/dev/null | sort -u)
   if [[ -n "$wt_oids" ]]; then
-    # shellcheck disable=SC2086
+    # Object IDs never contain whitespace, so word splitting is safe here.
+    # shellcheck disable=SC2086,SC2048
     lost=$(sb_git rev-list --count --ignore-missing $wt_oids --not --all ${SB_WT_HEAD[*]} $branch_oids 2>/dev/null) \
       || lost="?"
     if [[ "$lost" != 0 ]]; then

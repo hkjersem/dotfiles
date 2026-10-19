@@ -30,6 +30,7 @@ confirm() {
 
 normalize_directory() {
     local directory="$1"
+    # shellcheck disable=SC2088  # matches the literal text the user typed
     case "$directory" in
         '~') directory="$HOME" ;;
         '~/'*) directory="$HOME/${directory#\~/}" ;;

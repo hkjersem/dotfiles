@@ -60,6 +60,7 @@ read_npmrc_release_age() {
   [[ -z "$CONFIG_RELEASE_AGE" ]] && CONFIG_RELEASE_AGE="$mins"
   if [[ -z "$COOLDOWN_MINUTES" ]]; then
     COOLDOWN_MINUTES="$mins"
+    # shellcheck disable=SC2034  # read by the scripts that source this file
     COOLDOWN_SOURCE="$file"
   fi
 }

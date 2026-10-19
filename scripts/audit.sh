@@ -104,6 +104,7 @@ while IFS= read -r line; do
         symlink="${BASH_REMATCH[1]}"
         target="$DOTFILES/${BASH_REMATCH[2]}"
 
+        # shellcheck disable=SC2088  # literal key from install.conf.yaml
         [[ "$symlink" == "~/.dotfiles" ]] && continue
 
         symlink_path="${symlink/#\~/$HOME}"
@@ -395,6 +396,7 @@ fi
 
 # NVM directory — orphan now that fnm is in use
 if [ -d "$HOME/.nvm" ]; then
+    # shellcheck disable=SC2088  # display text
     if command -v fnm &>/dev/null; then
         warn "~/.nvm/ exists but fnm is active — safe to remove: rm -rf ~/.nvm"
     else

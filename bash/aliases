@@ -86,7 +86,7 @@ alias urlencode='python3 -c "import sys, urllib.parse; print(urllib.parse.quote_
 alias afk="/System/Library/CoreServices/Menu\ Extras/User.menu/Contents/Resources/CGSession -suspend"
 
 # Reload the shell
-alias reload="exec $SHELL -l"
+alias reload='exec "$SHELL" -l'
 
 # Kill almost all of the running applications on the currently logged in user
 alias rebootapps="launchctl reboot apps"
@@ -151,13 +151,13 @@ pmc() { bash "$HOME/.dotfiles/scripts/package-manager/clean.sh" "$@"; }
 pma() { bash "$HOME/.dotfiles/scripts/package-manager/audit.sh" "$@"; }
 
 # Create a directory and cd into it
-mkd() { mkdir -p "$@" && cd "$_"; }
+mkd() { mkdir -p "$@" && cd "$_" || return; }
 
 # Open current directory (or given path) in Finder
 o() { open "${1:-.}"; }
 
 # Clone a git repo and cd into it: gclone <url> [name]
-gclone() { git clone "$@" && cd "${2:-$(basename "${1%.git}")}"; }
+gclone() { git clone "$@" && cd "${2:-$(basename "${1%.git}")}" || return; }
 
 # Serve current directory over HTTP: server [port] (default: 8080)
 server() { python3 -m http.server "${1:-8080}"; }

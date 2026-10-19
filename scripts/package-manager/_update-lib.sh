@@ -184,6 +184,7 @@ is_cooldown_excluded() {
     else
       name_part="${entry%%@*}"
     fi
+    # shellcheck disable=SC2053  # entries may be globs such as @scope/*
     [[ "$pkg" == $name_part ]] && return 0
   done
   return 1
