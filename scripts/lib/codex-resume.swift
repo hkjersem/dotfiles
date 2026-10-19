@@ -22,10 +22,12 @@ struct Failure: Error, CustomStringConvertible {
     let description: String
     let retryable: Bool
     let missingComposer: Bool
-    init(_ description: String, retryable: Bool = false, missingComposer: Bool = false) {
+    let emptyWindow: Bool
+    init(_ description: String, retryable: Bool = false, missingComposer: Bool = false, emptyWindow: Bool = false) {
         self.description = description
         self.retryable = retryable
         self.missingComposer = missingComposer
+        self.emptyWindow = emptyWindow
     }
 }
 
@@ -66,9 +68,12 @@ enum SubmissionMode: String {
     case immediate = "--submit"
     case scheduledInitial = "--scheduled-initial-submit"
     case scheduledRetry = "--scheduled-submit"
+    case scheduledFinal = "--scheduled-final-submit"
 
-    var requiredIdle: TimeInterval? { self == .scheduledRetry ? scheduledIdleSeconds : nil }
+    var requiredIdle: TimeInterval? { self == .scheduledRetry || self == .scheduledFinal ? scheduledIdleSeconds : nil }
     var scheduled: Bool { self != .immediate }
+    // A window without text areas may still be building its tree, so scheduled runs retry before a blind Return.
+    var blindReturnWhenEmpty: Bool { self == .immediate || self == .scheduledFinal }
 }
 
 protocol UINode: AnyObject {
@@ -207,7 +212,7 @@ func findTarget<N: UINode>(in window: N) throws -> Target<N> {
             throw Failure("No composer found in the focused window (expected a text area labelled "
                 + composerLabels.sorted().joined(separator: ", ") + "; found "
                 + (found.isEmpty ? "no text areas" : "text areas labelled " + found.joined(separator: ", ")) + ").",
-                retryable: true, missingComposer: true)
+                retryable: true, missingComposer: true, emptyWindow: textAreas.isEmpty)
         }
         throw Failure("Found \(labelled.count) composers in the focused window and cannot tell which is active.")
     }
@@ -360,20 +365,20 @@ func submitUnverifiedReturn<N: UINode>(
 // After the first injected key, every failure is permanent so a retry can never duplicate or erase input.
 func submit<N: UINode>(
     app: N, foreground: Foreground, requiredIdle: TimeInterval? = nil, message: String? = nil,
-    sleep: (TimeInterval) -> Void
+    blindReturnWhenEmpty: Bool = true, sleep: (TimeInterval) -> Void
 ) throws -> (inserted: Bool, outcome: Outcome) {
     var injected = false
     do {
         return try submitSteps(app: app, foreground: foreground, requiredIdle: requiredIdle, message: message,
-                               sleep: sleep, injected: &injected)
+                               blindReturnWhenEmpty: blindReturnWhenEmpty, sleep: sleep, injected: &injected)
     } catch let failure as Failure where injected && failure.retryable {
         throw Failure(failure.description)
     }
 }
 
 func submitSteps<N: UINode>(
-    app: N, foreground: Foreground, requiredIdle: TimeInterval?, message: String?, sleep: (TimeInterval) -> Void,
-    injected: inout Bool
+    app: N, foreground: Foreground, requiredIdle: TimeInterval?, message: String?, blindReturnWhenEmpty: Bool,
+    sleep: (TimeInterval) -> Void, injected: inout Bool
 ) throws -> (inserted: Bool, outcome: Outcome) {
     let text = message ?? continueText
     let window = try focusedWindow(of: app)
@@ -384,6 +389,10 @@ func submitSteps<N: UINode>(
         // The Return-only fallback cannot type, so it would drop a custom message.
         guard message == nil else {
             throw Failure(failure.description + " A custom message needs a recognised composer; nothing was typed or sent.",
+                          retryable: true)
+        }
+        guard !failure.emptyWindow || blindReturnWhenEmpty else {
+            throw Failure(failure.description + " Retrying before pressing Return without a recognised composer.",
                           retryable: true)
         }
         return try submitUnverifiedReturn(app: app, window: window, foreground: foreground,
@@ -611,7 +620,8 @@ func postReturn() throws {
     for event in try keyEvents(source, key: 0x24) { event.post(tap: .cgSessionEventTap) }
 }
 
-func submitLive(requiredIdle: TimeInterval?, message: String?) throws -> Int32 {
+func submitLive(mode: SubmissionMode, message: String?) throws -> Int32 {
+    let requiredIdle = mode.requiredIdle
     let (runningApp, node) = try liveApp()
     let pid = runningApp.processIdentifier
     let previous = frontmostPid()
@@ -647,7 +657,7 @@ func submitLive(requiredIdle: TimeInterval?, message: String?) throws -> Int32 {
         }
     }
     let result = try submit(app: node, foreground: foreground, requiredIdle: requiredIdle, message: message,
-                            sleep: liveSleep)
+                            blindReturnWhenEmpty: mode.blindReturnWhenEmpty, sleep: liveSleep)
     let typed = message == nil ? "typed \"\(continueText)\"" : "typed the custom message"
     let draft = result.inserted ? typed : "kept the existing draft"
     switch result.outcome {
@@ -859,6 +869,30 @@ func selfTest() -> Int32 {
         let f = fixture()
         f.composer.attributes["AXDescription"] = "Notes"
         try expectFailure("found text areas labelled \"\", \"Notes\").") { _ = try findTarget(in: f.window) }
+    }
+    test("retries a window without text areas until the final scheduled attempt, then presses Return blindly") {
+        for final in [false, true] {
+            let f = fixture()
+            f.sidebar.kids.removeAll { (try? $0.role()) == "AXTextArea" }
+            f.composer.up?.kids.removeAll()
+            if final {
+                let result = try submit(app: f.app, foreground: f.host.foreground(f), requiredIdle: scheduledIdleSeconds,
+                                        blindReturnWhenEmpty: true, sleep: { _ in })
+                try expect(result.outcome == .unverifiedReturn && f.host.returns.count == 1, "no blind Return at the end")
+            } else {
+                let error = try failure("Retrying before pressing Return") {
+                    _ = try submit(app: f.app, foreground: f.host.foreground(f), requiredIdle: scheduledIdleSeconds,
+                                   blindReturnWhenEmpty: false, sleep: { _ in })
+                }
+                try expect(exitCode(for: error, scheduled: true) == 4, "not retryable")
+                try expect(f.host.activateCalls == 0, "activated the app")
+                try expectNoReturn(f)
+            }
+        }
+        try expect(SubmissionMode.immediate.blindReturnWhenEmpty && SubmissionMode.scheduledFinal.blindReturnWhenEmpty
+            && !SubmissionMode.scheduledInitial.blindReturnWhenEmpty && !SubmissionMode.scheduledRetry.blindReturnWhenEmpty,
+            "wrong blind-Return modes")
+        try expect(SubmissionMode.scheduledFinal.requiredIdle == scheduledIdleSeconds, "final attempt ignores idle")
     }
     test("exposes the Accessibility tree on demand and turns it off again") {
         let window = FakeNode("AXWindow")
@@ -1427,7 +1461,7 @@ let submissionMode = arguments.first.flatMap { SubmissionMode(rawValue: $0) }
 let hasMessage = arguments.count == 3 && arguments[1] == "--message" && submissionMode != nil
 guard arguments.count == 1 || hasMessage else {
     FileHandle.standardError.write(Data(("usage: codex-resume.swift --check | --inspect | --self-test | "
-        + "(--submit | --scheduled-initial-submit | --scheduled-submit) [--message TEXT]\n").utf8))
+        + "(--submit | --scheduled-initial-submit | --scheduled-submit | --scheduled-final-submit) [--message TEXT]\n").utf8))
     exit(2)
 }
 var message: String?
@@ -1441,7 +1475,7 @@ if hasMessage {
 }
 do {
     if let mode = submissionMode {
-        exit(try submitLive(requiredIdle: mode.requiredIdle, message: message))
+        exit(try submitLive(mode: mode, message: message))
     }
     switch arguments[0] {
     case "--check": try check()

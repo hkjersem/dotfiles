@@ -25,6 +25,8 @@ match ignoring surrounding whitespace is treated as empty, even if deliberately
 typed. If no composer label is recognised, it activates the app and sends only
 Return to its existing focus, without typing text. This fallback cannot verify
 what has focus or whether a message was sent, and never retries after Return.
+When the window exposes no text areas at all, scheduled runs retry first and
+use this fallback only on the final attempt; --now uses it immediately.
 Unreadable or ambiguous controls still fail; they do not use the fallback.
 
 Submission activates the app and verifies composer focus and unchanged text.
@@ -73,6 +75,9 @@ SCHEDULE_DELAY_SECONDS = 3
 RETRY_INTERVAL_SECONDS = 60
 MAX_SCHEDULED_RETRIES = 10
 HELPER_PATH = SCRIPT_PATH.parent / "lib/codex-resume.swift"
+SCHEDULED_ACTIONS = (
+    "--scheduled-initial-submit", "--scheduled-submit", "--scheduled-final-submit",
+)
 MIN_SWIFT_VERSION = (6, 2)
 SWIFT_VERSION_PATTERN = re.compile(r"Swift version (\d+)\.(\d+)")
 SWIFT_COMPILE_ERROR_PATTERN = re.compile(r"\.swift:\d+:\d+: error:")
@@ -235,9 +240,7 @@ def run_automation(action, message=None):
             "The message may have been sent; check the app before retrying. "
             + (result.stderr or result.stdout).strip()
         )
-    if result.returncode == 4 and action in (
-        "--scheduled-initial-submit", "--scheduled-submit",
-    ):
+    if result.returncode == 4 and action in SCHEDULED_ACTIONS:
         raise RetryableAutomationError((result.stderr or result.stdout).strip())
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip()
@@ -257,6 +260,14 @@ def submit(action="--submit", message=None):
     run_automation(action, message)
 
 
+def scheduled_action(attempt):
+    if attempt == 0:
+        return "--scheduled-initial-submit"
+    if attempt == MAX_SCHEDULED_RETRIES:
+        return "--scheduled-final-submit"
+    return "--scheduled-submit"
+
+
 def submit_scheduled(message=None):
     for attempt in range(MAX_SCHEDULED_RETRIES + 1):
         started = time.monotonic()
@@ -267,10 +278,7 @@ def submit_scheduled(message=None):
             flush=True,
         )
         try:
-            submit(
-                "--scheduled-initial-submit" if attempt == 0 else "--scheduled-submit",
-                message,
-            )
+            submit(scheduled_action(attempt), message)
             return
         except RetryableAutomationError as error:
             print(f"codex-resume: {error}", file=sys.stderr, flush=True)

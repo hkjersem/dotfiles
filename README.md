@@ -46,7 +46,8 @@ seconds after the next occurrence of that local time, or inserts `continue`
 if empty. Accepts `15:03`, `15.03`, or `1503`. Use `--status`, `--cancel`,
 `--now`, or `--help`; `--inspect` reads the draft and `--check` checks controls.
 If the input field isn't recognised, sends only Enter to Codex's existing focus,
-without typing text or retrying afterward.
+without typing text or retrying afterward. Scheduled runs that find no input
+field at all retry first and send that Enter only on the last attempt.
 
 Add `--message "text"` to `--time` or `--now` to send that text instead. It
 must be one line and not start with `/`. A custom message is only sent into a

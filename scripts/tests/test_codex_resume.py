@@ -132,7 +132,7 @@ class CodexResumeTests(unittest.TestCase):
             patch.object(codex_resume.shutil, "which", return_value="/usr/bin/swift"),
             patch.object(codex_resume.subprocess, "run", return_value=result),
         ):
-            for action in ("--scheduled-initial-submit", "--scheduled-submit"):
+            for action in codex_resume.SCHEDULED_ACTIONS:
                 with self.assertRaises(codex_resume.RetryableAutomationError):
                     codex_resume.run_automation(action)
             with self.assertRaises(RuntimeError) as error:
@@ -199,7 +199,8 @@ class CodexResumeTests(unittest.TestCase):
         self.assertEqual(submit.call_count, 11)
         self.assertEqual(
             submit.call_args_list,
-            [call("--scheduled-initial-submit", None)] + [call("--scheduled-submit", None)] * 10,
+            [call("--scheduled-initial-submit", None)] + [call("--scheduled-submit", None)] * 9
+            + [call("--scheduled-final-submit", None)],
         )
         self.assertEqual(sleep.call_args_list, [call(60)] * 10)
 
