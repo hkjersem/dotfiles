@@ -378,7 +378,15 @@ struct Foreground {
     let activate: () throws -> Void
     let isFrontmost: () throws -> Bool
     let typeText: (String) throws -> Void
+    // Moves the caret to the end of the composer, then adds a blank line without sending.
+    let breakAfterDraft: () throws -> Void
     let pressReturn: () throws -> Void
+}
+
+// Lines as the editor reports them, ignoring blank lines and surrounding whitespace.
+func squeezed(_ text: String) -> String {
+    text.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }
+        .filter { !$0.isEmpty }.joined(separator: "\n")
 }
 
 func requireForeground<N: UINode>(_ composer: N, _ foreground: Foreground) throws {
@@ -502,9 +510,8 @@ func submitSteps<N: UINode>(
             ? "A reply appears to be in progress (Stop is shown); not submitting."
             : "No Send button next to the composer; not submitting.", retryable: true)
     }
-    if message != nil && !inserted {
-        throw Failure("The composer holds a draft; not adding the custom message to it or sending it.", retryable: true)
-    }
+    // A custom message goes after a draft, separated by a blank line, so both are sent together.
+    let appended = message != nil && !inserted
 
     // An empty composer keeps Send disabled until text is typed, so only a draft waits for it here.
     if !inserted {
@@ -525,28 +532,30 @@ func submitSteps<N: UINode>(
 
     var expected = original
     var injectedAt: TimeInterval?
-    if inserted {
+    if inserted || appended {
         _ = try verifiedTarget(app: app, window: window, composer: composer, expected: original)
         try requireForeground(composer, foreground)
         if let requiredIdle { try requireIdle(foreground, required: requiredIdle, injectedAt: nil) }
         try requireChat(window, chatTitle)
         injected = true
+        if appended { try foreground.breakAfterDraft() }
         try foreground.typeText(text)
         injectedAt = foreground.now()
         // Typed characters arrive asynchronously; never undo them, since the editor may hold user edits by now.
+        let goal = squeezed(appended ? original + "\n\n" + text : text)
         var typed = ""
         let ready = try poll(enableAttempts, sleep) {
             let target = try currentTarget(app: app, window: window, composer: composer)
             typed = try composerText(target)
-            let trimmed = typed.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed == text { return try target.send?.flag("AXEnabled") == true }
-            guard trimmed.isEmpty || text.hasPrefix(trimmed) else {
+            let shown = squeezed(typed)
+            if shown == goal { return try target.send?.flag("AXEnabled") == true }
+            guard goal.hasPrefix(shown) else {
                 throw Failure("The composer holds unexpected text after typing; left it as is and did not press Return.")
             }
             return false
         }
         guard ready else {
-            throw Failure(typed.trimmingCharacters(in: .whitespacesAndNewlines) == text
+            throw Failure(squeezed(typed) == goal
                 ? "Typed \(message == nil ? "\"\(continueText)\"" : "the custom message") but Send stayed disabled; left it in the composer and did not press Return."
                 : "The typed text did not fully appear in the composer; left it as is and did not press Return.")
         }
@@ -719,9 +728,16 @@ func typeLive(_ text: String, pid: pid_t, watchIdle: Bool) throws {
 
 // Posts one Return through the session event tap, the same path System Events uses.
 // Callers verify the app is frontmost; the Enter-only fallback preserves its existing focus.
-func postReturn() throws {
+func postReturn() throws { try postKey(0x24) }
+
+// Cmd+Down moves to the end of the editor and Shift+Return adds a line without sending, both verified live.
+func postKey(_ key: CGKeyCode, flags: CGEventFlags = []) throws {
     guard let source = CGEventSource(stateID: .hidSystemState) else { throw Failure("Could not create a key event source.") }
-    for event in try keyEvents(source, key: 0x24) { event.post(tap: .cgSessionEventTap) }
+    for event in try keyEvents(source, key: key) {
+        event.flags = flags
+        event.post(tap: .cgSessionEventTap)
+    }
+    RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
 }
 
 func submitLive(mode: SubmissionMode, message: String?, chat: Chat?) throws -> Int32 {
@@ -745,6 +761,12 @@ func submitLive(mode: SubmissionMode, message: String?, chat: Chat?) throws -> I
             return frontmost == pid
         },
         typeText: { try typeLive($0, pid: pid, watchIdle: requiredIdle != nil) },
+        breakAfterDraft: {
+            guard frontmostPid() == pid else { throw Failure("Another app came to the front; did not add the message.") }
+            try postKey(0x7D, flags: .maskCommand)
+            try postKey(0x24, flags: .maskShift)
+            try postKey(0x24, flags: .maskShift)
+        },
         pressReturn: postReturn
     )
     defer {
@@ -768,7 +790,7 @@ func submitLive(mode: SubmissionMode, message: String?, chat: Chat?) throws -> I
     let result = try submit(app: node, foreground: foreground, requiredIdle: requiredIdle, message: message,
                             chatTitle: chat?.title, blindReturnWhenEmpty: mode.blindReturnWhenEmpty, sleep: liveSleep)
     let typed = message == nil ? "typed \"\(continueText)\"" : "typed the custom message"
-    let draft = result.inserted ? typed : "kept the existing draft"
+    let draft = result.inserted ? typed : message == nil ? "kept the existing draft" : "added the custom message after the draft"
     switch result.outcome {
     case .confirmed:
         print("Pressed Return in the composer (\(draft)); the composer cleared or a reply started.")
@@ -848,6 +870,7 @@ final class FakeHost {
     var idleReadable = true
     var typeError: Failure?
     var returnError: Failure?
+    var breaks: [(frontmost: Bool, focused: Bool)] = []
 
     func userActivity(secondsAgo: TimeInterval = 0) { lastInput = clock - secondsAgo }
 
@@ -879,6 +902,13 @@ final class FakeHost {
                 f.composer.attributes["AXValue"] = (isPlaceholder ? "" : before ?? "") + text
                 if self.typingEnablesSend { f.send.attributes["AXEnabled"] = true }
                 self.onType?()
+            },
+            breakAfterDraft: {
+                let focused = f.composer.attributes["AXFocused"] as? Bool == true
+                self.breaks.append((self.frontmost, focused))
+                self.lastInput = self.clock
+                guard self.frontmost && focused else { return }
+                f.composer.attributes["AXValue"] = (f.composer.attributes["AXValue"] as? String ?? "") + "\n\n"
             },
             pressReturn: {
                 let focused = f.composer.attributes["AXFocused"] as? Bool == true
@@ -1607,18 +1637,30 @@ func selfTest() -> Int32 {
         try expect(f.host.typed.count == 1 && f.host.typed[0].text == message, "did not type the message once")
         try expect(f.host.returns.count == 1 && f.host.returns[0].text == message, "Return not sent with the message")
     }
-    test("custom message: a draft stops before activation, retryably, and is kept") {
-        for scheduled in [true, false] {
-            let f = fixture(draft: "my draft")
-            let error = try failure("holds a draft") {
-                _ = try submit(app: f.app, foreground: f.host.foreground(f), requiredIdle: scheduled ? scheduledIdleSeconds : nil,
-                               message: "resume", sleep: { _ in })
-            }
-            try expect(exitCode(for: error, scheduled: scheduled) == (scheduled ? 4 : 1), "exit code")
-            try expect(f.host.activateCalls == 0 && f.composer.sets.isEmpty, "activated or focused")
-            try expect(f.composer.attributes["AXValue"] as? String == "my draft", "draft changed")
-            try expectNoReturn(f)
+    test("custom message: added after a draft with a blank line and sent together once") {
+        let f = fixture(draft: "my draft\nsecond line")
+        let result = try submit(app: f.app, foreground: f.host.foreground(f), message: "resume", sleep: { _ in })
+        try expect(!result.inserted && result.outcome == .confirmed, "unexpected result \(result)")
+        try expect(f.host.breaks.count == 1 && f.host.breaks[0].frontmost && f.host.breaks[0].focused,
+                   "blank line not added once in the focused composer")
+        try expect(f.host.typed.count == 1 && f.host.typed[0].before == "my draft\nsecond line\n\n", "message not typed after the break")
+        try expect(f.host.returns.count == 1 && f.host.returns[0].text == "my draft\nsecond line\n\nresume",
+                   "Return not sent with draft and message")
+    }
+    test("custom message: no Return when the text after a draft is not draft plus message") {
+        let f = fixture(draft: "my draft")
+        f.host.onType = { f.composer.attributes["AXValue"] = "myresume draft" }
+        let error = try failure("unexpected text") {
+            _ = try submit(app: f.app, foreground: f.host.foreground(f), message: "resume", sleep: { _ in })
         }
+        try expect(!error.retryable, "retryable after typing")
+        try expectNoReturn(f, typed: 1)
+    }
+    test("without a custom message a draft gets no blank line or text") {
+        let f = fixture(draft: "my draft")
+        let result = try run(f)
+        try expect(!result.inserted && result.outcome == .confirmed && f.host.breaks.isEmpty && f.host.typed.isEmpty,
+                   "changed the draft")
     }
     test("custom message: an unrecognised composer never gets the Return-only fallback") {
         let f = fixture(draft: "")

@@ -73,8 +73,9 @@ window title and, when exactly one Codex chat has that name, the chat's id,
 project and folder.
 
 Add `--message "text"` to `--time`, `--reset` or `--now` to send that text
-instead. It must be one line and not start with `/`. A custom message is only
-sent into a recognised, empty input field; otherwise nothing is sent.
+instead. It must be one line and not start with `/`. If the input field already
+holds text, the message is added after it with a blank line between, and both
+are sent together. Without a recognised input field nothing is sent.
 
 Keeps the Mac awake while waiting, briefly takes app focus to submit, and
 requires an unlocked session and Accessibility permission. The first scheduled

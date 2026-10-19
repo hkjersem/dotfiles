@@ -19,8 +19,10 @@ excluding the separate ChatGPT chat app. It reads the composer and nearby Send
 control, preserving drafts or inserting continue when empty. An empty composer
 may show a voice chat button instead of Send; text is then typed, and Return
 waits for Send to replace it. --message replaces continue with a single-line
-custom message. That message is typed only into a recognised, empty composer: a
-draft or an unrecognised composer stops before any input, retryably when
+custom message. After a draft, it moves the caret to the end (Cmd+Down), adds a
+blank line (Shift+Return twice) and types the message, so both are sent
+together; Return follows only when the composer shows exactly the draft and the
+message. An unrecognised composer stops before any input, retryably when
 scheduled. This app exposes its placeholder (sometimes with a newline) as
 AXValue when empty. A placeholder match ignoring surrounding whitespace is
 treated as empty, even if deliberately typed. If no composer label is
@@ -644,7 +646,7 @@ def argument_parser():
             "existing focus, without typing text or retrying after Return. "
             "Inspection does not activate the app. "
             "An empty composer is filled with 'continue', or with --message; existing "
-            "drafts are preserved, and --message never adds to or sends a draft. "
+            "drafts are preserved, and --message is added after a draft with a blank line. "
             "Scheduled jobs inhibit idle system/display sleep while waiting, "
             "but cannot prevent manual or policy-enforced locking. "
             "The first scheduled attempt ignores recent activity. Up to ten "
