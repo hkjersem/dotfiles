@@ -194,13 +194,18 @@ func focusedWindow<N: UINode>(of app: N) throws -> N {
 }
 
 func findTarget<N: UINode>(in window: N) throws -> Target<N> {
-    let labelled = try collect(window, roles: ["AXTextArea"]).filter { composerLabels.contains(try $0.label()) }
+    let textAreas = try collect(window, roles: ["AXTextArea"])
+    let labelled = try textAreas.filter { composerLabels.contains(try $0.label()) }
     var composers = labelled
     if composers.count > 1 { composers = try composers.filter { try $0.flag("AXFocused") == true } }
     guard composers.count == 1, let composer = composers.first else {
         if labelled.isEmpty {
+            // Labels are placeholders, not draft text, so they are safe to report.
+            let found = try textAreas.map { "\"" + (try $0.rawLabel()).trimmingCharacters(in: .whitespacesAndNewlines) + "\"" }
             throw Failure("No composer found in the focused window (expected a text area labelled "
-                + composerLabels.sorted().joined(separator: ", ") + ").", retryable: true, missingComposer: true)
+                + composerLabels.sorted().joined(separator: ", ") + "; found "
+                + (found.isEmpty ? "no text areas" : "text areas labelled " + found.joined(separator: ", ")) + ").",
+                retryable: true, missingComposer: true)
         }
         throw Failure("Found \(labelled.count) composers in the focused window and cannot tell which is active.")
     }
@@ -830,7 +835,7 @@ func selfTest() -> Int32 {
     test("refuses unlabelled text areas") {
         let f = fixture()
         f.composer.attributes["AXDescription"] = "Notes"
-        try expectFailure("No composer found") { _ = try findTarget(in: f.window) }
+        try expectFailure("found text areas labelled \"\", \"Notes\").") { _ = try findTarget(in: f.window) }
     }
     test("refuses two Send buttons next to the composer") {
         let f = fixture()
