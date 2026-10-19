@@ -34,6 +34,9 @@ if name == "brew" and args[:1] == ["doctor"]:
     if os.environ.get("CLT_TEST_DOCTOR_BROKEN"):
         sys.exit("Error: unknown check")
     if (state / "outdated").exists():
+        print("Please note that these warnings are just used to help the Homebrew maintainers")
+        print("with debugging if you file an issue.")
+        print()
         print("Warning: Your Command Line Tools are too outdated.")
         print("Update them from Software Update in System Settings.")
         sys.exit(1)
@@ -192,6 +195,9 @@ class CommandLineToolsTests(unittest.TestCase):
                     env={**self.env, **env}, text=True, capture_output=True, timeout=20,
                 )
                 self.assertEqual(result.returncode, expected, result.stderr)
+                if setup.get("outdated") and not env:
+                    self.assertTrue(result.stdout.startswith("Warning: Your Command Line Tools are too outdated."),
+                                    result.stdout)
 
 
 if __name__ == "__main__":

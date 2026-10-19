@@ -21,7 +21,8 @@ command_line_tools_outdated() {
         return 1
     fi
     if printf '%s\n' "$output" | grep -q 'Command Line Tools'; then
-        printf '%s\n' "$output"
+        # Skip brew doctor's leading disclaimer; the finding starts at "Warning:".
+        printf '%s\n' "$output" | sed -n '/^Warning:/,$p'
         return 0
     fi
     printf '%s\n' "$output" >&2
