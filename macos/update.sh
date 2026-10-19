@@ -5,6 +5,7 @@
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/scripts/machine-profile.sh" || exit 1
 ensure_machine_profile || exit 1
 source "$HOME/.dotfiles/scripts/lib/tool-updates.sh" || exit 1
+source "$HOME/.dotfiles/scripts/lib/command-line-tools.sh" || exit 1
 
 SKIP_DEFAULTS=false
 for arg in "$@"; do
@@ -55,6 +56,8 @@ header "Homebrew"
 # Update Homebrew (Cask) & packages
 brew analytics off
 brew update --quiet
+# After brew update, so Homebrew knows the latest Command Line Tools release.
+update_command_line_tools || exit 1
 HOMEBREW_NO_ASK=1 brew bundle install --file="$HOME/.dotfiles/Brewfile" --quiet || exit 1
 brew upgrade --yes || exit 1
 brew cleanup

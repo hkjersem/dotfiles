@@ -8,7 +8,7 @@ managed by [dotbot](https://github.com/anishathalye/dotbot).
 Start with Xcode Command Line Tools (`xcode-select --install`) and
 [Homebrew](https://brew.sh/). Ensure `git`, `python3`, and `brew` are available
 in the current shell. Setup needs network access and may request administrator
-access. Intel Macs are not supported.
+access. Requires macOS 26.7 or newer; Intel Macs are not supported.
 
 Review `install.conf.yaml` and back up conflicting dotfiles before applying the
 links. Dotbot includes its YAML dependency; no separate pip installation is needed.
@@ -34,7 +34,7 @@ commit or another install. Shell settings may require a new shell.
 | Command | What it does |
 |---|---|
 | `dotfiles-install` | Reapply links and bootstrap tools, plugins, and local Git identity; leaves macOS preferences unchanged |
-| `dotfiles-update` | Update macOS/App Store apps, Homebrew packages, Node/npm globals, Zsh plugins, and supported installed CLIs; then audit |
+| `dotfiles-update` | Update macOS/App Store apps, Homebrew packages, Command Line Tools, Node/npm globals, Zsh plugins, and supported installed CLIs; then audit |
 | `dotfiles-defaults` | Apply macOS system preferences |
 | `dotfiles-audit` | Check for drift between repo and installed state (includes skills) |
 | `dotfiles-profile` | Show or choose the machine's personal/work profile |

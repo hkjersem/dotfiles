@@ -60,6 +60,7 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 | `scripts/lib/stale-branches.sh` | Shared stale-branch and worktree classification for `prune-branches.sh` and the read-only section in `audit-repo.sh` |
 | `scripts/wipe-clean.sh` | Delete all known build artifacts and dependency folders from the current directory. Aliased as `wipe_clean` |
 | `scripts/copy-clean.sh` | Clone-copy or ZIP a source directory, defaulting to the current directory, excluding the same artifacts as `wipe_clean`; supports `--ignore-git` and `--keep-name`. Aliased as `copy_clean` |
+| `scripts/lib/command-line-tools.sh` | Command Line Tools check (via `brew doctor`) and update through Software Update; used by `update.sh` and `audit.sh` |
 | `scripts/lib/pm-utils.sh` | Shared package-manager duration and configuration parsing helpers, also used by repository audit |
 | `macos/applications.sh` | Bootstrap script — installs brew formulae and tools |
 | `macos/install.sh` | Full machine setup entry point (calls applications.sh etc.) |
@@ -81,7 +82,7 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 - **Symlinks are live** — editing a linked file in this checkout changes the machine's configuration before staging or committing. Run Bash entry points with `bash`, not `source` from zsh.
 - **Never hardcode paths** — always use `$HOME` or `~`, never `/Users/<username>/...`
 - **Never commit generated or cache files** — `.zcompdump`, `.zwc` and similar are machine-specific and gitignored
-- **All changes must be portable** — must work across Apple Silicon Macs, not just the current machine. Intel support is out of scope. Bash scripts must work with macOS's bundled Bash 3.2.
+- **All changes must be portable** — must work across Apple Silicon Macs running macOS 26.7 or newer, not just the current machine. Intel support is out of scope. `dotfiles-update` keeps the Command Line Tools current, so Swift code may target the current toolchain. Bash scripts must work with macOS's bundled Bash 3.2.
 - **When adding a new zsh config** — add it to a file in `zsh/conf.d/` and add a `source` line in `zsh/zshrc`
 - **When adding a new brew tool**: add it to `Brewfile` — this is the single source of truth for brew packages. `applications.sh` and `update.sh` both use `brew bundle` to install from it
 - **Machine profile** lives in `~/.config/dotfiles/profile`, never in Git. Load it through `scripts/machine-profile.sh`; conditional Brewfile entries use the exported `DOTFILES_PROFILE` for automatic installation only. Update and sync installed tools on either profile, regardless of their intended profile; never uninstall them automatically.

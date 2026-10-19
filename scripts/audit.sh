@@ -5,6 +5,7 @@
 
 DOTFILES="$HOME/.dotfiles"
 source "$DOTFILES/scripts/machine-profile.sh" || exit 1
+source "$DOTFILES/scripts/lib/command-line-tools.sh" || exit 1
 
 # Load local ignore list (audit.ignore is gitignored — machine-specific)
 # Format: one entry per line, prefixed by category:
@@ -188,6 +189,15 @@ else
     done < <(echo "$BREW_LEAVES")
 fi
 
+section_end
+
+section_start "Command Line Tools"
+clt_finding=$(command_line_tools_outdated 2>/dev/null)
+case $? in
+    0) warn "$(printf '%s\n' "$clt_finding" | sed -n 's/^Warning: //; /[^[:space:]]/{p;q;}') (run dotfiles-update)" ;;
+    1) ok "Command Line Tools are current" ;;
+    *) warn "Could not check the Command Line Tools with Homebrew" ;;
+esac
 section_end
 
 # ──────────────────────────────────────────────────────

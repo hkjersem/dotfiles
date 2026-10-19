@@ -74,6 +74,7 @@ class MachineProfileTests(unittest.TestCase):
         for relative in (
             "Brewfile", "install.conf.yaml", "scripts/audit.sh",
             "scripts/machine-profile.sh", "scripts/lib/tool-updates.sh",
+            "scripts/lib/command-line-tools.sh",
             "macos/install.sh", "macos/applications.sh", "macos/update.sh",
             "zsh/conf.d/omz.zsh",
         ):
@@ -90,7 +91,7 @@ class MachineProfileTests(unittest.TestCase):
                      "uname"):
             self.bin.joinpath(tool).symlink_to(shutil.which(tool))
         self.mock = "#!" + sys.executable + "\n" + MOCK_TOOL
-        for tool in ("brew", "npm", "fnm", "pnpm", "bash", "zsh", "softwareupdate"):
+        for tool in ("brew", "npm", "fnm", "pnpm", "bash", "zsh", "softwareupdate", "xcode-select"):
             self.write_mock(self.bin / tool)
         # The updater's cleanup must not delete even isolated fixture data.
         (self.bin / "rm").unlink()
