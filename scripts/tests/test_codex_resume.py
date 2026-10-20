@@ -5,6 +5,7 @@ from contextlib import redirect_stderr, redirect_stdout
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import plistlib
 import re
@@ -14,7 +15,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import call, patch
+from unittest.mock import MagicMock, call, patch
 
 
 REPO = Path(__file__).resolve().parents[2]
@@ -53,6 +54,7 @@ mode = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] != "app-server" else "{m
 for line in sys.stdin:
     request = json.loads(line)
     if request.get("id") == 1:
+        experimental = request["params"].get("capabilities", {{}}).get("experimentalApi")
         print(json.dumps({{"id": 1, "result": {{}}}}), flush=True)
     elif request.get("id") == 2 and mode == "exit":
         sys.exit(0)
@@ -60,13 +62,21 @@ for line in sys.stdin:
         if mode == "error":
             reply = {{"id": 2, "error": {{"message": "not signed in"}}}}
         else:
-            reply = {{"id": 2, "result": {{"method": request["method"]}}}}
+            reply = {{"id": 2, "result": {{"method": request["method"], "params": request.get("params"),
+                                           "experimentalApi": experimental}}}}
         print("not json", flush=True)
         print(json.dumps(reply), flush=True)
 """
+REAL_APP_SERVER_REQUEST = codex_resume.app_server_request
 
 
 class CodexResumeTests(unittest.TestCase):
+    def setUp(self):
+        # Never reach the real Codex CLI: a local chat would otherwise queue a real message.
+        guard = patch.object(codex_resume, "app_server_request",
+                             side_effect=AssertionError("unexpected Codex app server request"))
+        guard.start()
+        self.addCleanup(guard.stop)
     @unittest.skipUnless(
         sys.platform == "darwin" and shutil.which("swift"),
         "Native Accessibility self-tests require macOS and Swift.",
@@ -516,7 +526,8 @@ class CodexResumeTests(unittest.TestCase):
                 "--message", "Resume now", "--scheduled", "2026-10-16T16:30:00+02:00",
             ])
             self.assertEqual(output.getvalue().splitlines(), [
-                "Codex resume scheduled for 2026-10-16 16:30 with message: Resume now",
+                "Codex resume scheduled for 2026-10-16 16:30 via the app's Accessibility controls "
+                "with message: Resume now",
             ] * 2)
 
             with (
@@ -632,17 +643,19 @@ class CodexResumeTests(unittest.TestCase):
         with (
             patch.object(codex_resume.shutil, "which", return_value="/usr/bin/swift"),
             patch.object(codex_resume.subprocess, "run", return_value=result) as run,
+            patch.object(codex_resume, "resume_through_queue", return_value=False) as queue,
             redirect_stdout(io.StringIO()) as output,
         ):
             self.assertEqual(codex_resume.main(["--now", "--chat", "01a1"]), 0)
             now_arguments = run.call_args.args[0][2:]
             self.assertEqual(codex_resume.main(["--now", "--chat", "explore pwa"]), 0)
+        self.assertEqual([entry.args[0]["id"] for entry in queue.call_args_list], ["01a1-mine"])
         self.assertEqual(now_arguments, [
             "--submit", "--chat", "01a1-mine", "--chat-title", "Find current project status",
         ])
         self.assertEqual(output.getvalue().splitlines(), [
-            "Resuming in chat 'Find current project status'.",
-            "Resuming in chat 'Explore PWA roadmap' (remote).",
+            "Resuming in chat 'Find current project status' via the Codex queue.",
+            "Resuming in chat 'Explore PWA roadmap' (remote) via the app's Accessibility controls.",
         ])
         report = subprocess.CompletedProcess([], 0, '{"windowTitle": "Explore PWA roadmap"}', "")
         with (
@@ -668,10 +681,11 @@ class CodexResumeTests(unittest.TestCase):
             with plist_path.open("rb") as agent_file:
                 arguments = plistlib.load(agent_file)["ProgramArguments"]
             self.assertEqual(arguments[-4:-2], ["--chat", "01a6-status"])
-            self.assertEqual(output.getvalue().count("in chat 'Status board'"), 2)
+            self.assertEqual(output.getvalue().count("in chat 'Status board' via the Codex queue."), 2)
             with (
                 patch.object(codex_resume, "PLIST_PATH", plist_path),
                 patch.object(codex_resume, "wait_until_scheduled_time"),
+                patch.object(codex_resume, "resume_through_queue", return_value=False),
                 patch.object(codex_resume, "submit") as submit,
                 patch.object(codex_resume, "launchctl"),
                 redirect_stdout(io.StringIO()) as log,
@@ -722,7 +736,8 @@ class CodexResumeTests(unittest.TestCase):
             self.assertEqual(codex_resume.main(["--now", "--project", "local-relay"]), 0)
         self.assertEqual(run.call_args.args[0][3:5], ["--chat", "01a7-mini"])
         self.assertEqual(output.getvalue(),
-                         "Resuming in chat 'Explore PWA roadmap' (remote) in project 'local-relay' (remote).\n")
+                         "Resuming in chat 'Explore PWA roadmap' (remote) in project 'local-relay' (remote) "
+                         "via the app's Accessibility controls.\n")
         with tempfile.TemporaryDirectory() as temporary:
             plist_path = Path(temporary) / "job.plist"
             output = io.StringIO()
@@ -737,7 +752,7 @@ class CodexResumeTests(unittest.TestCase):
             with plist_path.open("rb") as agent_file:
                 arguments = plistlib.load(agent_file)["ProgramArguments"]
             self.assertEqual(arguments[-4:-2], ["--project", "/work/myntr"])
-            self.assertEqual(output.getvalue().count("in the latest chat in project 'myntr'"), 2)
+            self.assertEqual(output.getvalue().count("in the latest chat in project 'myntr' via the Codex queue."), 2)
             self.assertNotIn("in chat", output.getvalue())
             (home / codex_resume.CHAT_CATALOG).unlink()
             write_catalog(home / codex_resume.CHAT_CATALOG, self.chat_rows() + [
@@ -747,13 +762,14 @@ class CodexResumeTests(unittest.TestCase):
             with (
                 patch.object(codex_resume, "PLIST_PATH", plist_path),
                 patch.object(codex_resume, "wait_until_scheduled_time"),
+                patch.object(codex_resume, "resume_through_queue", return_value=True) as queue,
                 patch.object(codex_resume, "submit") as submit,
                 patch.object(codex_resume, "launchctl"),
-                redirect_stdout(io.StringIO()) as log,
+                redirect_stdout(io.StringIO()),
             ):
                 self.assertEqual(codex_resume.main(arguments[4:]), 0)
-            self.assertEqual(submit.call_args.args[2]["id"], "01a8-later")
-            self.assertIn("in chat 'Later myntr work'.", log.getvalue())
+            self.assertEqual(queue.call_args.args[0]["id"], "01a8-later")
+            submit.assert_not_called()
 
     def test_scheduled_project_without_chats_fails_and_unloads(self):
         self.with_chats()
@@ -801,21 +817,229 @@ class CodexResumeTests(unittest.TestCase):
     def test_app_server_request_waits_for_the_reply_before_closing_input(self):
         self.fake_cli("answer")
         self.assertEqual(
-            codex_resume.app_server_request("account/rateLimits/read"),
-            {"method": "account/rateLimits/read"},
+            REAL_APP_SERVER_REQUEST("account/rateLimits/read"),
+            {"method": "account/rateLimits/read", "params": None, "experimentalApi": True},
+        )
+        self.assertEqual(
+            REAL_APP_SERVER_REQUEST("thread/queue/list", {"threadId": "01a1"}),
+            {"method": "thread/queue/list", "params": {"threadId": "01a1"}, "experimentalApi": True},
         )
 
     def test_app_server_errors_and_silence_are_reported(self):
         self.fake_cli("error")
-        with self.assertRaisesRegex(RuntimeError, "rejected account/rateLimits/read: not signed in"):
-            codex_resume.app_server_request("account/rateLimits/read")
+        with self.assertRaisesRegex(codex_resume.AppServerRejectedError,
+                                    "rejected account/rateLimits/read: not signed in"):
+            REAL_APP_SERVER_REQUEST("account/rateLimits/read")
         self.fake_cli("exit")
-        with self.assertRaisesRegex(RuntimeError, "exited without answering"):
-            codex_resume.app_server_request("account/rateLimits/read")
+        with self.assertRaisesRegex(RuntimeError, "exited without answering") as error:
+            REAL_APP_SERVER_REQUEST("account/rateLimits/read")
+        self.assertNotIsInstance(error.exception, codex_resume.AppServerRejectedError)
         self.fake_cli("silent")
         with patch.object(codex_resume, "APP_SERVER_TIMEOUT_SECONDS", 0.5):
-            with self.assertRaisesRegex(RuntimeError, "did not answer"):
-                codex_resume.app_server_request("account/rateLimits/read")
+            with self.assertRaisesRegex(RuntimeError, "did not answer") as error:
+                REAL_APP_SERVER_REQUEST("account/rateLimits/read")
+        self.assertNotIsInstance(error.exception, codex_resume.AppServerRejectedError)
+        with (
+            patch.object(codex_resume, "CODEX_CLI_PATHS", ()),
+            patch.object(codex_resume.shutil, "which", return_value=None),
+            self.assertRaisesRegex(codex_resume.AppServerRejectedError, "Codex CLI is unavailable"),
+        ):
+            REAL_APP_SERVER_REQUEST("account/rateLimits/read")
+        with (
+            patch.object(codex_resume, "codex_cli", return_value="/nonexistent/codex"),
+            self.assertRaisesRegex(codex_resume.AppServerRejectedError, "could not be started"),
+        ):
+            REAL_APP_SERVER_REQUEST("account/rateLimits/read")
+        process = MagicMock()
+        process.stdout = iter(())
+        process.stdin.write.side_effect = BrokenPipeError(32, "Broken pipe")
+        with (
+            patch.object(codex_resume, "codex_cli", return_value="codex"),
+            patch.object(codex_resume.subprocess, "Popen", return_value=process),
+            self.assertRaisesRegex(RuntimeError, "stopped while sending thread/queue/add") as error,
+        ):
+            REAL_APP_SERVER_REQUEST("thread/queue/add", {"threadId": "01a1-mine"})
+        self.assertNotIsInstance(error.exception, codex_resume.AppServerRejectedError)
+        process.kill.assert_called_once()
+
+    def fake_queue(self, listings, deleted=True, add_error=None, on_add=None, home=None):
+        """Fake the app server's queue; each list request takes the next listing, repeating the last one."""
+        calls = []
+
+        def request(method, params=None):
+            calls.append((method, params))
+            if method == "thread/queue/add":
+                if add_error is not None:
+                    raise add_error
+                if on_add is not None:
+                    on_add()
+                return {"queuedSubmission": {"id": "q1"}}
+            if method == "thread/queue/list":
+                listing = listings.pop(0) if len(listings) > 1 else listings[0]
+                if isinstance(listing, Exception):
+                    raise listing
+                return listing
+            if method == "thread/queue/delete":
+                return {"deleted": deleted}
+            raise AssertionError(f"unexpected {method}")
+
+        if home is None:
+            temporary = tempfile.TemporaryDirectory()
+            self.addCleanup(temporary.cleanup)
+            home = Path(temporary.name)
+        for patcher in (
+            patch.object(codex_resume, "app_server_request", side_effect=request),
+            patch.object(codex_resume, "CODEX_HOME", home),
+            patch.object(codex_resume, "REPLY_RESULT_SECONDS", 0),
+            patch.object(codex_resume.time, "sleep"),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        return calls
+
+    def queued(self, *ids, cursor=None):
+        return {"data": [{"id": item} for item in ids], "nextCursor": cursor}
+
+    def write_session_log(self, *events, age=0):
+        """Append reply events to the local chat's session log, as the app does, last written age seconds ago."""
+        path = codex_resume.CODEX_HOME / "sessions/2026/10/20/rollout-2026-10-20T10-00-00-01a1-mine.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a") as log:
+            log.write(json.dumps({"type": "response_item", "payload": {"type": "message"}}) + "\n")
+            for event in events:
+                payload = event if isinstance(event, dict) else {"type": event}
+                log.write(json.dumps({"type": "event_msg", "payload": payload}) + "\n")
+        written = datetime.now().timestamp() - age
+        os.utime(path, (written, written))
+
+    LOCAL_CHAT = {"id": "01a1-mine", "name": "Find current project status", "cwd": "/work/myntr", "host": None}
+
+    def test_queue_sends_the_message_once_the_app_takes_it(self):
+        calls = self.fake_queue([self.queued("q1"), self.queued("other", cursor="c2"), self.queued("q1"),
+                                 self.queued("other")])
+        with redirect_stdout(io.StringIO()) as output:
+            self.assertTrue(codex_resume.resume_through_queue(self.LOCAL_CHAT, None))
+        add = calls[0]
+        self.assertEqual(add[0], "thread/queue/add")
+        self.assertEqual(add[1]["threadId"], "01a1-mine")
+        self.assertEqual(add[1]["input"], [{"type": "text", "text": "continue", "text_elements": []}])
+        self.assertTrue(add[1]["clientUserMessageId"])
+        self.assertEqual([call[1].get("cursor") for call in calls[1:]], [None, None, "c2", None])
+        self.assertNotIn("thread/queue/delete", [call[0] for call in calls])
+        self.assertEqual(output.getvalue().splitlines(), [
+            "Queued the message in chat 'Find current project status'; waiting for the app to take it.",
+            "The app took the message from the queue.",
+        ])
+
+    def test_queue_reports_how_the_reply_it_started_ended(self):
+        limit = {"type": "task_complete", "error": {"message": "You've hit your usage limit."}}
+        for events, expected in (
+            ((limit,), "The reply ended with an error: You've hit your usage limit."),
+            (("task_complete",), "The reply finished."),
+            (("turn_aborted",), "The reply was stopped."),
+            ((), "Codex is replying."),
+        ):
+            with self.subTest(expected=expected):
+                self.fake_queue([self.queued()], on_add=lambda: self.write_session_log("task_started", *events))
+                # An earlier reply's end must not be mistaken for this one's.
+                self.write_session_log("task_started", "task_complete")
+                with redirect_stdout(io.StringIO()) as output:
+                    self.assertTrue(codex_resume.resume_through_queue(self.LOCAL_CHAT, None))
+                self.assertEqual(output.getvalue().splitlines()[-1], expected)
+
+    def test_queue_leaves_a_reply_in_progress_alone(self):
+        calls = self.fake_queue([self.queued("q1")])
+        self.write_session_log("task_started", "task_complete", "task_started")
+        with redirect_stdout(io.StringIO()) as output:
+            self.assertTrue(codex_resume.resume_through_queue(self.LOCAL_CHAT, None, lambda: "[t] "))
+        self.assertEqual(calls, [])
+        self.assertEqual(output.getvalue(),
+                         "[t] Codex is already replying in chat 'Find current project status'; not sending continue.\n")
+        with redirect_stdout(io.StringIO()) as output:
+            self.assertTrue(codex_resume.resume_through_queue(self.LOCAL_CHAT, "After this"))
+        self.assertEqual([call[0] for call in calls], ["thread/queue/add"])
+        self.assertIn("queued the message, and the app sends it when the reply ends", output.getvalue())
+
+    def test_reply_counts_as_in_progress_only_when_started_unended_and_recent(self):
+        self.fake_queue([self.queued()])
+        self.assertFalse(codex_resume.replying(self.LOCAL_CHAT))
+        for events, age, expected in (
+            (("task_started",), 0, True),
+            (("task_started", "task_complete"), 0, False),
+            (("task_started", "turn_aborted"), 0, False),
+            (("task_started",), codex_resume.REPLY_STALE_SECONDS + 60, False),
+        ):
+            with self.subTest(events=events, age=age):
+                self.fake_queue([self.queued()])
+                self.write_session_log(*events, age=age)
+                self.assertEqual(codex_resume.replying(self.LOCAL_CHAT), expected)
+
+    def test_queue_message_left_untaken_is_removed_before_the_app_controls_are_used(self):
+        calls = self.fake_queue([self.queued("q1")])
+        with (
+            patch.object(codex_resume, "QUEUE_PICKUP_SECONDS", 0),
+            redirect_stdout(io.StringIO()) as output,
+        ):
+            self.assertFalse(codex_resume.resume_through_queue(self.LOCAL_CHAT, "Resume now", lambda: "[t] "))
+        self.assertEqual(calls[0][1]["input"][0]["text"], "Resume now")
+        self.assertEqual(calls[-1], ("thread/queue/delete", {"threadId": "01a1-mine", "queuedSubmissionId": "q1"}))
+        self.assertIn("[t] The app did not take the message within 0 minutes, so it was removed",
+                      output.getvalue())
+
+    def test_queue_message_taken_while_removing_it_counts_as_sent(self):
+        self.fake_queue([self.queued("q1")], deleted=False)
+        with (
+            patch.object(codex_resume, "QUEUE_PICKUP_SECONDS", 0),
+            redirect_stdout(io.StringIO()) as output,
+        ):
+            self.assertTrue(codex_resume.resume_through_queue(self.LOCAL_CHAT, None))
+        self.assertTrue(output.getvalue().endswith("The app took the message from the queue.\n"))
+
+    def test_queue_rejection_falls_back_and_uncertainty_types_only_continue(self):
+        calls = self.fake_queue([self.queued()], add_error=codex_resume.AppServerRejectedError("thread not found"))
+        with redirect_stdout(io.StringIO()) as output:
+            self.assertFalse(codex_resume.resume_through_queue(self.LOCAL_CHAT, "Resume now"))
+        self.assertEqual([call[0] for call in calls], ["thread/queue/add"])
+        self.assertIn("Could not queue the message (thread not found)", output.getvalue())
+        timeout = RuntimeError("The Codex app server did not answer in time.")
+        for kind, setup in (
+            ("may have been queued", {"listings": [self.queued()], "add_error": timeout}),
+            ("whether the app took it is unknown", {"listings": [timeout]}),
+        ):
+            with self.subTest(kind=kind):
+                self.fake_queue(**setup)
+                with redirect_stdout(io.StringIO()) as output:
+                    self.assertFalse(codex_resume.resume_through_queue(self.LOCAL_CHAT, None))
+                self.assertIn(f"{kind}: The Codex app server did not answer in time. Typing continue in the "
+                              "input field instead, which may send it twice.", output.getvalue())
+                self.fake_queue(**setup)
+                with redirect_stdout(io.StringIO()), \
+                        self.assertRaisesRegex(RuntimeError, f"{kind}.*Check the chat before retrying"):
+                    codex_resume.resume_through_queue(self.LOCAL_CHAT, "Resume now")
+
+    def test_scheduled_queue_uncertainty_types_continue_but_stops_a_message(self):
+        timeout = RuntimeError("The Codex app server did not answer in time.")
+        for message, falls_back in ((None, True), ("Resume now", False)):
+            with self.subTest(message=message), tempfile.TemporaryDirectory() as temporary:
+                self.fake_queue([timeout], home=self.with_chats())
+                plist_path = Path(temporary) / "job.plist"
+                plist_path.write_text("scheduled")
+                with (
+                    patch.object(codex_resume, "PLIST_PATH", plist_path),
+                    patch.object(codex_resume, "wait_until_scheduled_time"),
+                    patch.object(codex_resume, "submit") as submit,
+                    patch.object(codex_resume, "launchctl") as launchctl,
+                    redirect_stdout(io.StringIO()) as log,
+                    redirect_stderr(io.StringIO()) as errors,
+                ):
+                    self.assertEqual(codex_resume.main(
+                        [*(["--message", message] if message else []), "--chat", "01a1-mine",
+                         "--scheduled", "2026-10-20T00:00:00+02:00"]), 0 if falls_back else 1)
+                self.assertEqual(submit.call_count, 1 if falls_back else 0)
+                launchctl.assert_called_once()
+                self.assertFalse(plist_path.exists())
+                self.assertRegex(log.getvalue(), r"^\[\d\d\.\d\d\.\d{4} kl\. \d\d\.\d\d\.\d\d\] Queued the message")
+                self.assertEqual("whether the app took it is unknown" in errors.getvalue(), not falls_back)
 
     def limits(self, primary_used, secondary_used):
         return {"rateLimits": {
@@ -917,8 +1141,13 @@ class CodexResumeTests(unittest.TestCase):
                             else "Not sending: a 5-hour window is already running.")
                 lines = output.getvalue().splitlines()
                 self.assertRegex(lines[0], r"^\[\d\d\.\d\d\.\d{4} kl\. \d\d\.\d\d\.\d\d\] " + re.escape(expected) + "$")
-                self.assertEqual(lines[-1], expected)
-                self.assertEqual(len(lines), 3 if sends else 2)
+                if sends:
+                    self.assertEqual(lines[-2:], [
+                        expected, "Resuming in the open chat via the app's Accessibility controls.",
+                    ])
+                else:
+                    self.assertEqual(lines[-1], expected)
+                self.assertEqual(len(lines), 4 if sends else 2)
 
     def test_start_window_is_stored_shown_and_needs_time_or_now(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -941,7 +1170,8 @@ class CodexResumeTests(unittest.TestCase):
                 arguments = plistlib.load(agent_file)["ProgramArguments"]
         self.assertEqual(arguments[-3:], ["--start-window", "--scheduled", "2026-10-20T00:00:00+02:00"])
         self.assertEqual(output.getvalue().splitlines(), [
-            "Codex resume scheduled for 2026-10-20 00:00, only if no 5-hour window is running.",
+            "Codex resume scheduled for 2026-10-20 00:00, only if no 5-hour window is running "
+            "via the app's Accessibility controls.",
         ] * 2)
         for action in (["--reset"], ["--status"], ["--check"]):
             with self.subTest(action=action), redirect_stderr(io.StringIO()):

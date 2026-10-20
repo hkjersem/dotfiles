@@ -1,8 +1,27 @@
 #!/usr/bin/env python3
-"""Schedule a one-time submission through Codex's Accessibility controls.
+"""Schedule a one-time submission in the Codex desktop app.
 
-Requires macOS, Python 3, Swift (Xcode Command Line Tools), and Accessibility
-permission for the execution context. Terminal permission may not cover launchd.
+A chat on this Mac, chosen with --chat or --project, gets its message through
+the Codex queue: the app server's experimental thread/queue/add, reached
+through the Codex CLI. The app checks the queue about every ten seconds and
+sends the message once it has the chat loaded and not busy, without
+Accessibility, focus or an unlocked screen. A draft in the composer is left
+alone and the message is sent by itself. If queueing is rejected, or the app
+has not taken the message within two minutes, it is removed from the queue
+and the Accessibility path below is used instead. Remote-control chats, and
+the open chat when neither option is given, use Accessibility.
+Whether Codex is replying comes from the chat's session log in
+~/.codex/sessions: a reply started and not ended, in a log written within 30
+minutes. Then continue is dropped, while a --message is queued for the app to
+send after the reply. If it is unclear whether a queued continue was sent, it
+is typed with Accessibility anyway, since a second continue is harmless; a
+--message stops instead, to avoid sending it twice. After the app takes the
+message, the log shows for up to 30 seconds whether the reply finished,
+stopped, or ended with an error such as a usage limit.
+
+Accessibility requires macOS, Python 3, Swift (Xcode Command Line Tools), and
+Accessibility permission for the execution context. Terminal permission may
+not cover launchd.
 
 The user LaunchAgent starts immediately under caffeinate -di, waits until three
 seconds after the requested local minute, then runs lib/codex-resume.swift.
@@ -98,6 +117,7 @@ import tempfile
 import threading
 import time
 import unicodedata
+import uuid
 
 
 LABEL = "com.hkjersem.codex-resume"
@@ -119,6 +139,14 @@ LIMIT_NAMES = {300: "5-hour", 10080: "weekly"}
 FIVE_HOUR_MINUTES = 300
 # An unused window may report 0% with a reset a full window ahead; allow for clock and rounding drift.
 IDLE_WINDOW_TOLERANCE_SECONDS = 120
+DEFAULT_MESSAGE = "continue"
+# The app checks the queue every ten seconds, and only for a chat it has loaded that is not busy.
+QUEUE_PICKUP_SECONDS = 120
+QUEUE_POLL_SECONDS = 5
+TURN_EVENTS = ("task_started", "task_complete", "turn_aborted")
+# An unfinished reply this old in the session log is treated as abandoned, as after a crash.
+REPLY_STALE_SECONDS = 30 * 60
+REPLY_RESULT_SECONDS = 30
 RETRY_INTERVAL_SECONDS = 60
 MAX_SCHEDULED_RETRIES = 10
 HELPER_PATH = SCRIPT_PATH.parent / "lib/codex-resume.swift"
@@ -132,6 +160,10 @@ SWIFT_COMPILE_ERROR_PATTERN = re.compile(r"\.swift:\d+:\d+: error:")
 
 class RetryableAutomationError(RuntimeError):
     """The native helper confirms that no input was injected."""
+
+
+class AppServerRejectedError(RuntimeError):
+    """The app server could not be started or answered with an error, so it did nothing."""
 
 
 def next_occurrence(clock_text, now=None):
@@ -332,16 +364,19 @@ def codex_cli():
             return str(path)
     found = shutil.which("codex")
     if found is None:
-        raise RuntimeError("The Codex CLI is unavailable, so the usage limits cannot be read.")
+        raise AppServerRejectedError("The Codex CLI is unavailable, so its app server cannot be reached.")
     return found
 
 
-def app_server_request(method):
+def app_server_request(method, params=None):
     """Send one JSON-RPC request to a short-lived app server and return its result."""
-    process = subprocess.Popen(
-        [codex_cli(), "app-server"],
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
-    )
+    try:
+        process = subprocess.Popen(
+            [codex_cli(), "app-server"],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+        )
+    except OSError as error:
+        raise AppServerRejectedError(f"The Codex app server could not be started: {error}") from error
     replies = {}
     received = threading.Event()
 
@@ -361,15 +396,21 @@ def app_server_request(method):
     reader = threading.Thread(target=read, daemon=True)
     reader.start()
     try:
-        # The server exits at end of input before answering, so stdin stays open until the reply.
-        for request in (
-            {"id": 1, "method": "initialize",
-             "params": {"clientInfo": {"name": "codex-resume", "version": "1"}}},
-            {"method": "initialized"},
-            {"id": 2, "method": method},
-        ):
-            process.stdin.write(json.dumps(request) + "\n")
-        process.stdin.flush()
+        try:
+            # The server exits at end of input before answering, so stdin stays open until the reply.
+            for request in (
+                # The queue methods are experimental and need this opt-in.
+                {"id": 1, "method": "initialize",
+                 "params": {"clientInfo": {"name": "codex-resume", "version": "1"},
+                            "capabilities": {"experimentalApi": True}}},
+                {"method": "initialized"},
+                {"id": 2, "method": method, **({"params": params} if params is not None else {})},
+            ):
+                process.stdin.write(json.dumps(request) + "\n")
+            process.stdin.flush()
+        except OSError as error:
+            # The server may have read the request before it went away, so whether it ran is unknown.
+            raise RuntimeError(f"The Codex app server stopped while sending {method}: {error}") from error
         if not received.wait(APP_SERVER_TIMEOUT_SECONDS):
             raise RuntimeError(f"The Codex app server did not answer {method} in time.")
     finally:
@@ -379,8 +420,140 @@ def app_server_request(method):
     if reply is None:
         raise RuntimeError(f"The Codex app server exited without answering {method}.")
     if "error" in reply:
-        raise RuntimeError(f"The Codex app server rejected {method}: {reply['error'].get('message', reply['error'])}")
+        raise AppServerRejectedError(
+            f"The Codex app server rejected {method}: {reply['error'].get('message', reply['error'])}")
     return reply["result"]
+
+
+def uses_queue(target):
+    """A chat or project on this Mac takes a queued message; a remote one needs the app's controls here."""
+    return target is not None and target["host"] is None
+
+
+def delivery_label(target):
+    return "via the Codex queue" if uses_queue(target) else "via the app's Accessibility controls"
+
+
+def still_queued(chat, item):
+    params = {"threadId": chat["id"]}
+    while True:
+        page = app_server_request("thread/queue/list", params)
+        if any(entry.get("id") == item for entry in page.get("data") or []):
+            return True
+        if not page.get("nextCursor"):
+            return False
+        params = {**params, "cursor": page["nextCursor"]}
+
+
+def chat_log(chat):
+    """The session log the app writes for a chat on this Mac, or None when it cannot be found."""
+    found = list((CODEX_HOME / "sessions").glob(f"*/*/*/rollout-*-{chat['id']}.jsonl"))
+    return max(found, key=lambda path: path.stat().st_mtime) if found else None
+
+
+def turn_events(path, offset=0):
+    """Reply start and end events in a session log, from a byte offset."""
+    events = []
+    with path.open("rb") as log:
+        log.seek(offset)
+        for line in log:
+            if b'"event_msg"' not in line:
+                continue
+            try:
+                record = json.loads(line)
+            except ValueError:
+                continue
+            payload = record.get("payload") or {}
+            if record.get("type") == "event_msg" and payload.get("type") in TURN_EVENTS:
+                events.append(payload)
+    return events
+
+
+def replying(chat, now=None):
+    """Whether Codex is writing a reply in the chat: its last reply started and has not ended."""
+    path = chat_log(chat)
+    # A log left unfinished by a crash would otherwise look busy forever.
+    if path is None or (now or time.time()) - path.stat().st_mtime > REPLY_STALE_SECONDS:
+        return False
+    events = turn_events(path)
+    return bool(events) and events[-1]["type"] == "task_started"
+
+
+def report_reply(path, offset, stamp):
+    """Log how the reply the queued message started has ended so far, such as at a usage limit."""
+    if path is None:
+        return
+    deadline = time.monotonic() + REPLY_RESULT_SECONDS
+    while True:
+        ended = [event for event in turn_events(path, offset) if event["type"] != "task_started"]
+        if ended:
+            error = ended[0].get("error")
+            if ended[0]["type"] == "turn_aborted":
+                print(f"{stamp()}The reply was stopped.", flush=True)
+            elif error:
+                detail = error.get("message", error) if isinstance(error, dict) else error
+                print(f"{stamp()}The reply ended with an error: {detail}", flush=True)
+            else:
+                print(f"{stamp()}The reply finished.", flush=True)
+            return
+        if time.monotonic() >= deadline:
+            print(f"{stamp()}Codex is replying.", flush=True)
+            return
+        time.sleep(QUEUE_POLL_SECONDS)
+
+
+def resume_through_queue(chat, message, stamp=lambda: ""):
+    """Send the message through the queue; return False, with nothing left queued, to use the app's controls."""
+    def fall_back(reason):
+        # A repeated continue is harmless, so an uncertain state still gets one; a custom message does not.
+        if message is not None:
+            raise RuntimeError(f"{reason} Check the chat before retrying.")
+        print(f"{stamp()}{reason} Typing {DEFAULT_MESSAGE} in the input field instead, which may send it twice.",
+              flush=True)
+        return False
+
+    busy = replying(chat)
+    if busy and message is None:
+        print(f"{stamp()}Codex is already replying in chat {chat_label(chat)}; not sending {DEFAULT_MESSAGE}.",
+              flush=True)
+        return True
+    path = chat_log(chat)
+    offset = path.stat().st_size if path is not None else 0
+    try:
+        item = app_server_request("thread/queue/add", {
+            "threadId": chat["id"],
+            "input": [{"type": "text", "text": message or DEFAULT_MESSAGE, "text_elements": []}],
+            "clientUserMessageId": str(uuid.uuid4()),
+        })["queuedSubmission"]["id"]
+    except AppServerRejectedError as error:
+        print(f"{stamp()}Could not queue the message ({error}); using the app's Accessibility controls instead.",
+              flush=True)
+        return False
+    except RuntimeError as error:
+        return fall_back(f"The message may have been queued: {error}")
+    if busy:
+        print(f"{stamp()}Codex is replying in chat {chat_label(chat)}; queued the message, and the app "
+              "sends it when the reply ends.", flush=True)
+        return True
+    print(f"{stamp()}Queued the message in chat {chat_label(chat)}; waiting for the app to take it.", flush=True)
+    deadline = time.monotonic() + QUEUE_PICKUP_SECONDS
+    try:
+        while still_queued(chat, item):
+            if time.monotonic() >= deadline:
+                deleted = app_server_request(
+                    "thread/queue/delete", {"threadId": chat["id"], "queuedSubmissionId": item})
+                if deleted.get("deleted"):
+                    print(f"{stamp()}The app did not take the message within {QUEUE_PICKUP_SECONDS // 60} "
+                          "minutes, so it was removed from the queue; using the app's Accessibility controls "
+                          "instead.", flush=True)
+                    return False
+                break
+            time.sleep(QUEUE_POLL_SECONDS)
+    except RuntimeError as error:
+        return fall_back(f"The message was queued, but whether the app took it is unknown: {error}")
+    print(f"{stamp()}The app took the message from the queue.", flush=True)
+    report_reply(path or chat_log(chat), offset, stamp)
+    return True
 
 
 def usage_limits():
@@ -521,6 +694,7 @@ def scheduled_summary(scheduled, message, chat=None, project=None, start_window=
         summary += f" in chat {chat_label(chat)}"
     if start_window:
         summary += ", only if no 5-hour window is running"
+    summary += f" {delivery_label(project or chat)}"
     return f"{summary} with message: {message}" if message is not None else f"{summary}."
 
 
@@ -676,6 +850,10 @@ def argument_parser():
             "Codex desktop app. Times use local 24-hour HH:MM, HH.MM, or HHMM format."
         ),
         epilog=(
+            "A chat on this Mac chosen with --chat or --project gets its message through "
+            "the Codex queue, which needs no Accessibility or unlocked screen and leaves "
+            "any draft alone; if the app has not taken it within two minutes, it is "
+            "removed and the steps below are used instead. "
             "Submission activates the app and sends Return, verifying composer focus "
             "when recognised. If unrecognised, it sends only Return to the app's "
             "existing focus, without typing text or retrying after Return. "
@@ -798,7 +976,8 @@ def main(arguments):
                 return 0
             # Resolved at run time, so a project gets its latest chat and a failure still unloads the job.
             _, chat = target()
-            submit_scheduled(message, chat)
+            if not (uses_queue(chat) and resume_through_queue(chat, message, log_stamp)):
+                submit_scheduled(message, chat)
         except (OSError, RuntimeError, ValueError) as error:
             # bootout can terminate us before the outer error handler runs.
             print(f"codex-resume: {error}", file=sys.stderr, flush=True)
@@ -814,8 +993,11 @@ def main(arguments):
             return 0
         if chat is not None:
             where = f" in project {project_label(project)}" if project is not None else ""
-            print(f"Resuming in chat {chat_label(chat)}{where}.", flush=True)
-        submit(message=message, chat=chat)
+            print(f"Resuming in chat {chat_label(chat)}{where} {delivery_label(chat)}.", flush=True)
+        else:
+            print(f"Resuming in the open chat {delivery_label(None)}.", flush=True)
+        if not (uses_queue(chat) and resume_through_queue(chat, message)):
+            submit(message=message, chat=chat)
         return 0
     if options.inspect:
         run_automation("--inspect", chat=chat)
