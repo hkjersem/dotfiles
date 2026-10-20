@@ -93,9 +93,10 @@ instead of guessing. The helper opens it through its codex://threads/<id> link
 (with ?hostId= for a remote chat) only after any idle check passes, then waits
 for the window title to show the chat's name, and checks it again just before
 typing and before Return. A chat whose name another chat shares is refused,
-since the title could not tell them apart. A wrong title or a disabled
-composer, as when the remote Mac is disconnected, stops before any input and
-is retryable.
+since the title could not tell them apart, and a title shortened with an
+ellipsis that another chat's name also fits does not count. A wrong title or a
+disabled composer, as when the remote Mac is disconnected, stops before any
+input and is retryable.
 --project picks a project by its folder name (or full path) with the same
 name matching, and opens its most recently active chat; a scheduled run stores
 the folder and picks that chat when it starts.
@@ -859,6 +860,9 @@ def run_automation(action, message=None, chat=None):
         command += ["--chat", chat["id"], "--chat-title", chat["name"]]
         if chat["host"] is not None:
             command += ["--chat-host", chat["host"]]
+        # The window title may be shortened, so the helper needs the other names to tell them apart.
+        others = [other["name"] for other in load_chats() if other["id"] != chat["id"]]
+        command += ["--other-titles", json.dumps(others)]
     try:
         result = subprocess.run(
             command,

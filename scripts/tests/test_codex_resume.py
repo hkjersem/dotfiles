@@ -689,9 +689,12 @@ class CodexResumeTests(unittest.TestCase):
             now_arguments = run.call_args.args[0][2:]
             self.assertEqual(codex_resume.main(["--now", "--chat", "explore pwa"]), 0)
         self.assertEqual([entry.args[0]["id"] for entry in queue.call_args_list], ["01a1-mine"])
-        self.assertEqual(now_arguments, [
-            "--submit", "--chat", "01a1-mine", "--chat-title", "Find current project status",
+        self.assertEqual(now_arguments[:6], [
+            "--submit", "--chat", "01a1-mine", "--chat-title", "Find current project status", "--other-titles",
         ])
+        others = json.loads(now_arguments[6])
+        self.assertIn("Explore PWA roadmap", others)
+        self.assertNotIn("Find current project status", others)
         self.assertEqual(output.getvalue().splitlines(), [
             "Resuming in chat 'Find current project status' via the Codex queue.",
             "Resuming in chat 'Explore PWA roadmap' (remote) via the app's Accessibility controls.",
@@ -703,8 +706,9 @@ class CodexResumeTests(unittest.TestCase):
             redirect_stdout(io.StringIO()),
         ):
             self.assertEqual(codex_resume.main(["--check", "--chat", "explore pwa"]), 0)
-        self.assertEqual(run.call_args.args[0][2:], [
+        self.assertEqual(run.call_args.args[0][2:-1], [
             "--check", "--chat", "01a7-mini", "--chat-title", "Explore PWA roadmap", "--chat-host", REMOTE_HOST,
+            "--other-titles",
         ])
         with tempfile.TemporaryDirectory() as temporary:
             plist_path = Path(temporary) / "job.plist"

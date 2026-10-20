@@ -38,11 +38,12 @@ words in any order also work, such as `explore pwa`. `--list [text]` shows your
 recent chats with their ids and last activity. When several chats match, they
 are listed instead of guessing. The chat is confirmed by its name in the window
 title, checked again just before typing and before Return, so a chat whose
-name another chat shares is refused until one is renamed. Chats on another Mac
-that the app reaches through remote control are listed as `(remote)` and can
-be chosen the same way; they run on that Mac, but this Mac must be awake and
-unlocked. If that Mac is disconnected, scheduled attempts retry without typing
-anything.
+name another chat shares is refused until one is renamed. A shortened title
+that another chat's name also fits doesn't count as a match. Chats on another
+Mac that the app reaches through remote control are listed as `(remote)` and
+can be chosen the same way; they run on that Mac, but this Mac must be awake
+and unlocked. If that Mac is disconnected, scheduled attempts retry without
+typing anything.
 
 Use `--project name` instead of `--chat` to open the most recently active chat
 in a project, matched by its folder name the same way, such as `local-relay`
