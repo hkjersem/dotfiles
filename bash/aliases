@@ -120,7 +120,7 @@ _detect_pm() { bash "$HOME/.dotfiles/scripts/package-manager/_detect-pm.sh"; }
 pm()  { local _p; _p="$(_detect_pm)" || return 1; "$_p" "$@"; }
 
 # Updates packages — minor/patch by default, auto-detects bun, pnpm or npm
-# Usage: pmu [--dry-run] [--yes] [--force] [--major] [--cooldown <days>] [<package>]
+# Usage: pmu [--dry-run] [--yes] [--force] [--major] [--cooldown <days>] [--actions] [<package>]
 pmu() { bash "$HOME/.dotfiles/scripts/package-manager/run.sh" "$@"; }
 
 # Execute a package without installing — pnpm dlx / npx / bunx
@@ -141,6 +141,10 @@ pmi() { bash "$HOME/.dotfiles/scripts/package-manager/install.sh" "$@"; }
 # Remove packages
 # Usage: pmr <package...> [--root]
 pmr() { bash "$HOME/.dotfiles/scripts/package-manager/remove.sh" "$@"; }
+
+# Link a local library instead of the installed version (npm, pnpm 11+), or undo it
+# Usage: pml [--undo] <library path>
+pml() { bash "$HOME/.dotfiles/scripts/package-manager/link.sh" "$@"; }
 
 # Clean package-manager metadata. Removes safe manifest clutter and reports pnpm catalog suggestions.
 # Usage: pmc [--dry-run] [--yes]

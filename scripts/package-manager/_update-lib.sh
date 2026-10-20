@@ -9,7 +9,7 @@
 #   COOLDOWN_SOURCE     — human-readable label for the cooldown origin
 #   COOLDOWN_EXCLUDE    — array of package patterns to skip cooldown for
 #   CONFIG_RELEASE_AGE  — raw config value in minutes (pnpm augmentation; npm sets "")
-#   DRY_RUN AUTO_YES FORCE_CHECK ALLOW_MAJOR FILTER_PKG CLI_COOLDOWN
+#   DRY_RUN AUTO_YES FORCE_CHECK ALLOW_MAJOR FILTER_PKG CLI_COOLDOWN ACTIONS
 #   (set by _parse_args "$@")
 #
 # Wrappers must define these hooks:
@@ -37,6 +37,7 @@ _parse_args() {
   ALLOW_MAJOR=false
   CLI_COOLDOWN=""
   FILTER_PKG=""
+  ACTIONS=false
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -44,6 +45,7 @@ _parse_args() {
       --yes|-y)      AUTO_YES=true; shift ;;
       --force|-f)    FORCE_CHECK=true; shift ;;
       --major|-m)    ALLOW_MAJOR=true; shift ;;
+      --actions)     ACTIONS=true; shift ;;
       --cooldown)
         if [[ $# -lt 2 ]]; then
           echo -e "${RED}Error: --cooldown requires a value${RESET}" >&2; exit 1
@@ -55,6 +57,15 @@ _parse_args() {
       *)  FILTER_PKG="$1"; shift ;;
     esac
   done
+
+  if [[ "$ACTIONS" == true ]]; then
+    if [[ "${PM_NAME:-}" != pnpm ]]; then
+      echo -e "${RED}Error: --actions needs a pnpm project; ${PM_NAME:-this package manager} cannot update GitHub Actions${RESET}" >&2; exit 1
+    fi
+    if [[ "$FORCE_CHECK" == true || -n "$CLI_COOLDOWN" ]]; then
+      echo -e "${RED}Error: --force and --cooldown do not apply to --actions; pnpm applies its own minimumReleaseAge${RESET}" >&2; exit 1
+    fi
+  fi
 
   # Resolve CLI cooldown → minutes
   if [[ -n "$CLI_COOLDOWN" ]]; then
@@ -72,13 +83,14 @@ _parse_args() {
 
 # Default help — wrappers override with package-manager-specific text
 _show_help() {
-  echo "Usage: $(basename "$0") [--dry-run] [--yes] [--force] [--major] [--cooldown <days>] [<package>]"
+  echo "Usage: $(basename "$0") [--dry-run] [--yes] [--force] [--major] [--cooldown <days>] [--actions] [<package>]"
   echo "  <package>         Only update this package"
   echo "  --dry-run         Show planned updates without making changes"
   echo "  --yes             Skip confirmation prompt"
   echo "  --force           Check all exact pins directly via npm"
   echo "  --major           Allow major version bumps"
   echo "  --cooldown <days> Override cooldown in days (0 = disable)"
+  echo "  --actions         Update GitHub Actions instead of packages (pnpm 12+)"
 }
 
 # ── Root finder ───────────────────────────────────────────────────────────────

@@ -40,6 +40,10 @@ elif tool == "npm" and len(args) >= 3 and args[0] == "view":
     else:
         value = fixture["registry"][package][field]
         print(json.dumps(value) if "--json" in args else value)
+elif tool == "pnpm" and args == ["--version"]:
+    print(fixture.get("pnpm_version", "12.14.0"))
+elif tool == "pnpm" and args and args[0] == "update":
+    pass
 elif args == ["install"]:
     if fixture.get("fail_install"):
         sys.exit("Simulated install failure")
@@ -135,6 +139,69 @@ class PackageUpdateTests(unittest.TestCase):
         self.assertNotIn("ms@", result.stdout)
         self.assertNotIn("(dev)", result.stdout)
         self.assertNotIn(["npm", ["view", "ms@2.1.1", "version"]], self.calls("npm"))
+
+    def actions_fixture(self):
+        self.package("ms", latest="2.1.3", current="2.0.0")
+        action = {"isDeprecated": False, "dependencyType": "githubAction"}
+        self.fixture["outdated"]["actions/checkout"] = {
+            **action, "current": "4.0.0", "wanted": "4.4.0", "latest": "7.0.1"}
+        self.fixture["outdated"]["actions/cache"] = {
+            **action, "current": "4.2.0", "wanted": "4.2.0", "latest": "5.0.0"}
+        self.manifest("pnpm", {"ms": "2.0.0"})
+
+    def test_actions_updates_only_actions_within_their_major(self):
+        self.actions_fixture()
+        # The oldest pnpm that applies minimumReleaseAge to actions.
+        self.fixture["pnpm_version"] = "12.7.0"
+        before = (self.project / "package.json").read_bytes()
+        result = self.invoke("--actions", "--yes")
+        self.assert_success(result)
+        updates = [args for _, args in self.calls("pnpm") if args[0] == "update"]
+        self.assertEqual(updates, [["update", "--include-github-actions", "actions/checkout"]])
+        self.assertIn("actions/cache 4.2.0 → 5.0.0", result.stdout)
+        self.assertEqual((self.project / "package.json").read_bytes(), before)
+
+    def test_actions_major_updates_the_named_action_to_latest(self):
+        self.actions_fixture()
+        result = self.invoke("--actions", "--major", "--yes", "actions/cache")
+        self.assert_success(result)
+        updates = [args for _, args in self.calls("pnpm") if args[0] == "update"]
+        self.assertEqual(updates, [["update", "--include-github-actions", "--latest", "actions/cache"]])
+
+    def test_actions_dry_run_changes_nothing(self):
+        self.actions_fixture()
+        result = self.invoke("--actions", "--dry-run")
+        self.assert_success(result)
+        self.assertIn("actions/checkout", result.stdout)
+        self.assertFalse(any(args[0] == "update" for _, args in self.calls("pnpm")))
+
+    def test_actions_is_rejected_before_pnpm_12_7(self):
+        self.actions_fixture()
+        for version in ("11.28.5", "12.6.9"):
+            with self.subTest(version=version):
+                self.fixture["pnpm_version"] = version
+                result = self.invoke("--actions", "--yes")
+                self.assertEqual(result.returncode, 1)
+                self.assertIn(f"requires pnpm 12.7 or newer, which applies the release-age "
+                              f"cooldown to actions (found {version})", result.stderr)
+                self.assertFalse(any(args[0] in ("outdated", "update")
+                                     for _, args in self.calls("pnpm")))
+        for pm in ("npm", "bun"):
+            with self.subTest(pm=pm):
+                self.manifest(pm, {"ms": "2.0.0"})
+                result = self.invoke("--actions", "--yes")
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("--actions needs a pnpm project", result.stderr)
+                self.assertFalse(self.log.exists())
+
+    def test_package_plan_ignores_reported_actions(self):
+        # Projects with update.githubActions set report actions in plain outdated.
+        self.actions_fixture()
+        result = self.invoke("--dry-run")
+        self.assert_success(result)
+        self.assertIn("ms", result.stdout)
+        self.assertNotIn("actions/", result.stdout)
+        self.assertFalse(any("actions/" in " ".join(args) for _, args in self.calls("npm")))
 
     def test_dry_run_with_scoped_package_on_all_managers(self):
         self.package("@scope/pkg")

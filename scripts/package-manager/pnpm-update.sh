@@ -5,13 +5,14 @@
 # Respects minimumReleaseAge / minimumReleaseAgeExclude from pnpm-workspace.yaml or .npmrc.
 # Handles pnpm workspaces and catalog: entries.
 #
-# Usage: pnpm-update [--dry-run] [-y] [--force] [--major] [--cooldown <days>] [<package>]
-#   <package>          Only update this package
+# Usage: pnpm-update [--dry-run] [-y] [--force] [--major] [--cooldown <days>] [--actions] [<package>]
+#   <package>          Only update this package (or this action with --actions)
 #   --dry-run          Show what would change, make no changes
 #   -y / --yes         Skip confirmation prompt
 #   --force            Check all exact pins directly via npm
 #   --major            Allow major version bumps
 #   --cooldown <days>  Override cooldown in days (0 = disable)
+#   --actions          Update GitHub Actions in workflows instead of packages (pnpm 12+)
 
 set -euo pipefail
 
@@ -94,6 +95,64 @@ _pm_install() {
   pnpm install
 }
 
+# ── GitHub Actions (--actions) ────────────────────────────────────────────────
+# pnpm finds and pins the actions itself, honouring minimumReleaseAge from
+# 12.7.0; this wrapper only chooses the targets and shows them, like the
+# package plan.
+_update_actions() {
+  local version
+  version=$(pnpm --version 2>/dev/null || true)
+  if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]] || semver_newer 12.7.0 "${BASH_REMATCH[0]}"; then
+    echo -e "${RED}Error: --actions requires pnpm 12.7 or newer, which applies the release-age cooldown to actions (found ${version:-none})${RESET}" >&2
+    exit 1
+  fi
+  echo -e "${BOLD}Checking for outdated GitHub Actions...${RESET}  ${DIM}(pnpm)${RESET}"
+
+  local json rows
+  json=$(pnpm outdated --include-github-actions --json || true)
+  [[ -z "$json" ]] && json="{}"
+  rows=$(printf '%s' "$json" | jq -r --arg major "$ALLOW_MAJOR" --arg only "$FILTER_PKG" '
+    if type == "object" then to_entries else [] end
+    | map(select(.value.dependencyType == "githubAction")
+        | select($only == "" or .key == $only)
+        | .value as $v
+        | (if $major == "true" then $v.latest else $v.wanted end) as $target
+        | [.key, ($v.current // ""), ($target // ""), ($v.latest // "")])
+    | .[] | @tsv') || { echo -e "${RED}Error: could not read pnpm outdated output${RESET}" >&2; exit 1; }
+
+  local -a names=() held=()
+  local name current target latest
+  [[ -z "$rows" ]] || printf "\n  ${BOLD}%-38s  %-14s  %s${RESET}\n" "Action" "Current" "Target"
+  while IFS=$'\t' read -r name current target latest; do
+    [[ -z "$name" ]] && continue
+    if [[ -n "$target" && "$target" != "$current" ]]; then
+      names+=("$name")
+      printf "  ${GREEN}%-38s${RESET}  %-14s  %s\n" "$name" "$current" "$target"
+    fi
+    if [[ "$ALLOW_MAJOR" == false && -n "$latest" && "$latest" != "${target:-$current}" ]]; then
+      held+=("$name $current → $latest")
+    fi
+  done <<< "$rows"
+  if [[ ${#held[@]} -gt 0 ]]; then
+    echo -e "\n  ${BOLD}New majors${RESET} ${DIM}(use --major):${RESET}"
+    printf "  ${DIM}%s${RESET}\n" "${held[@]}"
+  fi
+  echo ""
+
+  if [[ ${#names[@]} -eq 0 ]]; then
+    echo -e "${GREEN}✓ Nothing to update.${RESET}"; exit 0
+  fi
+  $DRY_RUN && { echo -e "${CYAN}Dry run — no changes made.${RESET}"; exit 0; }
+  confirm_apply "Apply ${#names[@]} update(s)?" "$AUTO_YES" || exit 0
+
+  local -a latest_flag=()
+  [[ "$ALLOW_MAJOR" == true ]] && latest_flag=(--latest)
+  pnpm update --include-github-actions ${latest_flag[@]+"${latest_flag[@]}"} "${names[@]}"
+  echo -e "${GREEN}✓ Done! ${#names[@]} action(s) pinned to commit hashes.${RESET}"
+  exit 0
+}
+[[ "$ACTIONS" == true ]] && _update_actions
+
 # ── Fetch outdated packages ───────────────────────────────────────────────────
 RECURSIVE_FLAG=""
 [[ -f "$ROOT/pnpm-workspace.yaml" ]] && RECURSIVE_FLAG="--recursive"
@@ -109,6 +168,8 @@ OUTDATED=$(echo "$OUTDATED" | jq '
   def version_key: (.current // .wanted // "") | split("-")[0] | split(".") | map(tonumber? // 0);
   if type == "object" then
     to_entries
+    # A project with update.githubActions set reports workflow actions too.
+    | map(select(.value.dependencyType != "githubAction"))
     | map(.key |= base_name)
     | group_by(.key)
     | map(min_by(.value | version_key))
