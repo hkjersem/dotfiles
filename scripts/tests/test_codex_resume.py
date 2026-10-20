@@ -1054,7 +1054,7 @@ class CodexResumeTests(unittest.TestCase):
             self.assertTrue(codex_resume.resume_through_queue(self.LOCAL_CHAT, None))
         self.assertTrue(output.getvalue().endswith("The app took the message from the queue.\n"))
 
-    def test_queue_rejection_falls_back_and_uncertainty_types_only_continue(self):
+    def test_queue_rejection_falls_back_and_uncertainty_stops(self):
         calls = self.fake_queue([self.queued()], add_error=codex_resume.AppServerRejectedError("thread not found"))
         with redirect_stdout(io.StringIO()) as output:
             self.assertFalse(codex_resume.resume_through_queue(self.LOCAL_CHAT, "Resume now"))
@@ -1065,20 +1065,16 @@ class CodexResumeTests(unittest.TestCase):
             ("may have been queued", {"listings": [self.queued()], "add_error": timeout}),
             ("whether the app took it is unknown", {"listings": [timeout]}),
         ):
-            with self.subTest(kind=kind):
-                self.fake_queue(**setup)
-                with redirect_stdout(io.StringIO()) as output:
-                    self.assertFalse(codex_resume.resume_through_queue(self.LOCAL_CHAT, None))
-                self.assertIn(f"{kind}: The Codex app server did not answer in time. Typing continue in the "
-                              "input field instead, which may send it twice.", output.getvalue())
-                self.fake_queue(**setup)
-                with redirect_stdout(io.StringIO()), \
-                        self.assertRaisesRegex(RuntimeError, f"{kind}.*Check the chat before retrying"):
-                    codex_resume.resume_through_queue(self.LOCAL_CHAT, "Resume now")
+            for message in (None, "Resume now"):
+                with self.subTest(kind=kind, message=message):
+                    self.fake_queue(**setup)
+                    with redirect_stdout(io.StringIO()), \
+                            self.assertRaisesRegex(RuntimeError, f"{kind}.*Check the chat before retrying"):
+                        codex_resume.resume_through_queue(self.LOCAL_CHAT, message)
 
-    def test_scheduled_queue_uncertainty_types_continue_but_stops_a_message(self):
+    def test_scheduled_queue_uncertainty_stops_without_typing(self):
         timeout = RuntimeError("The Codex app server did not answer in time.")
-        for message, falls_back in ((None, True), ("Resume now", False)):
+        for message in (None, "Resume now"):
             with self.subTest(message=message), tempfile.TemporaryDirectory() as temporary:
                 self.fake_queue([timeout], home=self.with_chats())
                 plist_path = Path(temporary) / "job.plist"
@@ -1093,12 +1089,12 @@ class CodexResumeTests(unittest.TestCase):
                 ):
                     self.assertEqual(codex_resume.main(
                         [*(["--message", message] if message else []), "--chat", "01a1-mine",
-                         "--scheduled", datetime.now().astimezone().isoformat()]), 0 if falls_back else 1)
-                self.assertEqual(submit.call_count, 1 if falls_back else 0)
+                         "--scheduled", datetime.now().astimezone().isoformat()]), 1)
+                submit.assert_not_called()
                 launchctl.assert_called_once()
                 self.assertFalse(plist_path.exists())
                 self.assertRegex(log.getvalue(), r"^\[\d\d\.\d\d\.\d{4} kl\. \d\d\.\d\d\.\d\d\] Queued the message")
-                self.assertEqual("whether the app took it is unknown" in errors.getvalue(), not falls_back)
+                self.assertIn("whether the app took it is unknown", errors.getvalue())
 
     def limits(self, primary_used, secondary_used):
         return {"rateLimits": {

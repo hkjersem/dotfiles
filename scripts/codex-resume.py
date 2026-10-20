@@ -13,11 +13,11 @@ the open chat when neither option is given, use Accessibility.
 Whether Codex is replying comes from the chat's session log in
 ~/.codex/sessions: a reply started and not ended, in a log written within 30
 minutes. Then continue is dropped, while a --message is queued for the app to
-send after the reply. If it is unclear whether a queued continue was sent, it
-is typed with Accessibility anyway, since a second continue is harmless; a
---message stops instead, to avoid sending it twice. After the app takes the
-message, the log shows for up to 30 seconds whether the reply finished,
-stopped, or ended with an error such as a usage limit.
+send after the reply. If it is unclear whether a queued message was sent, it
+stops instead of typing it, since typing would likely fail on a locked screen
+and could send it twice. After the app takes the message, the log shows for up
+to 30 seconds whether the reply finished, stopped, or ended with an error such
+as a usage limit.
 
 Accessibility requires macOS, Python 3, Swift (Xcode Command Line Tools), and
 Accessibility permission for the execution context. Terminal permission may
@@ -524,14 +524,6 @@ def report_reply(path, offset, stamp, since=None):
 
 def resume_through_queue(chat, message, stamp=lambda: ""):
     """Send the message through the queue; return False, with nothing left queued, to use the app's controls."""
-    def fall_back(reason):
-        # A repeated continue is harmless, so an uncertain state still gets one; a custom message does not.
-        if message is not None:
-            raise RuntimeError(f"{reason} Check the chat before retrying.")
-        print(f"{stamp()}{reason} Typing {DEFAULT_MESSAGE} in the input field instead, which may send it twice.",
-              flush=True)
-        return False
-
     busy = replying(chat)
     if busy and message is None:
         print(f"{stamp()}Codex is already replying in chat {chat_label(chat)}; not sending {DEFAULT_MESSAGE}.",
@@ -552,7 +544,7 @@ def resume_through_queue(chat, message, stamp=lambda: ""):
               flush=True)
         return False
     except RuntimeError as error:
-        return fall_back(f"The message may have been queued: {error}")
+        raise RuntimeError(f"The message may have been queued: {error} Check the chat before retrying.") from error
     if busy:
         print(f"{stamp()}Codex is replying in chat {chat_label(chat)}; queued the message, and the app "
               "sends it when the reply ends.", flush=True)
@@ -572,7 +564,8 @@ def resume_through_queue(chat, message, stamp=lambda: ""):
                 break
             time.sleep(QUEUE_POLL_SECONDS)
     except RuntimeError as error:
-        return fall_back(f"The message was queued, but whether the app took it is unknown: {error}")
+        raise RuntimeError(f"The message was queued, but whether the app took it is unknown: {error} "
+                           "Check the chat before retrying.") from error
     print(f"{stamp()}The app took the message from the queue.", flush=True)
     if path is not None:
         report_reply(path, offset, stamp)

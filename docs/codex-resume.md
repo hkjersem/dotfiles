@@ -64,9 +64,8 @@ removed from the queue and typed into the input field instead. Scheduling and
 
 If Codex is still replying in that chat, `continue` is dropped, while a
 `--message` is queued to follow the reply. When it's unclear whether a queued
-`continue` went out, it's typed into the input field anyway, since a second
-`continue` is harmless; a `--message` stops instead. The log then says whether
-the reply finished or ended with an error, such as a usage limit.
+message went out, the run stops instead of typing it again. The log then says
+whether the reply finished or ended with an error, such as a usage limit.
 
 Add `--message "text"` to `--time`, `--reset` or `--now` to send that text
 instead. It must be one line and not start with `/`. When typed into the input
