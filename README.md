@@ -126,31 +126,11 @@ field or lockfile. The selected manager must already be installed.
 | `pmc --dry-run` | Preview manifest/catalog cleanup |
 | `pma` | Audit and apply supported fixes; Bun only reports findings |
 
-`pmu` respects configured release-age cooldowns. `--cooldown <days>` overrides
-them, including `--cooldown 0` to disable the cooldown. Use `--yes` only when
-you intend to skip confirmation. `pma --deep` additionally refreshes pnpm's
-lockfile before auditing; it is not a read-only check.
-
-In pnpm workspaces, `pmi` and `pmr` use the current member or infer an existing
-dependency's target from the root. Ambiguous targets fail rather than guessing.
-For pnpm, `--root` explicitly selects the root package. Unknown installs at the
-root stay at the root; catalog entries change only with an explicit version.
-Use `pmi --help`, `pmr --help`, or `pmu --help` for details.
-
-In zsh, `npm` and `npx` use the npm bundled with the active fnm Node version,
-unless a parent `package.json` has a `packageManager` field; then they run
-through corepack. `pnpm` and `yarn` always run through corepack. Outside pinned
-projects, corepack uses its saved default version. `dotfiles-update` moves the
-pnpm and Yarn defaults to the newest release in their current major that is
-older than the `~/.npmrc` release-age cooldown; a default that is still inside
-the cooldown is flagged and left unchanged. These defaults are shared by every
-fnm Node version, while corepack itself and its `pnpm`/`yarn` shims are
-installed per Node version; the audit checks each corepack version. New majors
-are reported by both the update and `dotfiles-audit`, and become warnings when
-more than one major behind. To
-switch manually, run `corepack install -g pnpm@<version>`. Bun is not managed
-by corepack; every installed Bun, including one per fnm Node version, gets the
-same new-major check.
+`pmu` respects configured release-age cooldowns; `pma --deep` is not a
+read-only check. In zsh, `pnpm` and `yarn` run through corepack, as do `npm`
+and `npx` in projects with a `packageManager` field. See
+[docs/package-managers.md](docs/package-managers.md) for cooldowns, pnpm
+workspaces, and how `dotfiles-update` manages package-manager versions.
 
 Related Node helpers: `install_node [version]` installs through fnm, migrates
 global packages, and installs and enables corepack if the Node version does not
@@ -192,39 +172,18 @@ prune_branches --apply            # show the plan, ask, then delete
 prune_branches --no-fetch ~/Developer   # read-only, uses the last fetch
 ```
 
-A branch is deleted only when its upstream was its own same-named remote
-branch, that branch is gone after `git fetch --prune`, and its commits are
-still on the remote: a GitHub pull request or GitLab merge request head,
-contained in a branch the remote still advertises, or rebased or
-squash-merged into the remote's default branch so that merging it would
-change nothing. Anything else is listed for review, including branches that
-were pushed but then deleted on the remote without being merged, since your
-copy may be the last one. Branches that were never pushed, repositories
-without a remote, protected names (`main`, `master`, `develop`, `trunk`, and
-each remote's default branch), and branches on remotes that could not be
-fetched are never deleted.
+A branch is deleted only when its remote branch is gone and its commits are
+confirmed on the remote, for example through a merged pull request. Anything
+uncertain is listed for review instead. Never-pushed branches, repositories
+without a remote, and protected names such as `main` are never deleted. A
+branch's linked worktree is removed first, and only when it has no
+uncommitted changes or unique commits; ignored generated artifacts such as
+`node_modules/` are discarded with it.
+Deleted branches are logged in `.git/prune-branches.log` for recovery. Exit
+status is 1 when a fetch or deletion fails.
 
-Worktrees are found through each repository's `git worktree list`, so
-worktrees created elsewhere, for example by agent tools, are included. A
-branch's linked worktree is removed first, without `--force`, and only when it
-has no uncommitted changes, no ignored files besides generated artifacts
-such as an ignored `node_modules/` folder, and no commits or refs that only
-that worktree holds. Otherwise it is listed, as are locked, missing, and
-checked-out worktrees, and branches with a rebase or bisect in progress.
-Detached worktrees are never removed; clean ones whose commit is already on a
-remote are reported as looking stale, together with never-pushed or untracked
-branches older than `--stale-days` (default 90). A branch without an upstream
-that exists on a remote under the same name is shown as not tracking it, with
-how far it is ahead or behind.
-
-Each fetching run records upstream commits in `.git/prune-branches-upstreams`
-so later runs can tell a branch that was pushed and then deleted unmerged
-from one with unpushed commits. The record only explains a review entry; it
-never justifies a deletion. Records are tied to the remote URL last fetched
-(`.git/prune-branches-remotes`), so they say nothing after the remote is
-repointed. Deleted branches are logged in `.git/prune-branches.log`; restore
-one with `git branch <name> <commit>` until Git garbage-collects the commits.
-Exit status is 1 when a fetch or deletion fails.
+See [docs/prune-branches.md](docs/prune-branches.md) for the exact deletion
+rules, worktree handling, and recovery.
 
 ## Repository triage
 
@@ -242,47 +201,20 @@ audit-repo --dir ../project --since "6 months ago"
 audit-repo --skip-security
 ```
 
-Documentation checks cover tracked and untracked files that Git doesn't ignore.
-They flag conventional files with the wrong case or in the wrong place (`README.md`,
-`AGENTS.md`, `CLAUDE.md`, `LICENSE`, `.github/copilot-instructions.md` and
-similar), a `DESIGN.md` without design tokens, paths that differ only in case,
-and Markdown links whose case differs from the file. macOS ignores case, so
-these work locally but break on Linux and on Git hosts.
-
-Source-file statistics use tracked files, excluding known generated artifacts,
-symlinks, and missing files. `.env` files are never read by any check, since
-they may hold secrets. Files the audit has no permission to read are left out
-of the statistics with a note, but an unreadable documentation file fails the
-documentation check. A project is labelled a workspace only when
-`pnpm-workspace.yaml` or `package.json` `workspaces` lists packages. With a
-root `package.json`, it also checks package metadata,
-cooldowns, and JS/TS tooling; these checks require jq. npm and pnpm provide
-structured vulnerability and outdated-package results. Bun and other managers'
-audit/outdated results are not parsed by this tool.
-
-It also reports a Node runtime vendored into `node_modules` by
-`devEngines.runtime.onFail: "download"`. A build linked out of the global
-package-manager store is flagged, because sandboxes commonly deny executing that
-tree and every child process resolving a bare `node` through
-`node_modules/.bin` then fails. Setting `runtimeOnFail: ignore` in
-`pnpm-workspace.yaml` keeps the version manager's Node instead.
+It also checks documentation file names and link case, and, with a root
+`package.json`, package metadata, cooldowns, JS/TS tooling, vulnerabilities and
+outdated packages (requires jq). `.env` files are never read.
 
 The script does not install dependencies, run project tests, apply fixes, or
 edit project files. **It is not offline:** npm/pnpm audit and outdated queries
 can contact registries and write package-manager caches. `--skip-security`
 skips only the vulnerability query, not the outdated query.
 
-Findings are triage indicators, not a security verdict or measured test
-coverage. Git-history signals (churn, ownership concentration, fix and
-firefighting commits) and missing conventionally named test files are warnings,
-since they suggest a closer look rather than prove a defect; ownership
-concentration is expected in a solo project.
-`--since` controls churn and fix/revert history; ownership uses all history,
-and velocity uses the last 12 complete calendar months, including inactive
-months. JSONC and inherited TypeScript settings are reported as unevaluated.
-Exit status is 1 for concrete issues (such as vulnerabilities or npm's
-always-failing placeholder `test` script) or checks that could not run, and 0
-otherwise; warnings alone do not fail the command.
+Findings are triage indicators, not a security verdict. Exit status is 1 for
+concrete issues (such as vulnerabilities or npm's always-failing placeholder
+`test` script) or checks that could not run, and 0 otherwise; warnings alone
+do not fail the command. See [docs/audit-repo.md](docs/audit-repo.md) for what
+each check covers and how to read the results.
 
 ## Testing
 
@@ -373,48 +305,21 @@ at `~/.agents/skills/` without overwriting name collisions. A skill that ships a
 script is tested from `scripts/tests/`, so the skill directory itself stays
 free of repository-specific tooling.
 
-`agents/skills/skills.txt` lists third-party global skills that should be
-installed on every machine. Machine-specific skills remain local and are not
-removed by the sync. Prefix a manifest entry with `# disabled:` to uninstall
-that managed skill on each machine while keeping the declaration available to
-re-enable later. Sources use GitHub `owner/repository` names. Skill names must
-start with a lowercase letter or digit and contain only lowercase letters,
-digits, dots, underscores, or hyphens; duplicate names are rejected.
-
-```text
-source/repository|enabled-skill
-# disabled: source/repository|disabled-skill
-```
+`agents/skills/skills.txt` lists third-party global skills installed on every
+machine, and `agents/skills/sources.txt` lists skill directories owned by other
+repositories. Machine-specific skills remain local and are not removed by the
+sync.
 
 ```sh
 bash scripts/sync-agent-skills.sh --dry-run
 bash scripts/sync-agent-skills.sh
+bash scripts/audit-skills.sh --fix-symlinks
 ```
 
-`agents/skills/sources.txt` lists skill directories owned by other
-repositories, one `~/path` per line. Each subdirectory containing a `SKILL.md`
-is linked like a repo-authored skill, so the owning repository stays the only
-copy. A directory that does not exist on a machine is skipped, and a link whose
-external skill has disappeared or lost its `SKILL.md` is removed by the next
-sync. Names that collide
-with repo-authored, manifest or already installed skills are reported and left
-unchanged.
-
-Afterward, `scripts/audit-skills.sh --fix-symlinks` exposes the canonical skills
-to installed agent providers.
-
-Without repair flags, the skills audit is read-only. `--fix-symlinks` creates
-missing links and repairs links whose targets are inside the canonical store;
-real files, directories, and foreign links are reported as conflicts and
-preserved. `--fix-lockfile` removes entries for missing skill directories but
-does not replace a symlinked lockfile.
-
-`--clean-stale` only removes listed agent directories whose `skills/` subtree
-contains verified managed links and empty directories. Real content, foreign
-links, and sibling directories such as `skills-backup` are preserved.
-`--quiet` changes output only; it does not disable requested repairs or hide
-warnings as successful checks. Python 3 is required for link-target checks,
-and jq is required for manifest/lockfile verification.
+The last command exposes the canonical skills to installed agent providers.
+Without repair flags, the skills audit is read-only, and repairs never replace
+real files or foreign links. See [docs/agent-skills.md](docs/agent-skills.md)
+for the manifest format, external sources, and every audit flag.
 
 Setup and update stop if synchronization or repair fails. Resolve conflicts
 manually rather than deleting local skills to make the audit pass.
@@ -422,11 +327,3 @@ manually rather than deleting local skills to make the audit pass.
 ## iTerm2
 
 Settings → enable *Load preferences from a custom folder or URL* → `~/.dotfiles/iterm/com.googlecode.iterm2.plist`
-
-## TODO
-- Add [`dotbot-brew`](https://github.com/wren/dotbot-brew) + [`dotbot-git`](https://github.com/DrDynamic/dotbot-git) plugins — move `brew bundle` and `install-zsh-plugins.sh` into `install.conf.yaml` so `./install` keeps brew packages and zsh plugins in sync
-- Explore [`direnv`](https://direnv.net/) — per-directory env vars for project secrets, per-project npm tokens, and extending the work/personal split beyond git identity. Would need: Brewfile entry + `eval "$(direnv hook zsh)"` in `env.zsh`
-https://medium.com/@ankitbabber/how-i-improved-my-shell-load-time-with-a-lazy-load-3acd89f8c4a3
-https://www.joshyin.cc/blog/speeding-up-zsh
-https://github.com/zimfw/zimfw
-https://github.com/omerxx/dotfiles
