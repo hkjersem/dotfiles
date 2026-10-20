@@ -16,6 +16,15 @@ field at all retry first and send that Enter only on the last attempt.
 or the later one if both are, and submits a minute after it resets.
 `--limits` shows both limits, read live through the Codex CLI.
 
+Add a number of minutes, at least 5, such as `--reset 30`, to also read the
+limits that often while waiting, for limits OpenAI resets early. It sends once
+no limit is used up and the limits that were used up show 0% used. If they
+already show use, someone started on the new allowance, for example from
+another device, so it stops without sending. At the reset time it sends unless
+that is the case, also when the limits cannot be read. Each check is logged
+with the limits it read. Like `--reset`, it refuses to schedule when no limit
+is used up.
+
 Add `--start-window` to `--time` or `--now` to send only when no 5-hour window
 is running, so the message starts a new one, for example at midnight to get an
 earlier reset. When the run starts, it checks the limits; if a window is

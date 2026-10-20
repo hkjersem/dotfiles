@@ -59,7 +59,7 @@ for chats on this Mac.
 
 ```sh
 codex-resume --time 15.03 --chat "explore pwa"
-codex-resume --reset --project local-relay --message "Carry on with the plan"
+codex-resume --reset 30 --project local-relay --message "Carry on with the plan"
 codex-resume --list
 ```
 

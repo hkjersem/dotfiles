@@ -1087,6 +1087,129 @@ class CodexResumeTests(unittest.TestCase):
         self.assertEqual(arguments[4:-2], ["--message", "Resume now", "--chat", "01a1-mine"])
         self.assertIn("5-hour: 100% used", output.getvalue())
 
+    def test_recurring_reset_is_stored_shown_and_needs_five_minutes(self):
+        self.with_chats()
+        with tempfile.TemporaryDirectory() as temporary:
+            plist_path = Path(temporary) / "job.plist"
+            output = io.StringIO()
+            with (
+                patch.object(codex_resume, "PLIST_PATH", plist_path),
+                patch.object(codex_resume, "LOG_PATH", Path(temporary) / "log"),
+                patch.object(codex_resume, "launchctl"),
+                patch.object(codex_resume, "app_server_request", return_value=self.limits(100, 76)),
+                redirect_stdout(output),
+            ):
+                self.assertEqual(codex_resume.main(["--reset", "30", "--chat", "01a1"]), 0)
+                codex_resume.main(["--status"])
+            with plist_path.open("rb") as agent_file:
+                arguments = plistlib.load(agent_file)["ProgramArguments"]
+        self.assertEqual(arguments[4:-2], ["--chat", "01a1-mine", "--every", "30", "--used-up", "300"])
+        lines = output.getvalue().splitlines()
+        self.assertRegex(lines[-1], r"^Codex resume scheduled for \S+ \S+, or earlier if the limit resets "
+                                    r"first \(checked every 30 minutes\) in chat 'Find current project status' "
+                                    r"via the Codex queue\.$")
+        self.assertEqual(lines[-2], lines[-1])
+        for minutes in ("4", "0x"):
+            with self.subTest(minutes=minutes), redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as error:
+                    codex_resume.main(["--reset", minutes])
+                self.assertEqual(error.exception.code, 2)
+
+    def reset_limits(self, five_hour, weekly=40, allowed=True):
+        resets = int(datetime.fromisoformat("2026-10-20T14:25:00+02:00").timestamp())
+        return {"ordinaryUsageAllowed": allowed, "rateLimits": {
+            "primary": {"usedPercent": five_hour, "windowDurationMins": 300, "resetsAt": resets},
+            "secondary": {"usedPercent": weekly, "windowDurationMins": 10080, "resetsAt": None},
+        }}
+
+    def run_recurring_reset(self, readings, minutes_to_reset, used_up="300"):
+        """Run a scheduled --reset 30 job on a fake clock that advances while sleeping."""
+        clock = [datetime.fromisoformat("2026-10-20T12:00:00+02:00")]
+        deadline = clock[0] + timedelta(minutes=minutes_to_reset)
+
+        class FakeDatetime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return clock[0].astimezone(tz)
+
+        def sleep(seconds):
+            clock[0] += timedelta(seconds=seconds)
+
+        checks = []
+
+        def read(method, params=None):
+            self.assertEqual(method, "account/rateLimits/read")
+            checks.append(clock[0])
+            reading = readings.pop(0)
+            if isinstance(reading, Exception):
+                raise reading
+            return reading
+
+        with tempfile.TemporaryDirectory() as temporary:
+            plist_path = Path(temporary) / "job.plist"
+            plist_path.write_text("scheduled")
+            with (
+                patch.object(codex_resume, "PLIST_PATH", plist_path),
+                patch.object(codex_resume, "datetime", FakeDatetime),
+                patch.object(codex_resume.time, "sleep", side_effect=sleep),
+                patch.object(codex_resume, "app_server_request", side_effect=read),
+                patch.object(codex_resume, "log_stamp", return_value=""),
+                patch.object(codex_resume, "submit_scheduled") as submit,
+                patch.object(codex_resume, "launchctl"),
+                redirect_stdout(io.StringIO()) as output,
+            ):
+                self.assertEqual(codex_resume.main(
+                    ["--every", "30", "--used-up", used_up, "--scheduled", deadline.isoformat()]), 0)
+        self.assertEqual(readings, [])
+        return ([(moment - deadline).total_seconds() / 60 for moment in checks], submit.call_count,
+                output.getvalue().splitlines())
+
+    def test_recurring_reset_sends_once_an_early_reset_leaves_the_limit_unused(self):
+        checks, sends, lines = self.run_recurring_reset(
+            [self.reset_limits(100), RuntimeError("no answer"), self.reset_limits(0)], minutes_to_reset=200)
+        self.assertEqual(checks, [-170, -140, -110])
+        self.assertEqual(sends, 1)
+        limits = "5-hour: {}% used, resets 2026-10-20 14:25; weekly: 40% used, resets not set"
+        self.assertEqual(lines, [
+            f"Not sending yet ({limits.format(100)}); next check at 2026-10-20 13:00.",
+            "Not sending yet (the limits could not be read: no answer); next check at 2026-10-20 13:30.",
+            f"The limit has reset early and its new allowance is unused ({limits.format(0)}); sending.",
+        ])
+
+    def test_recurring_reset_stops_when_the_new_allowance_is_already_in_use(self):
+        for final in (False, True):
+            with self.subTest(final=final):
+                readings = [self.reset_limits(0, allowed=False), self.reset_limits(100), self.reset_limits(12)]
+                checks, sends, lines = self.run_recurring_reset(readings, minutes_to_reset=70 if final else 200)
+                self.assertEqual(checks, [-40, -10, 0.05] if final else [-170, -140, -110])
+                self.assertEqual(sends, 0)
+                self.assertIn("usage not allowed", lines[0])
+                self.assertRegex(lines[-1], r"^The limit has reset, but its new allowance is already in use "
+                                            r"\(5-hour: 12% used.*\); not sending\.$")
+
+    def test_recurring_reset_judges_only_the_limits_that_were_used_up(self):
+        # The weekly limit ran out mid-window; the 5-hour window's earlier use is not a new session.
+        checks, sends, lines = self.run_recurring_reset(
+            [self.reset_limits(30, weekly=100), self.reset_limits(30, weekly=0)],
+            minutes_to_reset=200, used_up="10080")
+        self.assertEqual(sends, 1)
+        self.assertIn("reset early and its new allowance is unused", lines[-1])
+
+    def test_recurring_reset_sends_at_the_reset_unless_its_allowance_is_in_use(self):
+        for reading, expected in (
+            (self.reset_limits(100), "The reset time has arrived (5-hour: 100% used"),
+            (RuntimeError("no answer"), "The reset time has arrived (the limits could not be read: no answer)"),
+            (self.reset_limits(0), "The limit has reset and its new allowance is unused"),
+        ):
+            with self.subTest(expected=expected):
+                checks, sends, lines = self.run_recurring_reset(
+                    [self.reset_limits(100), self.reset_limits(100), reading], minutes_to_reset=70)
+                self.assertEqual(checks, [-40, -10, 0.05])
+                self.assertEqual(sends, 1)
+                self.assertEqual(lines[1], "Not sending yet (5-hour: 100% used, resets 2026-10-20 14:25; weekly: "
+                                           "40% used, resets not set); last check at the reset, 2026-10-20 13:10.")
+                self.assertTrue(lines[-1].startswith(expected), lines[-1])
+
     def window_limits(self, used, resets, allowed=True):
         return {"ordinaryUsageAllowed": allowed, "rateLimits": {
             "primary": {"usedPercent": used, "windowDurationMins": 300,

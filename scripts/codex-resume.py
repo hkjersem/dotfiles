@@ -99,7 +99,12 @@ the folder and picks that chat when it starts.
 catalogue has that name, the open chat's id, project and folder.
 --limits and --reset read the usage limits live through the Codex CLI's app
 server (account/rateLimits/read, read-only). --reset schedules a minute after
-the latest reset among the limits that are used up.
+the latest reset among the limits that are used up. --reset MINUTES also reads
+the limits that often while waiting, logging them each time. It sends once no
+limit is used up and the limits that were used up when it was scheduled show 0%
+used, so an early reset is used too; if those already show use, someone started
+on the new allowance elsewhere and it stops without sending. At the reset time
+it sends unless that is the case, also when the limits cannot be read.
 """
 
 from datetime import datetime, timedelta
@@ -127,6 +132,7 @@ SCRIPT_PATH = Path(__file__).resolve()
 TIME_PATTERN = re.compile(r"([01][0-9]|2[0-3])[:.]?([0-5][0-9])\Z")
 SCHEDULE_DELAY_SECONDS = 3
 RESET_MARGIN_SECONDS = 60
+MIN_RESET_CHECK_MINUTES = 5
 CODEX_HOME = Path.home() / ".codex"
 CHAT_CATALOG = "sqlite/codex-dev.db"
 CODEX_CLI_PATHS = (
@@ -566,6 +572,7 @@ def usage_limits():
         minutes = window.get("windowDurationMins")
         windows.append({
             "name": LIMIT_NAMES.get(minutes, f"{minutes}-minute"),
+            "minutes": minutes,
             "used": window.get("usedPercent", 0),
             "resets": datetime.fromtimestamp(window["resetsAt"]).astimezone(),
         })
@@ -617,6 +624,68 @@ def wait_until_scheduled_time(timestamp, now=None):
         time.sleep(delay)
 
 
+def early_reset_state(used_up):
+    """Read the limits for a --reset MINUTES job: "wait" while a limit is used up, "send" once the limits
+    that were used up have reset with nothing used since, or "taken" when that new allowance is already in use.
+    used_up lists the window lengths in minutes that were used up when the job was scheduled."""
+    result = app_server_request("account/rateLimits/read")
+    limits = result.get("rateLimits") or {}
+    windows = {}
+    for key in ("primary", "secondary"):
+        window = limits.get(key)
+        if window and window.get("windowDurationMins") is not None:
+            windows[window["windowDurationMins"]] = window
+    parts = []
+    for minutes, window in windows.items():
+        resets = window.get("resetsAt")
+        when = format_time(datetime.fromtimestamp(resets).astimezone()) if resets is not None else "not set"
+        parts.append(f"{LIMIT_NAMES.get(minutes, f'{minutes}-minute')}: "
+                     f"{window.get('usedPercent', 0):g}% used, resets {when}")
+    if result.get("ordinaryUsageAllowed") is False:
+        parts.append("usage not allowed")
+    detail = "; ".join(parts) or "no limits reported"
+    if result.get("ordinaryUsageAllowed") is False or any(
+            window.get("usedPercent", 0) >= 100 for window in windows.values()):
+        return "wait", detail
+    if any(windows.get(minutes, {}).get("usedPercent", 0) > 0 for minutes in used_up):
+        return "taken", detail
+    return "send", detail
+
+
+def wait_for_early_reset(timestamp, minutes, used_up):
+    """Check the limits every few minutes until the used-up limits reset, early or at the scheduled time.
+    Return whether to send: not when the new allowance is already in use, as when a session was started
+    on another device."""
+    deadline = datetime.fromisoformat(timestamp) + timedelta(seconds=SCHEDULE_DELAY_SECONDS)
+    interval = timedelta(minutes=minutes)
+    next_check = datetime.now(deadline.tzinfo) + interval
+    while True:
+        final = next_check >= deadline
+        if final:
+            wait_until_scheduled_time(timestamp)
+        else:
+            time.sleep(max(0, (next_check - datetime.now(deadline.tzinfo)).total_seconds()))
+        try:
+            state, detail = early_reset_state(used_up)
+        except RuntimeError as error:
+            state, detail = "unknown", f"the limits could not be read: {error}"
+        if state == "taken":
+            print(f"{log_stamp()}The limit has reset, but its new allowance is already in use ({detail}); "
+                  "not sending.", flush=True)
+            return False
+        if state == "send":
+            print(f"{log_stamp()}The limit has reset{'' if final else ' early'} and its new allowance is unused "
+                  f"({detail}); sending.", flush=True)
+            return True
+        if final:
+            print(f"{log_stamp()}The reset time has arrived ({detail}); sending.", flush=True)
+            return True
+        next_check = max(next_check + interval, datetime.now(deadline.tzinfo))
+        then = (f"next check at {format_time(next_check)}" if next_check < deadline
+                else f"last check at the reset, {format_time(deadline)}")
+        print(f"{log_stamp()}Not sending yet ({detail}); {then}.", flush=True)
+
+
 def launchctl(*arguments):
     executable = shutil.which("launchctl")
     if executable is None:
@@ -640,7 +709,7 @@ def remove_agent():
     return True
 
 
-def schedule(scheduled, message=None, chat=None, project=None, start_window=False):
+def schedule(scheduled, message=None, chat=None, project=None, start_window=False, every=None, used_up=()):
     if PLIST_PATH.exists():
         remove_agent()
 
@@ -658,6 +727,8 @@ def schedule(scheduled, message=None, chat=None, project=None, start_window=Fals
             *(["--project", project["cwd"]] if project is not None
               else ["--chat", chat["id"]] if chat is not None else []),
             *(["--start-window"] if start_window else []),
+            *(["--every", str(every), "--used-up", ",".join(str(minutes) for minutes in used_up)]
+              if every else []),
             "--scheduled",
             scheduled.isoformat(),
         ],
@@ -679,15 +750,18 @@ def schedule(scheduled, message=None, chat=None, project=None, start_window=Fals
         PLIST_PATH.unlink(missing_ok=True)
         raise
 
-    print(scheduled_summary(scheduled, message, None if project is not None else chat, project, start_window))
+    print(scheduled_summary(scheduled, message, None if project is not None else chat, project, start_window,
+                            every))
 
 
 def chat_label(chat):
     return f"{chat['name']!r}" + (" (remote)" if chat["host"] is not None else "")
 
 
-def scheduled_summary(scheduled, message, chat=None, project=None, start_window=False):
+def scheduled_summary(scheduled, message, chat=None, project=None, start_window=False, every=None):
     summary = f"Codex resume scheduled for {format_time(scheduled)}"
+    if every:
+        summary += f", or earlier if the limit resets first (checked every {every} minutes)"
     if project is not None:
         summary += f" in the latest chat in project {project_label(project)}"
     elif chat is not None:
@@ -723,7 +797,8 @@ def status():
             chat = next((chat for chat in load_chats() if chat["id"] == chat_id), unknown)
         except RuntimeError:
             chat = unknown
-    print(scheduled_summary(scheduled, message, chat, project, "--start-window" in arguments))
+    every = int(arguments[arguments.index("--every") + 1]) if "--every" in arguments else None
+    print(scheduled_summary(scheduled, message, chat, project, "--start-window" in arguments, every))
 
 
 def swift_version(executable):
@@ -872,8 +947,10 @@ def argument_parser():
         "--time", metavar="HH:MM", help="schedule the next occurrence of this local time"
     )
     actions.add_argument(
-        "--reset", action="store_true",
-        help="schedule a minute after the used-up usage limit resets (the later one if both are)",
+        "--reset", nargs="?", const=0, type=int, metavar="MINUTES",
+        help="schedule a minute after the used-up usage limit resets (the later one if both are); "
+             f"with MINUTES (at least {MIN_RESET_CHECK_MINUTES}), also check that often and send "
+             "as soon as the limit resets early; skip if its new allowance is already in use",
     )
     actions.add_argument(
         "--limits", action="store_true", help="show the 5-hour and weekly usage limits",
@@ -897,6 +974,8 @@ def argument_parser():
         help="check Accessibility controls without printing or changing the draft",
     )
     actions.add_argument("--scheduled", metavar="TIMESTAMP", help=argparse.SUPPRESS)
+    parser.add_argument("--every", type=int, help=argparse.SUPPRESS)
+    parser.add_argument("--used-up", default="", help=argparse.SUPPRESS)
     parser.add_argument(
         "--message", metavar="TEXT",
         help="with --time, --reset or --now, type this single-line message instead of 'continue'",
@@ -924,12 +1003,12 @@ def main(arguments):
     options = parser.parse_args(arguments)
     message = None
     if options.message is not None:
-        if not (options.time or options.reset or options.now or options.scheduled):
+        if not (options.time or options.reset is not None or options.now or options.scheduled):
             parser.error("--message requires --time, --reset or --now")
         message = validate_message(options.message)
     for name, value in (("--chat", options.chat), ("--project", options.project)):
         if value is not None and not (
-            options.time or options.reset or options.now or options.check
+            options.time or options.reset is not None or options.now or options.check
             or options.inspect or options.scheduled
         ):
             parser.error(f"{name} requires --time, --reset, --now, --check or --inspect")
@@ -937,6 +1016,8 @@ def main(arguments):
         parser.error("use either --chat or --project, not both")
     if options.start_window and not (options.time or options.now or options.scheduled):
         parser.error("--start-window requires --time or --now")
+    if options.reset and options.reset < MIN_RESET_CHECK_MINUTES:
+        parser.error(f"--reset MINUTES must be at least {MIN_RESET_CHECK_MINUTES}")
 
     def skip_start_window():
         if not options.start_window:
@@ -971,7 +1052,12 @@ def main(arguments):
         return 0
     if options.scheduled:
         try:
-            wait_until_scheduled_time(options.scheduled)
+            if options.every:
+                used_up = [int(minutes) for minutes in options.used_up.split(",") if minutes]
+                if not wait_for_early_reset(options.scheduled, options.every, used_up):
+                    return 0
+            else:
+                wait_until_scheduled_time(options.scheduled)
             if skip_start_window():
                 return 0
             # Resolved at run time, so a project gets its latest chat and a failure still unloads the job.
@@ -1005,13 +1091,15 @@ def main(arguments):
     if options.check:
         run_automation("--check", chat=chat)
         return 0
-    if options.reset:
+    used_up = ()
+    if options.reset is not None:
         windows = usage_limits()
         scheduled = reset_time(windows)
+        used_up = [window["minutes"] for window in windows if window["used"] >= 100]
         print(describe_limits(windows))
     else:
         scheduled = next_occurrence(options.time)
-    schedule(scheduled, message, chat, project, options.start_window)
+    schedule(scheduled, message, chat, project, options.start_window, options.reset or None, used_up)
     return 0
 
 
