@@ -64,8 +64,7 @@ brew cleanup
 
 header "Zsh"
 # Update Zsh plugins
-ZSH=~/.oh-my-zsh DISABLE_UPDATE_PROMPT=true zsh ~/.oh-my-zsh/tools/upgrade.sh 2>&1 \
-    | grep -v -E "^[[:space:]]*$|______|/ __ |/ /_/ |\\____|\\.git|ohmyzsh\.com|discord|CommitGoods|follow us|@ohmyzsh"
+ZSH=~/.oh-my-zsh DISABLE_UPDATE_PROMPT=true zsh ~/.oh-my-zsh/tools/upgrade.sh -v minimal
 bash ~/.dotfiles/scripts/install-zsh-plugins.sh || exit 1
 
 # Run settings script (skip with --no-defaults)
