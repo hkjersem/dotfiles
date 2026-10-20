@@ -27,8 +27,10 @@ RESOLVE_VERSION="$VERSION"
 run_fnm_install() {
     # fnm prints a benign "already installed" notice on stderr when re-running
     # on an already-up-to-date version; pass through anything else.
+    # Corepack is installed and enabled below: fnm's own corepack option fails
+    # on Node 25+, which no longer bundles it (Schniz/fnm#1469).
     local out
-    if ! out=$(fnm --corepack-enabled install "$@" 2>&1 >/dev/null); then
+    if ! out=$(FNM_COREPACK_ENABLED=false fnm install "$@" 2>&1 >/dev/null); then
         printf '%s\n' "$out" >&2
         return 1
     fi

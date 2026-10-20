@@ -21,8 +21,9 @@ state = json.loads(path.read_text())
 args = sys.argv[1:]
 with open(os.environ["FNM_TEST_LOG"], "a") as log:
     log.write(json.dumps(args) + "\n")
-if args[:1] == ["--corepack-enabled"]:
-    args = args[1:]
+if "--corepack-enabled" in args or ("install" in args and os.environ.get("FNM_COREPACK_ENABLED") != "false"):
+    print("fnm corepack option fails on Node 25+", file=sys.stderr)
+    sys.exit(97)
 
 def save():
     path.write_text(json.dumps(state))
@@ -331,7 +332,7 @@ class InstallNodeTests(unittest.TestCase):
         self.assert_success(result)
         self.assertEqual(state["installed"], ["v22.10.0"])
         self.assertEqual(state["default"], "v22.10.0")
-        self.assertIn(["--corepack-enabled", "install", "--lts"], events)
+        self.assertIn(["install", "--lts"], events)
         self.assertNotIn("migrated_to", state)
         self.assert_no_cleanup(events)
 
