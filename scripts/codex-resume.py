@@ -461,8 +461,16 @@ def chat_log(chat):
     return max(found, key=lambda path: path.stat().st_mtime) if found else None
 
 
-def turn_events(path, offset=0):
-    """Reply start and end events in a session log, from a byte offset."""
+def written_since(record, since):
+    """Whether a session log record is stamped at or after since; an unreadable stamp counts as older."""
+    try:
+        return datetime.fromisoformat(record["timestamp"].replace("Z", "+00:00")) >= since
+    except (KeyError, AttributeError, TypeError, ValueError):
+        return False
+
+
+def turn_events(path, offset=0, since=None):
+    """Reply start and end events in a session log, from a byte offset and, if given, a time."""
     events = []
     with path.open("rb") as log:
         log.seek(offset)
@@ -474,6 +482,8 @@ def turn_events(path, offset=0):
             except ValueError:
                 continue
             payload = record.get("payload") or {}
+            if since is not None and not written_since(record, since):
+                continue
             if record.get("type") == "event_msg" and payload.get("type") in TURN_EVENTS:
                 events.append(payload)
     return events
@@ -489,13 +499,13 @@ def replying(chat, now=None):
     return bool(events) and events[-1]["type"] == "task_started"
 
 
-def report_reply(path, offset, stamp):
+def report_reply(path, offset, stamp, since=None):
     """Log how the reply the queued message started has ended so far, such as at a usage limit."""
     if path is None:
         return
     deadline = time.monotonic() + REPLY_RESULT_SECONDS
     while True:
-        ended = [event for event in turn_events(path, offset) if event["type"] != "task_started"]
+        ended = [event for event in turn_events(path, offset, since) if event["type"] != "task_started"]
         if ended:
             error = ended[0].get("error")
             if ended[0]["type"] == "turn_aborted":
@@ -529,6 +539,8 @@ def resume_through_queue(chat, message, stamp=lambda: ""):
         return True
     path = chat_log(chat)
     offset = path.stat().st_size if path is not None else 0
+    # Session logs stamp to the millisecond, so a whole second keeps the comparison from cutting a reply off.
+    queued_at = datetime.now().astimezone().replace(microsecond=0)
     try:
         item = app_server_request("thread/queue/add", {
             "threadId": chat["id"],
@@ -562,7 +574,12 @@ def resume_through_queue(chat, message, stamp=lambda: ""):
     except RuntimeError as error:
         return fall_back(f"The message was queued, but whether the app took it is unknown: {error}")
     print(f"{stamp()}The app took the message from the queue.", flush=True)
-    report_reply(path or chat_log(chat), offset, stamp)
+    if path is not None:
+        report_reply(path, offset, stamp)
+    else:
+        # Codex compresses idle chats' logs and unpacks one again before writing to it, so a log found only
+        # now holds earlier replies too; only events from after queueing belong to this one.
+        report_reply(chat_log(chat), 0, stamp, since=queued_at)
     return True
 
 

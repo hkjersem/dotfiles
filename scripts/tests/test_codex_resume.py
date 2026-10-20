@@ -1,6 +1,6 @@
 """Offline regression tests for codex-resume scheduling."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from contextlib import redirect_stderr, redirect_stdout
 import importlib.util
 import io
@@ -936,15 +936,18 @@ class CodexResumeTests(unittest.TestCase):
     def queued(self, *ids, cursor=None):
         return {"data": [{"id": item} for item in ids], "nextCursor": cursor}
 
-    def write_session_log(self, *events, age=0):
-        """Append reply events to the local chat's session log, as the app does, last written age seconds ago."""
+    def write_session_log(self, *events, age=0, stamped=None):
+        """Append reply events to the local chat's session log, as the app does, last written age seconds ago;
+        the records are stamped at stamped, or now."""
         path = codex_resume.CODEX_HOME / "sessions/2026/10/20/rollout-2026-10-20T10-00-00-01a1-mine.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a") as log:
             log.write(json.dumps({"type": "response_item", "payload": {"type": "message"}}) + "\n")
             for event in events:
                 payload = event if isinstance(event, dict) else {"type": event}
-                log.write(json.dumps({"type": "event_msg", "payload": payload}) + "\n")
+                moment = (stamped or datetime.now().astimezone()).astimezone(timezone.utc)
+                log.write(json.dumps({"timestamp": f"{moment:%Y-%m-%dT%H:%M:%S.%f}"[:-3] + "Z",
+                                      "type": "event_msg", "payload": payload}) + "\n")
         written = datetime.now().timestamp() - age
         os.utime(path, (written, written))
 
@@ -982,6 +985,26 @@ class CodexResumeTests(unittest.TestCase):
                 with redirect_stdout(io.StringIO()) as output:
                     self.assertTrue(codex_resume.resume_through_queue(self.LOCAL_CHAT, None))
                 self.assertEqual(output.getvalue().splitlines()[-1], expected)
+
+    def test_queue_reports_only_the_new_reply_when_the_log_was_compressed(self):
+        home = self.with_chats()
+        compressed = home / "sessions/2026/10/20/rollout-2026-10-20T10-00-00-01a1-mine.jsonl.zst"
+        compressed.parent.mkdir(parents=True)
+        compressed.write_bytes(b"compressed")
+
+        def unpack_and_reply():
+            # The app unpacks the log, with its earlier replies, before writing the new one.
+            compressed.unlink()
+            earlier = datetime.now().astimezone() - timedelta(days=30)
+            self.write_session_log("task_started", "task_complete", stamped=earlier)
+            self.write_session_log("task_started", {"type": "task_complete", "error": {"message": "Usage limit."}})
+
+        self.fake_queue([self.queued()], on_add=unpack_and_reply, home=home)
+        with redirect_stdout(io.StringIO()) as output:
+            self.assertTrue(codex_resume.resume_through_queue(self.LOCAL_CHAT, None))
+        self.assertEqual(output.getvalue().splitlines()[-1], "The reply ended with an error: Usage limit.")
+        self.assertFalse(codex_resume.written_since({"timestamp": "unreadable"}, datetime.now().astimezone()))
+        self.assertFalse(codex_resume.written_since({}, datetime.now().astimezone()))
 
     def test_queue_leaves_a_reply_in_progress_alone(self):
         calls = self.fake_queue([self.queued("q1")])
