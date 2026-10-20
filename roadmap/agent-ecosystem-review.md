@@ -53,9 +53,6 @@ expect today, and lists changes worth adopting. It covers:
    - cplt: its sandbox profile (`cplt --print-profile`) must still allow
      reading `~/.agents` and the instruction targets, or sandboxed agents lose
      our skills and instructions.
-   - VS Code: it reads personal skills from `~/.copilot/skills`,
-     `~/.claude/skills` and `~/.agents/skills`. Check whether the Claude
-     links make skills appear twice in Chat: Open Customizations.
    - pnpm (12.11+): `pnpm install` links skills that dependencies ship under
      `skills/<name>/SKILL.md` into project agent folders such as
      `.claude/skills`, after `pnpm approve`. The `skills.dirs` setting picks
@@ -94,3 +91,6 @@ expect today, and lists changes worth adopting. It covers:
   - `npx skills` (1.7.2) installs global skills for Copilot, Codex, Gemini and
     Antigravity into `~/.agents/skills` only; only Claude Code gets links.
     nav-pilot installs real files into `~/.copilot` with no name clashes.
+- 2026-10-20: VS Code reads `~/.copilot/skills`, `~/.claude/skills` and
+  `~/.agents/skills` but lists each skill name once (61 unique names from 96
+  folders), so the Claude links cause no duplicates. Dropped that check.
