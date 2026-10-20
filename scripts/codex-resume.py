@@ -23,7 +23,9 @@ Accessibility requires macOS, Python 3, Swift (Xcode Command Line Tools), and
 Accessibility permission for the execution context. Terminal permission may
 not cover launchd.
 
-The user LaunchAgent starts immediately under caffeinate -i, waits until three
+The user LaunchAgent starts immediately under caffeinate -i, or -di when the
+target needs Accessibility (a remote chat or the open chat), so the display
+stays on and an idle lock does not start before the run; it waits until three
 seconds after the requested local minute, then sends. Accessibility runs of
 lib/codex-resume.swift go under caffeinate -du, which wakes the display and
 keeps it on until the helper ends. Late starts submit immediately and are
@@ -745,9 +747,10 @@ def schedule(scheduled, message=None, chat=None, project=None, start_window=Fals
     plist = {
         "Label": LABEL,
         "ProgramArguments": [
-            # Only idle sleep is held off while waiting; Accessibility runs keep the display on themselves.
+            # Typing needs an unlocked screen, so keep the display on and the idle lock off until the run;
+            # a queued message needs neither.
             "/usr/bin/caffeinate",
-            "-i",
+            "-i" if uses_queue(project or chat) else "-di",
             sys.executable,
             str(SCRIPT_PATH),
             *(["--message", message] if message is not None else []),

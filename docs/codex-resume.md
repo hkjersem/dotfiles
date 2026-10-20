@@ -75,7 +75,9 @@ nothing is sent.
 
 ## Requirements and logs
 
-Prevents idle sleep while waiting but lets the display turn off. Closing the lid
+Prevents idle sleep while waiting. Chats on this Mac let the display turn off;
+remote chats and the open chat keep it on, so an idle lock doesn't stop the
+input field path, though a manual lock still does. Closing the lid
 still puts the Mac to sleep; a run that starts late says so in the log. The
 input field path wakes the display while it runs, briefly takes app focus
 to submit, and requires an unlocked session and Accessibility permission. The

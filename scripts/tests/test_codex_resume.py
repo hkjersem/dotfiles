@@ -374,30 +374,33 @@ class CodexResumeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             plist_path = Path(temporary) / "com.hkjersem.codex-resume.plist"
             log_path = Path(temporary) / "codex-resume.log"
-            now = datetime.fromisoformat("2026-10-16T13:00:00+02:00")
+            at_half_past_four = datetime.fromisoformat("2026-10-16T16:30:00+02:00")
             with (
                 patch.object(codex_resume, "PLIST_PATH", plist_path),
                 patch.object(codex_resume, "LOG_PATH", log_path),
                 patch.object(codex_resume, "launchctl") as launchctl,
                 patch("builtins.print"),
             ):
-                codex_resume.schedule(codex_resume.next_occurrence("16:30", now))
+                codex_resume.schedule(at_half_past_four)
+                with plist_path.open("rb") as agent_file:
+                    plist = plistlib.load(agent_file)
+                # Typing into the open chat or a remote one needs the screen unlocked, so the display stays on.
+                for chat, flags in ((self.LOCAL_CHAT, "-i"), ({**self.LOCAL_CHAT, "host": "mini"}, "-di")):
+                    codex_resume.schedule(at_half_past_four, chat=chat)
+                    with plist_path.open("rb") as agent_file:
+                        self.assertEqual(plistlib.load(agent_file)["ProgramArguments"][1], flags)
 
-            with plist_path.open("rb") as agent_file:
-                plist = plistlib.load(agent_file)
             self.assertEqual(plist["Label"], codex_resume.LABEL)
             self.assertTrue(plist["RunAtLoad"])
             self.assertNotIn("StartCalendarInterval", plist)
-            self.assertEqual(plist["ProgramArguments"][:2], ["/usr/bin/caffeinate", "-i"])
+            self.assertEqual(plist["ProgramArguments"][:2], ["/usr/bin/caffeinate", "-di"])
             self.assertEqual(plist["ProgramArguments"][2:4], [
                 sys.executable, str(codex_resume.SCRIPT_PATH),
             ])
             self.assertEqual(plist["ProgramArguments"][-2:], [
                 "--scheduled", "2026-10-16T16:30:00+02:00",
             ])
-            launchctl.assert_called_once_with(
-                "bootstrap", codex_resume.agent_domain(), str(plist_path)
-            )
+            launchctl.assert_any_call("bootstrap", codex_resume.agent_domain(), str(plist_path))
 
     def test_invalid_schedule_does_not_create_a_job(self):
         with tempfile.TemporaryDirectory() as temporary:
