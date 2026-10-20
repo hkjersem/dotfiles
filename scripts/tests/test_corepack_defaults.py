@@ -296,6 +296,36 @@ class CorepackDefaultsTest(unittest.TestCase):
 
         self.assertEqual(result.stdout, "")
 
+    def end_of_life(self, schedule):
+        path = self.tmp / "schedule.json"
+        if schedule is not None:
+            path.write_text(json.dumps(schedule))
+        return subprocess.run(
+            ["/bin/bash", "-c", f'source "{LIB}"; fnm_end_of_life_majors'],
+            env={**self.env, "NODE_SCHEDULE_URL": path.as_uri()}, capture_output=True, text=True,
+        )
+
+    def test_end_of_life_node_majors_are_listed_once(self):
+        for version in ("v20.5.0", "v22.1.0", "v22.2.0", "v24.1.0", "v99.0.0"):
+            self.add_fnm_node(version)
+
+        result = self.end_of_life({
+            "v20": {"start": "2023-04-18", "end": "2026-04-30"},
+            "v22": {"start": "2024-04-24", "end": "2000-01-01"},
+            "v24": {"start": "2025-05-06", "end": "2999-04-30"},
+        })
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), ["20|2026-04-30", "22|2000-01-01"])
+
+    def test_end_of_life_check_fails_without_the_schedule(self):
+        self.add_fnm_node("v20.5.0")
+
+        result = self.end_of_life(None)
+
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, "")
+
     def test_bun_registry_failure_only_warns(self):
         self.set_defaults({"pnpm": "10.33.4", "yarn": "1.22.22"})
         self.standard_registry()

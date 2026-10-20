@@ -42,14 +42,10 @@ bash ~/.dotfiles/scripts/install-node.sh lts
 # points at, leaving node/npm/npx/pnpm unresolved until the next `cd`.
 # Re-point this shell to the (possibly new) default now.
 command -v fnm &>/dev/null && fnm use --install-if-missing lts-latest >/dev/null
-# Update npm & packages
 bash ~/.dotfiles/scripts/ensure-pm-config.sh || exit 1
 npm cache verify -g > /dev/null
-npm install npm -g --no-fund
-_npm_outdated=$(npm outdated -g 2>/dev/null || true)
-[[ -n "$_npm_outdated" ]] && echo "Outdated global npm packages:" && echo "$_npm_outdated"
-unset _npm_outdated
-npm update -g --no-fund
+# Other Node majors, then npm and global packages in every installation
+bash ~/.dotfiles/scripts/update-node-versions.sh || exit 1
 bash ~/.dotfiles/scripts/corepack-defaults.sh || exit 1
 
 header "Homebrew"
