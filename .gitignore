@@ -4,3 +4,5 @@ audit.ignore
 # Zsh completion and compiled caches
 .zcompdump*
 *.zwc
+# Python bytecode from running the tests
+__pycache__/
