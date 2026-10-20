@@ -23,10 +23,12 @@ Accessibility requires macOS, Python 3, Swift (Xcode Command Line Tools), and
 Accessibility permission for the execution context. Terminal permission may
 not cover launchd.
 
-The user LaunchAgent starts immediately under caffeinate -di, waits until three
-seconds after the requested local minute, then runs lib/codex-resume.swift.
-Late starts submit immediately. Completion, failure, or cancellation unloads
-the job and releases the sleep assertions. --now does not inhibit idle sleep.
+The user LaunchAgent starts immediately under caffeinate -i, waits until three
+seconds after the requested local minute, then sends. Accessibility runs of
+lib/codex-resume.swift go under caffeinate -du, which wakes the display and
+keeps it on until the helper ends. Late starts submit immediately and are
+logged as late. Completion, failure, or cancellation unloads the job and
+releases the sleep assertions. --now does not inhibit idle sleep.
 This does not unlock the Mac or prevent manual/policy locks or lid-close sleep.
 The first scheduled attempt runs regardless of recent keyboard/mouse activity.
 Failures known to precede all input can retry once per minute, up to ten times;
@@ -133,6 +135,8 @@ TIME_PATTERN = re.compile(r"([01][0-9]|2[0-3])[:.]?([0-5][0-9])\Z")
 SCHEDULE_DELAY_SECONDS = 3
 RESET_MARGIN_SECONDS = 60
 MIN_RESET_CHECK_MINUTES = 5
+# A check or send this far past its planned time is logged as late, as after sleep.
+LATE_SECONDS = 120
 CODEX_HOME = Path.home() / ".codex"
 CHAT_CATALOG = "sqlite/codex-dev.db"
 CODEX_CLI_PATHS = (
@@ -616,6 +620,16 @@ def reset_time(windows):
     return max(window["resets"] for window in exhausted) + timedelta(seconds=RESET_MARGIN_SECONDS)
 
 
+def late_note(planned, now=None):
+    """Say how late a run is when it started well after its planned time, as when the Mac was asleep."""
+    late = (now or datetime.now(planned.tzinfo)) - planned
+    if late.total_seconds() < LATE_SECONDS:
+        return ""
+    hours, minutes = divmod(int(late.total_seconds()) // 60, 60)
+    duration = f"{hours} h {minutes} min" if hours else f"{minutes} min"
+    return f"{duration} late; the Mac was probably asleep or off"
+
+
 def wait_until_scheduled_time(timestamp, now=None):
     scheduled = datetime.fromisoformat(timestamp) + timedelta(seconds=SCHEDULE_DELAY_SECONDS)
     now = now or datetime.now(scheduled.tzinfo)
@@ -665,10 +679,13 @@ def wait_for_early_reset(timestamp, minutes, used_up):
             wait_until_scheduled_time(timestamp)
         else:
             time.sleep(max(0, (next_check - datetime.now(deadline.tzinfo)).total_seconds()))
+        late = late_note(deadline if final else next_check)
         try:
             state, detail = early_reset_state(used_up)
         except RuntimeError as error:
             state, detail = "unknown", f"the limits could not be read: {error}"
+        if late:
+            detail += f"; {late}"
         if state == "taken":
             print(f"{log_stamp()}The limit has reset, but its new allowance is already in use ({detail}); "
                   "not sending.", flush=True)
@@ -718,8 +735,9 @@ def schedule(scheduled, message=None, chat=None, project=None, start_window=Fals
     plist = {
         "Label": LABEL,
         "ProgramArguments": [
+            # Only idle sleep is held off while waiting; Accessibility runs keep the display on themselves.
             "/usr/bin/caffeinate",
-            "-di",
+            "-i",
             sys.executable,
             str(SCRIPT_PATH),
             *(["--message", message] if message is not None else []),
@@ -819,6 +837,9 @@ def run_automation(action, message=None, chat=None):
             "Swift is unavailable; install Apple's Xcode Command Line Tools."
         )
     command = [executable, str(HELPER_PATH), action]
+    if action in SCHEDULED_ACTIONS:
+        # The scheduled job only holds off idle sleep, so wake the display and keep it on for the helper.
+        command = ["/usr/bin/caffeinate", "-du", *command]
     if message is not None:
         command += ["--message", message]
     if chat is not None:
@@ -1058,6 +1079,9 @@ def main(arguments):
                     return 0
             else:
                 wait_until_scheduled_time(options.scheduled)
+                late = late_note(datetime.fromisoformat(options.scheduled))
+                if late:
+                    print(f"{log_stamp()}Running now ({late}).", flush=True)
             if skip_start_window():
                 return 0
             # Resolved at run time, so a project gets its latest chat and a failure still unloads the job.

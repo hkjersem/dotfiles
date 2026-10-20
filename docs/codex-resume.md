@@ -76,7 +76,9 @@ nothing is sent.
 
 ## Requirements and logs
 
-Keeps the Mac awake while waiting. The input field path briefly takes app focus
+Prevents idle sleep while waiting but lets the display turn off. Closing the lid
+still puts the Mac to sleep; a run that starts late says so in the log. The
+input field path wakes the display while it runs, briefly takes app focus
 to submit, and requires an unlocked session and Accessibility permission. The
 first scheduled attempt runs regardless of recent activity; up to ten
 one-minute retries require one minute of inactivity and no previous input sent.

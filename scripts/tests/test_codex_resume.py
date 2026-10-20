@@ -162,6 +162,37 @@ class CodexResumeTests(unittest.TestCase):
         )
         self.assertEqual(output.getvalue(), result.stdout)
 
+    def test_scheduled_automation_wakes_the_display_while_the_helper_runs(self):
+        result = subprocess.CompletedProcess([], 0, "", "")
+        with (
+            patch.object(codex_resume.shutil, "which", return_value="/usr/bin/swift"),
+            patch.object(codex_resume.subprocess, "run", return_value=result) as run,
+            redirect_stdout(io.StringIO()),
+        ):
+            for action in codex_resume.SCHEDULED_ACTIONS:
+                codex_resume.run_automation(action)
+        self.assertEqual([command.args[0] for command in run.call_args_list], [
+            ["/usr/bin/caffeinate", "-du", "/usr/bin/swift", str(codex_resume.HELPER_PATH), action]
+            for action in codex_resume.SCHEDULED_ACTIONS
+        ])
+
+    def test_a_late_scheduled_run_says_how_late_it_is(self):
+        planned = datetime.now().astimezone() - timedelta(hours=2, minutes=36, seconds=10)
+        with tempfile.TemporaryDirectory() as temporary:
+            with (
+                patch.object(codex_resume, "PLIST_PATH", Path(temporary) / "job.plist"),
+                patch.object(codex_resume, "log_stamp", return_value=""),
+                patch.object(codex_resume, "submit_scheduled") as submit,
+                redirect_stdout(io.StringIO()) as output,
+            ):
+                self.assertEqual(codex_resume.main(["--scheduled", planned.isoformat()]), 0)
+        submit.assert_called_once_with(None, None)
+        self.assertEqual(output.getvalue(),
+                         "Running now (2 h 36 min late; the Mac was probably asleep or off).\n")
+        self.assertEqual(codex_resume.late_note(planned, planned + timedelta(seconds=119)), "")
+        self.assertEqual(codex_resume.late_note(planned, planned + timedelta(minutes=5)),
+                         "5 min late; the Mac was probably asleep or off")
+
     def test_automation_failure_is_not_reported_as_success(self):
         result = subprocess.CompletedProcess([], 1, "", "Composer is ambiguous.")
         with (
@@ -352,7 +383,7 @@ class CodexResumeTests(unittest.TestCase):
             self.assertEqual(plist["Label"], codex_resume.LABEL)
             self.assertTrue(plist["RunAtLoad"])
             self.assertNotIn("StartCalendarInterval", plist)
-            self.assertEqual(plist["ProgramArguments"][:2], ["/usr/bin/caffeinate", "-di"])
+            self.assertEqual(plist["ProgramArguments"][:2], ["/usr/bin/caffeinate", "-i"])
             self.assertEqual(plist["ProgramArguments"][2:4], [
                 sys.executable, str(codex_resume.SCRIPT_PATH),
             ])
@@ -1034,7 +1065,7 @@ class CodexResumeTests(unittest.TestCase):
                 ):
                     self.assertEqual(codex_resume.main(
                         [*(["--message", message] if message else []), "--chat", "01a1-mine",
-                         "--scheduled", "2026-10-20T00:00:00+02:00"]), 0 if falls_back else 1)
+                         "--scheduled", datetime.now().astimezone().isoformat()]), 0 if falls_back else 1)
                 self.assertEqual(submit.call_count, 1 if falls_back else 0)
                 launchctl.assert_called_once()
                 self.assertFalse(plist_path.exists())
@@ -1122,8 +1153,9 @@ class CodexResumeTests(unittest.TestCase):
             "secondary": {"usedPercent": weekly, "windowDurationMins": 10080, "resetsAt": None},
         }}
 
-    def run_recurring_reset(self, readings, minutes_to_reset, used_up="300"):
-        """Run a scheduled --reset 30 job on a fake clock that advances while sleeping."""
+    def run_recurring_reset(self, readings, minutes_to_reset, used_up="300", asleep_minutes=0):
+        """Run a scheduled --reset 30 job on a fake clock that advances while sleeping; the first wait
+        overruns by asleep_minutes, as when the Mac sleeps."""
         clock = [datetime.fromisoformat("2026-10-20T12:00:00+02:00")]
         deadline = clock[0] + timedelta(minutes=minutes_to_reset)
 
@@ -1132,8 +1164,10 @@ class CodexResumeTests(unittest.TestCase):
             def now(cls, tz=None):
                 return clock[0].astimezone(tz)
 
+        overrun = [timedelta(minutes=asleep_minutes)]
+
         def sleep(seconds):
-            clock[0] += timedelta(seconds=seconds)
+            clock[0] += timedelta(seconds=seconds) + (overrun.pop() if overrun else timedelta())
 
         checks = []
 
@@ -1186,6 +1220,14 @@ class CodexResumeTests(unittest.TestCase):
                 self.assertIn("usage not allowed", lines[0])
                 self.assertRegex(lines[-1], r"^The limit has reset, but its new allowance is already in use "
                                             r"\(5-hour: 12% used.*\); not sending\.$")
+
+    def test_recurring_reset_says_when_a_check_ran_late(self):
+        checks, sends, lines = self.run_recurring_reset(
+            [self.reset_limits(12)], minutes_to_reset=70, asleep_minutes=150)
+        self.assertEqual(checks, [110])
+        self.assertEqual(sends, 0)
+        self.assertRegex(lines[-1], r"already in use \(5-hour: 12% used.*; "
+                                    r"2 h 30 min late; the Mac was probably asleep or off\); not sending\.$")
 
     def test_recurring_reset_judges_only_the_limits_that_were_used_up(self):
         # The weekly limit ran out mid-window; the 5-hour window's earlier use is not a new session.
@@ -1255,7 +1297,7 @@ class CodexResumeTests(unittest.TestCase):
                     redirect_stdout(output),
                 ):
                     self.assertEqual(codex_resume.main(
-                        ["--start-window", "--scheduled", "2026-10-20T00:00:00+02:00"]), 0)
+                        ["--start-window", "--scheduled", datetime.now().astimezone().isoformat()]), 0)
                     self.assertEqual(codex_resume.main(["--now", "--start-window"]), 0)
                 self.assertEqual(submit.call_count, 2 if sends else 0)
                 self.assertFalse(plist_path.exists())
