@@ -48,6 +48,11 @@ def seconds(text):
     return datetime.fromisoformat(text).timestamp()
 
 
+def shown(moment):
+    """Format a fixed moment as the script shows it, in the local time zone, which differs in CI."""
+    return f"{datetime.fromisoformat(moment).astimezone():%Y-%m-%d %H:%M}"
+
+
 FAKE_APP_SERVER = """#!/usr/bin/env python3
 import json, sys
 mode = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] != "app-server" else "{mode}"
@@ -621,8 +626,8 @@ class CodexResumeTests(unittest.TestCase):
             codex_resume.list_chats("pwa")
         lines = output.getvalue().splitlines()
         self.assertEqual(len(lines), 3)
-        self.assertRegex(lines[0], r"^2026-09-04 \d\d:56  01a1-mine  Find current project status\s+myntr$")
-        self.assertRegex(lines[2], r"^2026-10-10 \d\d:00  01a7-mini  Explore PWA roadmap  local-relay \(remote\)$")
+        self.assertRegex(lines[0], rf"^{shown('2026-09-04T13:56:00+02:00')}  01a1-mine  Find current project status\s+myntr$")
+        self.assertEqual(lines[2], f"{shown('2026-10-10T08:00:00+02:00')}  01a7-mini  Explore PWA roadmap  local-relay (remote)")
         self.assertNotIn("Guardian", output.getvalue())
 
     def test_missing_chat_catalog_is_reported(self):
@@ -648,8 +653,8 @@ class CodexResumeTests(unittest.TestCase):
             codex_resume.resolve_chat("find current")
         message = str(ambiguous.exception)
         self.assertIn("2 chats match", message)
-        self.assertRegex(message, r"2026-09-04 \d\d:56  01a1-mine")
-        self.assertRegex(message, r"2026-08-01 \d\d:00  01a4-old")
+        self.assertIn(f"{shown('2026-09-04T13:56:00+02:00')}  01a1-mine", message)
+        self.assertIn(f"{shown('2026-08-01T10:00:00+02:00')}  01a4-old", message)
         for query in ("guardian", "removed", "plain chatgpt", "nothing like this"):
             with self.subTest(query=query), self.assertRaisesRegex(RuntimeError, "No chat matches"):
                 codex_resume.resolve_chat(query)
@@ -1146,8 +1151,11 @@ class CodexResumeTests(unittest.TestCase):
                     codex_resume.main(["--reset", minutes])
                 self.assertEqual(error.exception.code, 2)
 
+    RESETS_AT = "2026-10-20T14:25:00+02:00"
+    SHOWN_RESET = shown(RESETS_AT)
+
     def reset_limits(self, five_hour, weekly=40, allowed=True):
-        resets = int(datetime.fromisoformat("2026-10-20T14:25:00+02:00").timestamp())
+        resets = int(datetime.fromisoformat(self.RESETS_AT).timestamp())
         return {"ordinaryUsageAllowed": allowed, "rateLimits": {
             "primary": {"usedPercent": five_hour, "windowDurationMins": 300, "resetsAt": resets},
             "secondary": {"usedPercent": weekly, "windowDurationMins": 10080, "resetsAt": None},
@@ -1203,7 +1211,7 @@ class CodexResumeTests(unittest.TestCase):
             [self.reset_limits(100), RuntimeError("no answer"), self.reset_limits(0)], minutes_to_reset=200)
         self.assertEqual(checks, [-170, -140, -110])
         self.assertEqual(sends, 1)
-        limits = "5-hour: {}% used, resets 2026-10-20 14:25; weekly: 40% used, resets not set"
+        limits = "5-hour: {}% used, resets " + self.SHOWN_RESET + "; weekly: 40% used, resets not set"
         self.assertEqual(lines, [
             f"Not sending yet ({limits.format(100)}); next check at 2026-10-20 13:00.",
             "Not sending yet (the limits could not be read: no answer); next check at 2026-10-20 13:30.",
@@ -1248,7 +1256,7 @@ class CodexResumeTests(unittest.TestCase):
                     [self.reset_limits(100), self.reset_limits(100), reading], minutes_to_reset=70)
                 self.assertEqual(checks, [-40, -10, 0.05])
                 self.assertEqual(sends, 1)
-                self.assertEqual(lines[1], "Not sending yet (5-hour: 100% used, resets 2026-10-20 14:25; weekly: "
+                self.assertEqual(lines[1], f"Not sending yet (5-hour: 100% used, resets {self.SHOWN_RESET}; weekly: "
                                            "40% used, resets not set); last check at the reset, 2026-10-20 13:10.")
                 self.assertTrue(lines[-1].startswith(expected), lines[-1])
 

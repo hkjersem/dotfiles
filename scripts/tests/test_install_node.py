@@ -21,7 +21,7 @@ state = json.loads(path.read_text())
 args = sys.argv[1:]
 with open(os.environ["FNM_TEST_LOG"], "a") as log:
     log.write(json.dumps(args) + "\n")
-if "--corepack-enabled" in args or ("install" in args and os.environ.get("FNM_COREPACK_ENABLED") != "false"):
+if "--corepack-enabled" in args or (args[:1] == ["install"] and os.environ.get("FNM_COREPACK_ENABLED") != "false"):
     print("fnm corepack option fails on Node 25+", file=sys.stderr)
     sys.exit(97)
 
@@ -118,6 +118,8 @@ class InstallNodeTests(unittest.TestCase):
                         PATH=str(bin_dir) + os.pathsep + os.environ["PATH"],
                         FNM_TEST_STATE=str(self.state_path),
                         FNM_TEST_LOG=str(self.log_path))
+        # A shell that exports this would hide a missing FNM_COREPACK_ENABLED=false on fnm install.
+        self.env.pop("FNM_COREPACK_ENABLED", None)
 
     def run_case(self, request="22", **overrides):
         state = {
