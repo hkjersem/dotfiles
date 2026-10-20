@@ -121,8 +121,10 @@ field or lockfile. The selected manager must already be installed.
 | `pmx <package>` | Execute a package through npx, pnpm dlx, or bunx |
 | `pmi [package...]` | Install dependencies or add packages |
 | `pmr <package...>` | Remove packages |
+| `pml ../lib` | Try a local library instead of the installed one; `pml --undo ../lib` restores it |
 | `pmu --dry-run` | Preview updates within the current compatible version range |
 | `pmu --major` | Allow breaking version updates; still asks before applying |
+| `pmu --actions` | Update and pin GitHub Actions in a pnpm 12.7+ project |
 | `pmc --dry-run` | Preview manifest/catalog cleanup |
 | `pma` | Audit and apply supported fixes; Bun only reports findings |
 
@@ -130,7 +132,8 @@ field or lockfile. The selected manager must already be installed.
 read-only check. In zsh, `pnpm` and `yarn` run through corepack, as do `npm`
 and `npx` in projects with a `packageManager` field. See
 [docs/package-managers.md](docs/package-managers.md) for cooldowns, pnpm
-workspaces, and how `dotfiles-update` manages package-manager versions.
+workspaces, local libraries, and how `dotfiles-update` manages package-manager
+and Node versions.
 
 Related Node helpers: `install_node [version]` installs through fnm, migrates
 global packages, and installs and enables corepack if the Node version does not
