@@ -77,19 +77,41 @@ sys.exit(0 if managed else 1)
 PY
 }
 
+# Usage: skills_stale_plan CANDIDATE CANONICAL [SUBTREE...]
+# SUBTREEs are skill directories relative to CANDIDATE (default: skills). The
+# candidate is stale when everything in it is inside a subtree or is a real
+# directory on the way to one, and the subtrees hold only managed links and
+# empty directories. Returns 0 stale, 1 not stale, 2 inspection failed.
 skills_stale_plan() {
-    local candidate="$1" canonical="$2" scan path safe=0
+    local candidate="$1" canonical="$2" scan path rel tree in_tree found=0 safe=0
+    local -a trees
+    shift 2
+    if [[ $# -gt 0 ]]; then trees=("$@"); else trees=(skills); fi
     SKILLS_STALE_PATHS=()
     [[ -d "$candidate" && ! -L "$candidate" ]] || return 1
-    [[ -d "$candidate/skills" || -L "$candidate/skills" ]] || return 1
+    for tree in "${trees[@]}"; do
+        [[ -d "$candidate/$tree" || -L "$candidate/$tree" ]] && found=1
+    done
+    [[ "$found" -eq 1 ]] || return 1
     scan=$(mktemp) || return 2
     if ! find "$candidate" -depth -mindepth 1 -print0 > "$scan"; then
         rm -f "$scan"
         return 2
     fi
     while IFS= read -r -d '' path; do
-        if [[ "$path" != "$candidate/skills" && "$path" != "$candidate/skills/"* ]]; then
+        rel="${path#"$candidate"/}"
+        in_tree=0
+        for tree in "${trees[@]}"; do
+            if [[ "$rel" == "$tree" || "$rel" == "$tree/"* ]]; then
+                in_tree=1
+            elif [[ "$in_tree" -eq 0 && "$tree" == "$rel/"* ]]; then
+                in_tree=2
+            fi
+        done
+        if [[ "$in_tree" -eq 0 ]]; then
             safe=1
+        elif [[ "$in_tree" -eq 2 ]]; then
+            [[ -d "$path" && ! -L "$path" ]] || safe=1
         elif [[ -L "$path" ]]; then
             if [[ "$path" == "$candidate/skills" ]] && skills_same_path "$path" "$canonical"; then
                 :

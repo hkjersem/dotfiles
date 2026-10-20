@@ -32,12 +32,18 @@ skills are reported and left unchanged.
 Without repair flags, the skills audit is read-only. `--fix-symlinks` creates
 missing links and repairs links whose targets are inside the canonical store;
 real files, directories, and foreign links are reported as conflicts and
-preserved. `--fix-lockfile` removes entries for missing skill directories but
+preserved. Codex and Copilot CLI read `~/.agents/skills` directly, so only
+Claude Code gets links. `--fix-symlinks` also removes managed links left in
+`~/.codex/skills`, `~/.copilot/skills`, `~/.gemini/skills` and
+`~/.config/agents/skills`, which no agent in use needs.
+`--fix-lockfile` removes entries for missing skill directories but
 does not replace a symlinked lockfile.
 
-`--clean-stale` only removes listed agent directories whose `skills/` subtree
-contains verified managed links and empty directories. Real content, foreign
-links, and sibling directories such as `skills-backup` are preserved.
+`--clean-stale` only removes listed agent directories whose skill subtrees
+contain verified managed links and empty directories. For most agents that is
+`skills/`; `~/.gemini` also covers Antigravity's `antigravity/skills` and
+`antigravity/global_skills`. Real content, foreign links, and sibling
+directories such as `skills-backup` are preserved.
 `--quiet` changes output only; it does not disable requested repairs or hide
 warnings as successful checks. Python 3 is required for link-target checks,
 and jq is required for manifest/lockfile verification.

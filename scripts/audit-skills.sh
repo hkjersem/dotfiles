@@ -18,11 +18,12 @@
 # Options:
 #   --fix-symlinks   Create or repair missing/wrong symlinks in each provider's
 #                    skills directory, pointing back to SKILLS_DIR. Also removes
-#                    dangling symlinks left behind by uninstalled skills.
+#                    dangling symlinks left behind by uninstalled skills and
+#                    managed links in legacy provider directories.
 #   --fix-lockfile   Remove ghost entries from the lockfile (.skill-lock.json)
 #                    for skills whose folder no longer exists on disk.
-#   --clean-stale    Remove listed agent directories only when their skills/
-#                    subtree contains verified managed links and empty dirs.
+#   --clean-stale    Remove listed agent directories only when their skills
+#                    subtrees contain verified managed links and empty dirs.
 #   --quiet          Suppress per-check output; only print a one-line summary.
 
 # ── CONFIGURATION ─────────────────────────────────────────────────────────────
@@ -38,16 +39,26 @@ LOCK_FILE="$(dirname "$SKILLS_DIR")/.skill-lock.json"
 # agent is installed). To skip a provider entirely, comment it out or remove it.
 PREFERRED_PROVIDERS=(
     "claude-code:$HOME/.claude/skills"
+)
+
+# Former provider directories for agents that now read SKILLS_DIR directly
+# (Codex, Copilot CLI) or that no agent in use reads (Gemini CLI, universal).
+# Managed links left there would show each skill twice; --fix-symlinks removes
+# them. Real content and foreign links are preserved.
+LEGACY_PROVIDERS=(
     "codex:$HOME/.codex/skills"
-    "gemini-cli:$HOME/.gemini/skills"
     "github-copilot:$HOME/.copilot/skills"
+    "gemini-cli:$HOME/.gemini/skills"
     "universal:$HOME/.config/agents/skills"
 )
 
 # Agent home directories to flag when they contain ONLY a skills/ subdirectory.
 # If a listed directory exists and has nothing besides skills/, the audit warns
 # that the agent may not be installed and the directory is safe to delete.
+# An entry may name other skill subdirectories after a colon, space-separated;
+# they replace the default skills/.
 AUTO_DELETE_CANDIDATES=(
+    "$HOME/.gemini:skills antigravity/skills antigravity/global_skills"
     "$HOME/.codebuddy"
     "$HOME/.commandcode"
     "$HOME/.continue"
@@ -69,6 +80,7 @@ AUTO_DELETE_CANDIDATES=(
     "$HOME/.trae"
     "$HOME/.zencoder"
     "$HOME/.codeium"
+    "$HOME/.config/agents"
     "$HOME/.config/crush"
     "$HOME/.config/goose"
     "$HOME/.config/opencode"
@@ -494,6 +506,26 @@ for entry in "${PREFERRED_PROVIDERS[@]}"; do
     done
 done
 
+for entry in "${LEGACY_PROVIDERS[@]}"; do
+    agent_id="${entry%%:*}"
+    skills_dir="${entry#*:}"
+    [[ -d "$skills_dir" && ! -L "$skills_dir" ]] || continue
+    legacy_count=0
+    for link in "$skills_dir"/*; do
+        skills_managed_link "$link" "$SKILLS_DIR" || continue
+        if [ "$FIX_MODE" -eq 1 ]; then
+            rm "$link" || fail "$agent_id: $(basename "$link") (failed to remove legacy link)"
+        fi
+        legacy_count=$((legacy_count + 1))
+    done
+    [ "$legacy_count" -eq 0 ] && continue
+    if [ "$FIX_MODE" -eq 1 ]; then
+        fixed "$agent_id: removed $legacy_count legacy link(s) from $skills_dir (reads $SKILLS_DIR directly)"
+    else
+        warn "$agent_id: $legacy_count legacy link(s) in $skills_dir duplicate $SKILLS_DIR; run --fix-symlinks to remove"
+    fi
+done
+
 # If everything passed silently, emit one confirmation so section_end has something to show
 [[ $SECTION_ISSUES -eq 0 && $SECTION_WARNINGS -eq 0 ]] && ok "all skills correctly linked"
 
@@ -505,9 +537,16 @@ if [ "${#AUTO_DELETE_CANDIDATES[@]}" -gt 0 ]; then
     _stale_section_open=0
 
     for candidate in "${AUTO_DELETE_CANDIDATES[@]}"; do
+        candidate_trees=()
+        case "$candidate" in
+            *:*)
+                read -r -a candidate_trees <<< "${candidate#*:}"
+                candidate="${candidate%%:*}"
+                ;;
+        esac
         [ -d "$candidate" ] || continue
 
-        skills_stale_plan "$candidate" "$SKILLS_DIR"
+        skills_stale_plan "$candidate" "$SKILLS_DIR" ${candidate_trees[@]+"${candidate_trees[@]}"}
         plan_status=$?
 
         _will_output=0
@@ -542,7 +581,7 @@ if [ "${#AUTO_DELETE_CANDIDATES[@]}" -gt 0 ]; then
     done
 
     [ "$_stale_section_open" -eq 1 ] && section_end
-    unset _stale_section_open
+    unset _stale_section_open candidate_trees
 fi
 
 # ── SUMMARY (standalone only) ──────────────────────────────────────────────────

@@ -103,7 +103,7 @@ class AgentSkillsTests(unittest.TestCase):
         return directory
 
     def provider(self):
-        directory = self.home / ".copilot/skills"
+        directory = self.home / ".claude/skills"
         directory.mkdir(parents=True)
         return directory
 
@@ -244,6 +244,27 @@ class AgentSkillsTests(unittest.TestCase):
         self.assertIn("warning(s)", result.stdout)
         self.assertNotIn("Skills ok", result.stdout)
 
+    def test_legacy_codex_links_are_reported_then_removed_preserving_other_content(self):
+        self.installed()
+        legacy = self.home / ".codex/skills"
+        (legacy / ".system").mkdir(parents=True)
+        managed = legacy / "sample"
+        managed.symlink_to(self.canonical / "sample")
+        real = legacy / "own"
+        real.mkdir()
+        foreign = legacy / "foreign"
+        foreign.symlink_to(self.root)
+        before = self.snapshot()
+        result = self.run_script("audit-skills.sh")
+        self.assertIn("1 legacy link(s)", result.stdout)
+        self.assertEqual(self.snapshot(), before)
+        result = self.run_script("audit-skills.sh", "--fix-symlinks")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(managed.is_symlink())
+        self.assertTrue((legacy / ".system").is_dir() and real.is_dir() and foreign.is_symlink())
+        result = self.run_script("audit-skills.sh")
+        self.assertNotIn("legacy", result.stdout)
+
     def test_stale_cleanup_preserves_real_content_and_similarly_named_directories(self):
         self.installed()
         candidate = self.home / ".cursor"
@@ -280,6 +301,33 @@ class AgentSkillsTests(unittest.TestCase):
         self.assertEqual((skill / "SKILL.md").read_text(), "keep\n")
         self.assertIn("change(s)", result.stdout)
 
+    def test_gemini_leftovers_are_cleaned_across_listed_subtrees_only(self):
+        skill = self.installed()
+        gemini = self.home / ".gemini"
+        (gemini / "skills").mkdir(parents=True)
+        for tree in ("antigravity/skills", "antigravity/global_skills"):
+            (gemini / tree).mkdir(parents=True)
+            link = gemini / tree / "sample"
+            link.symlink_to(os.path.relpath(skill, link.parent))
+        settings = gemini / "settings.json"
+        settings.write_text("{}")
+        stray = gemini / "antigravity/notes.txt"
+        stray.write_text("keep")
+        for keep in (settings, stray):
+            before = self.snapshot()
+            result = self.run_script("audit-skills.sh", "--clean-stale")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(self.snapshot(), before)
+            keep.unlink()
+        before = self.snapshot()
+        result = self.run_script("audit-skills.sh")
+        self.assertEqual(self.snapshot(), before)
+        self.assertIn(".gemini — only managed links", result.stdout)
+        result = self.run_script("audit-skills.sh", "--clean-stale")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(gemini.exists())
+        self.assertEqual((skill / "SKILL.md").read_text(), "keep\n")
+
     def test_lockfile_ghost_fix_preserves_installed_records_and_symlinked_lockfiles(self):
         self.installed()
         state = json.loads(self.lock.read_text())
@@ -302,7 +350,7 @@ class AgentSkillsTests(unittest.TestCase):
         foreign = self.root / "foreign"
         (foreign / "skills").mkdir(parents=True)
         (foreign / "skills/sample").symlink_to(self.canonical / "sample")
-        provider = self.home / ".copilot"
+        provider = self.home / ".claude"
         provider.mkdir()
         (provider / "skills").symlink_to(foreign)
         (self.home / ".cursor").symlink_to(foreign)
