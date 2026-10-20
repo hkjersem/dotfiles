@@ -114,6 +114,12 @@ class CorepackDefaultsTest(unittest.TestCase):
         self.assertIn("corepack install -g pnpm@12.1.0", result.stderr)
         self.assertIn("yarn default 1.22.22 is current", result.stdout)
 
+    def test_same_major_release_above_latest_is_not_installed(self):
+        self.set_defaults({"pnpm": "12.0.0"})
+        self.publish("pnpm", metadata("12.1.0", {"12.0.0": 30, "12.1.0": 20, "12.1.1": 10}))
+
+        self.assertEqual(self.plan("pnpm")[2], "12.1.0")
+
     def test_accepts_npm_12_array_output(self):
         self.set_defaults({"pnpm": "10.33.4", "yarn": "1.22.22"})
         self.standard_registry(wrap=True)

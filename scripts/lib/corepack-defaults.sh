@@ -69,14 +69,15 @@ release_plan() {
     const cmp = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
     const latest = data["dist-tags"] && data["dist-tags"].latest;
     if (!latest || !data.time) process.exit(1);
-    const latestMajor = parse(latest)[0];
+    const latestVersion = parse(latest);
     const published = new Set([].concat(data.versions || []));
     const cutoff = Date.now() - Number(cooldown) * 60000;
     const eligible = Object.keys(data.time)
       .filter((v) => /^\d+\.\d+\.\d+$/.test(v) && published.has(v))
       .filter((v) => Date.parse(data.time[v]) <= cutoff)
       .map(parse)
-      .filter((v) => v[0] <= latestMajor)
+      // Releases above `latest` carry only next-style tags.
+      .filter((v) => cmp(v, latestVersion) <= 0)
       .sort(cmp);
     const newest = (list) => (list.length ? list[list.length - 1].join(".") : "");
     if (!current) {
