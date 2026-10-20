@@ -48,10 +48,23 @@ repo's scripts still match them.
      `codex-resume --check --chat <id>` (input-field path, read-only) and
      `codex-resume --now --chat <id> --message "Reply with OK only."`, which
      should report sending via the Codex queue.
-3. Ignore releases that change nothing the repo uses.
-4. Report findings briefly. For each one, either propose a change or say it
+3. Check the version baselines against the projects in `~/Developer` (skip
+   `fagtorsdag` and `worktrees`). Read `packageManager`, `devEngines`,
+   `engines.node`, `.nvmrc` and `.node-version`, and compare them with the
+   previous run's baseline in the Log:
+   - pnpm: the oldest pinned version against the floor in `AGENTS.md`. Propose
+     raising the floor when old pins are gone; only the owner decides. A pin
+     below the floor needs a fix or an exception.
+   - Node: pinned majors against the majors fnm has installed. Flag majors
+     that are end-of-life or within six months of it, and majors whose newest
+     npm no longer supports them (`update-node-versions.sh` warns about this).
+   - Yarn, Bun and npm pins: flag majors the wrappers or corepack defaults do
+     not cover.
+4. Ignore releases that change nothing the repo uses.
+5. Report findings briefly. For each one, either propose a change or say it
    needs nothing.
-5. Add a dated line to the Log listing the releases reviewed and the outcome.
+6. Add a dated line to the Log listing the releases reviewed, the baselines
+   and the outcome.
 
 ## Log
 
@@ -82,3 +95,9 @@ repo's scripts still match them.
   - Checks: `codex-resume --limits` and `--list`, the Swift self-test (80/80)
     and the codex-resume unit tests (59) all pass. The live `--check` and
     `--now` runs are not done yet.
+- 2026-10-20: Baseline. pnpm pins range from 10.29.3 to 12.9.1, three
+  projects are on pnpm 10, and the oldest pnpm 11 pin is 11.1.1. The `pm*`
+  commands pass smoke tests on 10.29.3, 11.1.1, 11.8.0 and 11.28.6; the floor
+  in `AGENTS.md` is 10.29. Node: projects pin 24, except `unleash` (22.17);
+  fnm has 22.23.3 and 24.22.0. Node 22 reaches end-of-life on 2027-04-30.
+  Yarn: `unleash` pins 4.9.2. No project pins Bun or npm.

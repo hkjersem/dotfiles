@@ -1,6 +1,6 @@
 ---
 title: Move the global pnpm default to 12
-status: idea
+status: verifying
 summary: Decide when to switch corepack's global pnpm default from 11 to 12, then check the package-manager scripts against it.
 kind: investigation
 ---
@@ -48,18 +48,27 @@ Release notes: the pnpm 12.0.0 to 12.14.0 GitHub releases.
 ## Decisions
 
 - 2026-10-20: Keep fnm for Node and corepack for package-manager switching.
-  pnpm 12's shims and provisioning are not adopted. (proposed)
+  pnpm 12's shims and provisioning are not adopted. (agreed)
 
-## Open questions
-
-- Switch now, or wait for a few 12.x patch releases?
+- 2026-10-20: Switch now to 12.14.0; it is past the 3-day cooldown and 12.x
+  has had many patch releases. (agreed)
 
 ## Acceptance
 
-- [ ] `pnpm -v` outside a pinned project shows 12.x.
-- [ ] `pmu`, `pmi`, `pmr`, `pmc` and `pma` work in a pnpm workspace with a
+- [x] `pnpm -v` outside a pinned project shows 12.x.
+- [x] `pmu`, `pmi`, `pmr`, `pmc` and `pma` work in a pnpm workspace with a
       catalog.
-- [ ] `bash scripts/audit.sh` shows no pnpm major warning.
-- [ ] In a project with `.nvmrc`, `command -v node` and `node -v` still
+- [x] `bash scripts/audit.sh` shows no pnpm major warning.
+- [x] In a project with `.nvmrc`, `command -v node` and `node -v` still
       resolve through fnm, not a pnpm shim, and `pnpm shim ls` is empty.
-- [ ] `yarn -v` in a project pinning Yarn still resolves through corepack.
+- [x] `yarn -v` in a project pinning Yarn still resolves through corepack.
+
+## Progress
+
+- 2026-10-20: Switched with `corepack install -g pnpm@12.14.0`. In a
+  temporary workspace with a catalog: `pmu --dry-run` and `pmu --yes`
+  updated both catalog entries, `pmi`/`pmr` added and removed a dependency in
+  a workspace package, `pmc --yes` removed an unused catalog entry, and `pma`
+  ran clean. With `.nvmrc` set to 22, `node` resolved to fnm's v22.23.3, and
+  `pnpm shim ls` reported no shims. A project pinning `yarn@4.18.0` ran it
+  through corepack. `audit.sh` reported no issues.

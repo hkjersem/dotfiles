@@ -56,6 +56,12 @@ expect today, and lists changes worth adopting. It covers:
    - VS Code: it reads personal skills from `~/.copilot/skills`,
      `~/.claude/skills` and `~/.agents/skills`. Check whether the Claude
      links make skills appear twice in Chat: Open Customizations.
+   - pnpm (12.11+): `pnpm install` links skills that dependencies ship under
+     `skills/<name>/SKILL.md` into project agent folders such as
+     `.claude/skills`, after `pnpm approve`. The `skills.dirs` setting picks
+     the folders. Check which folders it targets by default, whether it now
+     links without approval or into global folders, and that the links do not
+     end up in Git.
 5. Update third-party skills with `npx -y skills check -g`. Despite its name,
    it installs updates as well as listing them, as `dotfiles-update` does.
    Record which skills changed.

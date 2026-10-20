@@ -33,7 +33,7 @@ favouring portable, auditable changes over one-off fixes on a single machine.
 
 ## Now
 
-_Nothing in progress._
+- [Move the global pnpm default to 12](roadmap/pnpm-12-default.md) · verifying · investigation · Decide when to switch corepack's global pnpm default from 11 to 12, then check the package-manager scripts against it.
 
 ## Next
 
@@ -46,7 +46,6 @@ _Nothing committed._
 
 ## Later
 
-- [Move the global pnpm default to 12](roadmap/pnpm-12-default.md) · idea · investigation · Decide when to switch corepack's global pnpm default from 11 to 12, then check the package-manager scripts against it.
 - [Shell history sync between Macs](roadmap/shell-history-sync.md) · idea · investigation · Merge zsh history between my Macs on demand over the local network, with no cloud service.
 - [Verify the Node 26 LTS switch](roadmap/node-26-lts-switch.md) · planned · investigation · Check that the first dotfiles-update after Node 26 becomes LTS installs it cleanly with corepack, globals and package managers working. · when: Node 26 becomes LTS (planned 2026-10-28) and dotfiles-update has run
 <!-- roadmap:end -->
@@ -62,7 +61,7 @@ _Nothing committed._
 - **codex-resume queue start**: the experimental `thread/queue/start` or `codex queue` could send right away instead of waiting for the app. `--reset` also ignores `rateLimitsByLimitId`. When: next codex-resume change.
 - **Claude skill folders**: make sure the skills audit never touches `~/.claude/skills/synced` or `.trash`. When: before relying on claude.ai skill sync.
 - **COPILOT_HOME warning**: setting it stops Copilot from reading `~/.agents/skills`, so the audit could warn when it is set. When: next time `audit-skills.sh` changes.
-- **Manage agent hooks, MCP and plugins**: Claude, Codex, Copilot and Antigravity all support user-level hooks and MCP. Keep files that hold secrets out of Git. When: a hook or MCP server is wanted on every machine.
+- **Manage agent hooks, MCP and plugins**: Claude, Codex and Copilot all support user-level hooks and MCP. Keep files that hold secrets out of Git. When: a hook or MCP server is wanted on every machine.
 - **Frecency directory jumping**: [zoxide](https://github.com/ajeetdsouza/zoxide) (or similar) jumps to frequently used directories by partial name and works with fzf. It needs a Brewfile entry and an init line in `zsh/conf.d/`. When: anytime.
 - **Per-directory environment**: [direnv](https://direnv.net/) loads environment variables and tokens for each project, and could extend the work/personal split beyond Git identity. It needs a Brewfile entry and `eval "$(direnv hook zsh)"` in `env.zsh`. When: a project needs its own environment variables or tokens.
 
