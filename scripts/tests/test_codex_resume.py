@@ -1,7 +1,7 @@
 """Offline regression tests for codex-resume scheduling."""
 
 from datetime import datetime, timedelta, timezone
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 import importlib.util
 import io
 import json
@@ -14,6 +14,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import MagicMock, call, patch
 
@@ -51,6 +52,22 @@ def seconds(text):
 def shown(moment):
     """Format a fixed moment as the script shows it, in the local time zone, which differs in CI."""
     return f"{datetime.fromisoformat(moment).astimezone():%Y-%m-%d %H:%M}"
+
+
+@contextmanager
+def local_zone(name):
+    """Set the system time zone, which the script uses for the offset of a future local time."""
+    previous = os.environ.get("TZ")
+    os.environ["TZ"] = name
+    time.tzset()
+    try:
+        yield
+    finally:
+        if previous is None:
+            del os.environ["TZ"]
+        else:
+            os.environ["TZ"] = previous
+        time.tzset()
 
 
 FAKE_APP_SERVER = """#!/usr/bin/env python3
@@ -118,7 +135,7 @@ class CodexResumeTests(unittest.TestCase):
             (("23:59", "23.59", "2359"), "2026-10-16T23:59:00+02:00"),
         ):
             for value in formats:
-                with self.subTest(value=value):
+                with self.subTest(value=value), local_zone("Europe/Oslo"):
                     self.assertEqual(
                         codex_resume.next_occurrence(value, now),
                         datetime.fromisoformat(expected),
@@ -126,17 +143,29 @@ class CodexResumeTests(unittest.TestCase):
 
     def test_next_occurrence_uses_today_if_time_is_ahead(self):
         now = datetime.fromisoformat("2026-10-16T13:00:00+02:00")
-        self.assertEqual(
-            codex_resume.next_occurrence("16:30", now),
-            datetime.fromisoformat("2026-10-16T16:30:00+02:00"),
-        )
+        with local_zone("Europe/Oslo"):
+            self.assertEqual(
+                codex_resume.next_occurrence("16:30", now),
+                datetime.fromisoformat("2026-10-16T16:30:00+02:00"),
+            )
 
     def test_next_occurrence_moves_elapsed_time_to_tomorrow(self):
         now = datetime.fromisoformat("2026-10-16T16:30:00+02:00")
-        self.assertEqual(
-            codex_resume.next_occurrence("16:30", now),
-            datetime.fromisoformat("2026-10-17T16:30:00+02:00"),
-        )
+        with local_zone("Europe/Oslo"):
+            self.assertEqual(
+                codex_resume.next_occurrence("16:30", now),
+                datetime.fromisoformat("2026-10-17T16:30:00+02:00"),
+            )
+
+    def test_next_occurrence_keeps_the_local_time_across_a_daylight_saving_change(self):
+        with local_zone("Europe/Oslo"):
+            for now, expected in (
+                ("2026-10-24T23:00:00+02:00", "2026-10-25T09:00:00+01:00"),
+                ("2026-03-28T23:00:00+01:00", "2026-03-29T09:00:00+02:00"),
+            ):
+                with self.subTest(now=now):
+                    self.assertEqual(codex_resume.next_occurrence("09:00", datetime.fromisoformat(now)),
+                                     datetime.fromisoformat(expected))
 
     def test_scheduled_wait_targets_three_seconds_after_requested_minute(self):
         target = "2026-10-16T16:30:00+02:00"
@@ -547,13 +576,12 @@ class CodexResumeTests(unittest.TestCase):
     def test_scheduled_message_is_stored_shown_and_used_for_every_attempt(self):
         with tempfile.TemporaryDirectory() as temporary:
             plist_path = Path(temporary) / "com.hkjersem.codex-resume.plist"
-            now = datetime.fromisoformat("2026-10-16T13:00:00+02:00")
             output = io.StringIO()
             with (
                 patch.object(codex_resume, "PLIST_PATH", plist_path),
                 patch.object(codex_resume, "LOG_PATH", Path(temporary) / "log"),
                 patch.object(codex_resume, "next_occurrence",
-                              return_value=codex_resume.next_occurrence("16:30", now)),
+                              return_value=datetime.fromisoformat("2026-10-16T16:30:00+02:00")),
                 patch.object(codex_resume, "launchctl"),
                 redirect_stdout(output),
             ):
@@ -1351,13 +1379,12 @@ class CodexResumeTests(unittest.TestCase):
     def test_start_window_is_stored_shown_and_needs_time_or_now(self):
         with tempfile.TemporaryDirectory() as temporary:
             plist_path = Path(temporary) / "job.plist"
-            now = datetime.fromisoformat("2026-10-19T20:00:00+02:00")
             output = io.StringIO()
             with (
                 patch.object(codex_resume, "PLIST_PATH", plist_path),
                 patch.object(codex_resume, "LOG_PATH", Path(temporary) / "log"),
                 patch.object(codex_resume, "next_occurrence",
-                             return_value=codex_resume.next_occurrence("00:00", now)),
+                             return_value=datetime.fromisoformat("2026-10-20T00:00:00+02:00")),
                 patch.object(codex_resume, "launchctl"),
                 patch.object(codex_resume, "start_window_skip_reason") as check,
                 redirect_stdout(output),

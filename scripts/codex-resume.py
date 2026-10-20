@@ -112,7 +112,7 @@ on the new allowance elsewhere and it stops without sending. At the reset time
 it sends unless that is the case, also when the limits cannot be read.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, time as dt_time, timedelta
 import argparse
 import json
 import os
@@ -188,9 +188,10 @@ def next_occurrence(clock_text, now=None):
         )
     now = now or datetime.now().astimezone()
     hour, minute = (int(part) for part in match.groups())
-    scheduled = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    # A naive wall-clock time takes the system zone's offset for its own date, which a DST change can differ from.
+    scheduled = datetime.combine(now.date(), dt_time(hour, minute)).astimezone()
     if scheduled <= now:
-        scheduled += timedelta(days=1)
+        scheduled = datetime.combine(now.date() + timedelta(days=1), dt_time(hour, minute)).astimezone()
     return scheduled
 
 
