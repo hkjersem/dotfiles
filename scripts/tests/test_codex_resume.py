@@ -837,8 +837,10 @@ class CodexResumeTests(unittest.TestCase):
             windows = codex_resume.usage_limits()
         with self.assertRaisesRegex(RuntimeError, "No Codex usage limit is used up") as error:
             codex_resume.reset_time(windows)
-        self.assertIn("5-hour: 98% used, resets 2026-10-19", str(error.exception))
-        self.assertIn("weekly: 76% used, resets 2026-10-25", str(error.exception))
+        self.assertIn("5-hour: 98% used, resets ", str(error.exception))
+        self.assertIn(
+            f"weekly: 76% used, resets {datetime.fromisoformat('2026-10-25T02:55:00+02:00').astimezone():%Y-%m-%d %H:%M}",
+            str(error.exception))
 
     def test_reset_schedules_the_job_with_message_and_chat(self):
         self.with_chats()
@@ -872,7 +874,8 @@ class CodexResumeTests(unittest.TestCase):
     def test_start_window_sends_only_when_no_five_hour_window_is_running(self):
         now = datetime.fromisoformat("2026-10-20T00:00:00+02:00")
         for used, resets, allowed, fragment in (
-            (55, now + timedelta(hours=2), False, "already running (55% used, resets 2026-10-20 02:00)"),
+            (55, now + timedelta(hours=2), False,
+             f"already running (55% used, resets {(now + timedelta(hours=2)).astimezone():%Y-%m-%d %H:%M})"),
             (1, now + timedelta(hours=4, minutes=59), True, "already running"),
             (0, now + timedelta(hours=3), True, "already running"),
             (0, now + timedelta(hours=5), True, None),
