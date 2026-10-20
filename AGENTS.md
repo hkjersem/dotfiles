@@ -111,6 +111,12 @@ These rules have been broken before and are checked by `scripts/tests/test_repo_
 | No hardcoded `/Users/<name>` paths | `test_no_hardcoded_home_paths` |
 | Repo-authored skills do not reference this repository | `test_repo_authored_skills_do_not_reference_this_repository` |
 
+## Roadmap
+
+Planned work and recurring reviews live in [ROADMAP.md](ROADMAP.md). Each item's
+brief in `roadmap/` is self-contained; read it before working on the item. A
+listed item does not authorise implementing it.
+
 ## Testing
 
 - See [README testing instructions](README.md#testing) for prerequisites and suite commands. Run relevant suites from the repository root; shell regression tests must exercise `/bin/bash`, not only a newer Homebrew Bash.
