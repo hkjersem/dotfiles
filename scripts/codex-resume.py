@@ -461,7 +461,10 @@ def still_queued(chat, item):
 
 def chat_log(chat):
     """The session log the app writes for a chat on this Mac, or None when it cannot be found."""
-    found = list((CODEX_HOME / "sessions").glob(f"*/*/*/rollout-*-{chat['id']}.jsonl"))
+    # A reverted chat keeps its id but continues in a new log named <id>_<log id>.
+    sessions = CODEX_HOME / "sessions"
+    found = [*sessions.glob(f"*/*/*/rollout-*-{chat['id']}.jsonl"),
+             *sessions.glob(f"*/*/*/rollout-*-{chat['id']}_*.jsonl")]
     return max(found, key=lambda path: path.stat().st_mtime) if found else None
 
 

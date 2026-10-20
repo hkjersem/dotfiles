@@ -1054,6 +1054,16 @@ class CodexResumeTests(unittest.TestCase):
         self.assertEqual([call[0] for call in calls], ["thread/queue/add"])
         self.assertIn("queued the message, and the app sends it when the reply ends", output.getvalue())
 
+    def test_reply_in_a_reverted_chats_new_log_counts_as_in_progress(self):
+        self.fake_queue([self.queued()])
+        self.write_session_log("task_started", "task_complete", age=3600)
+        reverted = codex_resume.CODEX_HOME / "sessions/2026/10/20/rollout-2026-10-20T11-00-00-01a1-mine_01a2-new.jsonl"
+        reverted.write_text(json.dumps({"type": "event_msg", "payload": {"type": "task_started"}}) + "\n")
+        other = codex_resume.CODEX_HOME / "sessions/2026/10/20/rollout-2026-10-20T11-00-00-01a1-mine2.jsonl"
+        other.write_text("")
+        self.assertEqual(codex_resume.chat_log(self.LOCAL_CHAT), reverted)
+        self.assertTrue(codex_resume.replying(self.LOCAL_CHAT))
+
     def test_reply_counts_as_in_progress_only_when_started_unended_and_recent(self):
         self.fake_queue([self.queued()])
         self.assertFalse(codex_resume.replying(self.LOCAL_CHAT))
