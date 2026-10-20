@@ -100,11 +100,20 @@ RECURSIVE_FLAG=""
 
 OUTDATED=$(pnpm outdated $RECURSIVE_FLAG --json 2>/dev/null || true)
 [[ -z "$OUTDATED" ]] && OUTDATED="{}"
+# pnpm 11.28+ keys a package found at several versions or dependency types as
+# "name@version (dev)"; collapse to one entry per name, keeping the oldest current.
 # pnpm outdated reports "wanted" and "latest" but not "current".
 # For this wrapper, "wanted" is the relevant baseline for update planning.
 OUTDATED=$(echo "$OUTDATED" | jq '
+  def base_name: sub(" \\([^)]*\\)$"; "") | if test("^@?[^@]+@[^@]+$") then sub("@[^@]+$"; "") else . end;
+  def version_key: (.current // .wanted // "") | split("-")[0] | split(".") | map(tonumber? // 0);
   if type == "object" then
-    with_entries(
+    to_entries
+    | map(.key |= base_name)
+    | group_by(.key)
+    | map(min_by(.value | version_key))
+    | from_entries
+    | with_entries(
       .value |= if ((.current // "") == "") then
         . + { current: (.wanted // .latest // "") }
       else

@@ -117,6 +117,25 @@ class PackageUpdateTests(unittest.TestCase):
         self.assertNotIn("unbound variable", result.stderr)
         self.assertNotIn("invalid option", result.stderr)
 
+    def test_pnpm_versioned_outdated_keys_map_to_package_names(self):
+        self.package("ms", latest="2.1.3", current="2.0.0")
+        self.package("@scope/pkg", latest="1.2.0", current="1.0.0")
+        # Key shapes from pnpm 11.28.5 `outdated --recursive --json` with duplicates.
+        self.fixture["outdated"] = {
+            "ms@2.1.1": {"current": "2.1.1", "wanted": "2.1.1", "latest": "2.1.3"},
+            "ms@2.0.0 (dev)": {"current": "2.0.0", "wanted": "2.0.0", "latest": "2.1.3"},
+            "@scope/pkg@1.0.0 (dev)": {"current": "1.0.0", "wanted": "1.0.0", "latest": "1.2.0"},
+        }
+        self.manifest("pnpm", {"ms": "2.0.0", "@scope/pkg": "1.0.0"})
+        result = self.invoke("--dry-run")
+        self.assert_success(result)
+        self.assertIn("2.0.0", result.stdout)
+        self.assertIn("2.1.3", result.stdout)
+        self.assertIn("@scope/pkg", result.stdout)
+        self.assertNotIn("ms@", result.stdout)
+        self.assertNotIn("(dev)", result.stdout)
+        self.assertNotIn(["npm", ["view", "ms@2.1.1", "version"]], self.calls("npm"))
+
     def test_dry_run_with_scoped_package_on_all_managers(self):
         self.package("@scope/pkg")
         for pm in ("npm", "pnpm", "bun"):
