@@ -28,7 +28,9 @@ repository or chat is meant, ask before running.
 
 Match the request by command name or by task. Other dotfiles commands are not
 covered: say so rather than guessing a script. Read the reference before the
-first run in a conversation; each script also takes `--help`.
+first run in a conversation; each script also takes `--help`. Read the
+matching doc in `~/.dotfiles/docs/` only when explaining how a command works,
+interpreting unexpected output, or when the reference does not cover the case.
 
 ## Rules
 
