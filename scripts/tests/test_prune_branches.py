@@ -404,6 +404,50 @@ class PruneBranchesTests(unittest.TestCase):
             result = self.run_prune(*args)
             self.assertIn("already in origin/main", result.stdout, args)
 
+    def test_merged_branch_whose_remote_branch_still_exists_is_reported_but_kept(self):
+        self.pushed_branch("merged-kept")
+        self.pushed_branch("open")
+        self.git(self.other, "fetch", "-q")
+        self.git(self.other, "merge", "-q", "--no-edit", "origin/merged-kept")
+        self.git(self.other, "push", "-q", "origin", "main")
+
+        result = self.run_prune("--apply", "--yes")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("merged into origin/main, but origin/merged-kept still exists", result.stdout)
+        self.assertNotIn("open", result.stdout.split("── Summary")[0])
+        self.assertRegex(result.stdout, r"Checked +3 local branch\(es\) in 1 repository")
+        self.assertNotIn("To delete", result.stdout)
+        self.assertEqual(self.branches(), {"main", "merged-kept", "open"})
+
+        worktree = self.root / "wt-merged-kept"
+        self.git(self.work, "worktree", "add", "-q", str(worktree), "merged-kept")
+        dry = self.run_prune("--include-merged")
+        self.assertIn("merged into origin/main; origin/merged-kept is kept", dry.stdout)
+        self.assertIn("prune_branches --apply --include-merged", dry.stdout)
+        self.assertEqual(self.branches(), {"main", "merged-kept", "open"})
+
+        applied = self.run_prune("--apply", "--yes", "--include-merged")
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        self.assertEqual(self.branches(), {"main", "open"})
+        self.assertFalse(worktree.exists())
+        self.assertIn("merged-kept", self.git(self.root, "--git-dir", str(self.origin), "branch"))
+
+    def test_include_merged_requires_default_ref_to_match_the_remote(self):
+        base = self.git(self.work, "rev-parse", "main")
+        self.pushed_branch("feature")
+        self.git(self.other, "fetch", "-q")
+        self.git(self.other, "merge", "-q", "--no-edit", "origin/feature")
+        self.git(self.other, "push", "-q", "origin", "main")
+        self.git(self.work, "fetch", "-q")
+        # The merge is undone on the remote, and origin/main is no longer fetched.
+        self.git(self.other, "push", "-q", "-f", "origin", base + ":refs/heads/main", base + ":refs/heads/feature")
+        self.git(self.work, "config", "remote.origin.fetch", "+refs/heads/feature:refs/remotes/origin/feature")
+
+        result = self.run_prune("--apply", "--yes", "--include-merged")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("origin/main does not match the remote", result.stdout)
+        self.assertIn("feature", self.branches())
+
     def test_pushed_but_unmerged_branch_is_kept_for_review(self):
         self.pushed_branch("abandoned")
         self.pushed_branch("moved")

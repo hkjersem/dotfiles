@@ -3,7 +3,7 @@
 # prune-branches.sh — remove local branches whose remote branch was deleted,
 # together with their clean linked worktrees. Dry run unless --apply is given.
 #
-# Usage: prune_branches [--apply [--yes]] [--no-fetch] [--depth N] [path]
+# Usage: prune_branches [--apply [--yes]] [--include-merged] [--no-fetch] [--depth N] [path]
 
 set -uo pipefail
 
@@ -34,6 +34,9 @@ that repository is checked; otherwise repositories are found recursively.
 Options:
   --apply          Delete after showing the plan and asking for confirmation
   --yes, -y        With --apply, skip the confirmation prompt
+  --include-merged Also delete local branches already merged into the remote's
+                   default branch whose remote branch still exists (the remote
+                   branch is kept)
   --no-fetch       Use existing remote-tracking refs (read-only; not with --apply)
   --depth N        Directory depth to search for repositories (default: 4)
   --stale-days N   Report never-pushed or untracked branches older than N days (default: 90)
@@ -58,6 +61,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --apply) APPLY=true; shift ;;
     --yes|-y) AUTO_YES=true; shift ;;
+    --include-merged) SB_INCLUDE_MERGED=true; shift ;;
     --no-fetch) FETCH=false; shift ;;
     --depth|--stale-days|--jobs|--timeout)
       [[ $# -ge 2 ]] || { echo "Missing value for $1" >&2; exit 1; }
@@ -145,6 +149,7 @@ repo_name() {
 # ── Snapshot, fetch, classify ─────────────────────────────────────────────────
 
 STATUS=()
+N_CHECKED=0
 for i in "${!REPOS[@]}"; do
   SB_GIT_DIR=${REPOS[$i]}
   if sb_has_remote; then
@@ -178,6 +183,7 @@ for i in "${!REPOS[@]}"; do
   SB_GIT_DIR=${REPOS[$i]}
   SB_TMP=$TMP/scratch
   sb_classify "$TMP/$i.snapshot" "$TMP/$i.failed" "$TMP/$i.requests" > "$TMP/$i.plan"
+  N_CHECKED=$((N_CHECKED + $(sb_git for-each-ref --format=x refs/heads 2>/dev/null | wc -l)))
 done
 
 # ── Report ────────────────────────────────────────────────────────────────────
@@ -246,12 +252,18 @@ summary_row() { printf '  %s %-22s %s\n' "$1" "$2" "$3"; }
 
 echo ""
 echo "${BOLD}── Summary ──────────────────────────────────${RESET}"
-summary_row "${RED}✂${RESET} " "To delete" "$N_DELETE branch(es), $N_DELETE_WT with a worktree"
+N_WITH_REMOTE=$(( ${#REPOS[@]} - ${#NO_REMOTE[@]} ))
+summary_row "🔍" "Checked" "$N_CHECKED local branch(es) in $N_WITH_REMOTE repositor$( [[ "$N_WITH_REMOTE" -eq 1 ]] && echo y || echo ies) with a remote"
+if [[ "$N_DELETE" -gt 0 ]]; then
+  detail="$N_DELETE branch(es)"
+  [[ "$N_DELETE_WT" -gt 0 ]] && detail+=", $N_DELETE_WT with a worktree"
+  summary_row "${RED}✂${RESET} " "To delete" "$detail"
+fi
 [[ "$N_BLOCKED" -gt 0 ]] && summary_row "🟠" "Blocked by worktree" "$N_BLOCKED (uncommitted changes, ignored local files, locked, or checked out)"
 [[ "$N_REVIEW" -gt 0 ]] && summary_row "🟡" "Needs review" "$N_REVIEW (upstream gone, but commits not confirmed on a remote)"
 [[ "$N_UNVERIFIED" -gt 0 ]] && summary_row "⚪" "Unverified" "$N_UNVERIFIED (remote could not be fetched)"
-[[ "$N_HINT" -gt 0 ]] && summary_row "${CYAN}ℹ${RESET} " "Looks stale (kept)" "$N_HINT"
-[[ "$N_CLEAN" -gt 0 ]] && summary_row "✅" "Nothing to prune" "$N_CLEAN repositor$( [[ "$N_CLEAN" -eq 1 ]] && echo y || echo ies)"
+[[ "$N_HINT" -gt 0 ]] && summary_row "${CYAN}ℹ${RESET} " "Kept, looks stale" "$N_HINT (merged or old, but not prunable; see above)"
+[[ "$N_CLEAN" -gt 0 ]] && summary_row "✅" "Nothing to report" "$N_CLEAN repositor$( [[ "$N_CLEAN" -eq 1 ]] && echo y || echo ies)"
 if [[ ${#NO_REMOTE[@]} -gt 0 ]]; then
   list="${NO_REMOTE[0]}"
   for ((j = 1; j < ${#NO_REMOTE[@]} && j < 5; j++)); do list+=", ${NO_REMOTE[$j]}"; done
@@ -266,12 +278,18 @@ STATUS_CODE=0
 
 if [[ "$N_DELETE" -eq 0 ]]; then
   echo ""
-  echo "Nothing to delete."
+  if [[ "$SB_INCLUDE_MERGED" == true ]]; then
+    echo "Nothing to delete."
+  else
+    echo "Nothing to delete. ${DIM}Only branches whose remote branch was deleted are pruned, unless --include-merged is given.${RESET}"
+  fi
   exit "$STATUS_CODE"
 fi
 if ! $APPLY; then
   echo ""
-  echo "Dry run — nothing was changed. Run ${BOLD}prune_branches --apply${RESET} to delete."
+  apply_cmd="prune_branches --apply"
+  [[ "$SB_INCLUDE_MERGED" == true ]] && apply_cmd+=" --include-merged"
+  echo "Dry run — nothing was changed. Run ${BOLD}${apply_cmd}${RESET} to delete."
   exit "$STATUS_CODE"
 fi
 

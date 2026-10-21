@@ -12,6 +12,7 @@
 SB_SEP=$'\x1f'
 SB_PROTECTED="main master develop development trunk"
 SB_STALE_DAYS="${SB_STALE_DAYS:-90}"
+SB_INCLUDE_MERGED="${SB_INCLUDE_MERGED:-false}"
 SB_FETCH_TIMEOUT="${SB_FETCH_TIMEOUT:-60}"
 SB_PATCH_ID_LIMIT=1000
 SB_INVOKING_TOP=""
@@ -430,38 +431,64 @@ sb_classify() {
       fi
       continue
     fi
-    [[ "$upstream" == refs/remotes/* && "$track" == gone ]] || continue
-
-    if sb_is_protected "$branch"; then
-      sb_record review "$branch" "$sha" "protected branch; upstream ${upstream#refs/remotes/} is gone" "$wt_path"
-      continue
-    fi
-    if ! sb_git config --get "remote.$remotename.url" >/dev/null 2>&1; then
-      sb_record review "$branch" "$sha" "remote '$remotename' is no longer configured" "$wt_path"
-      continue
-    fi
-    if [[ -n "$failed_file" && -f "$failed_file" ]] && grep -qxF "$remotename" "$failed_file"; then
-      sb_record unverified "$branch" "$sha" "could not fetch $remotename" "$wt_path"
-      continue
-    fi
-    if [[ "${remoteref#refs/heads/}" != "$branch" ]]; then
-      sb_record review "$branch" "$sha" "tracked ${upstream#refs/remotes/}, not its own remote branch" "$wt_path"
-      continue
-    fi
-
-    if ! evidence=$(sb_safe_evidence "$sha" "$remotename" "$request_file"); then
-      if sb_was_pushed "$branch" "$sha" "$remotename" "$snapshot_file"; then
-        detail="was pushed to $remotename/$branch, but is not merged or in a pull request"
-      else
-        unique=$(sb_git rev-list --count "$sha" --not --remotes 2>/dev/null) || unique="?"
-        detail="upstream gone; $unique commit(s) not found on any remote"
+    [[ "$upstream" == refs/remotes/* ]] || continue
+    if [[ "$track" != gone ]]; then
+      # Merged pull requests whose remote branch was not deleted are only deleted with --include-merged.
+      [[ "${remoteref#refs/heads/}" == "$branch" ]] && ! sb_is_protected "$branch" \
+        && ref=$(sb_default_ref "$remotename" 2>/dev/null) \
+        && sb_git merge-base --is-ancestor "$sha" "$ref" 2>/dev/null || continue
+      if [[ "$SB_INCLUDE_MERGED" != true ]]; then
+        sb_record hint "$branch" "$sha" \
+          "merged into ${ref#refs/remotes/}, but ${upstream#refs/remotes/} still exists (prune_branches --include-merged deletes the local branch)" \
+          "$wt_path"
+        continue
       fi
-      if [[ -n "$wt" && "$wt" -ne 0 ]]; then
-        dirt=$(sb_worktree_dirt "$wt_path")
-        [[ -n "$dirt" ]] && detail+="; worktree has $dirt"
+      if [[ -n "$failed_file" && -f "$failed_file" ]] && grep -qxF "$remotename" "$failed_file"; then
+        sb_record unverified "$branch" "$sha" "could not fetch $remotename" "$wt_path"
+        continue
       fi
-      sb_record review "$branch" "$sha" "$detail" "$wt_path"
-      continue
+      # The default ref may be stale (for example outside the fetch refspec), so
+      # it must match what the remote advertised during this run's fetch.
+      if [[ -n "$request_file" && -f "$request_file" ]] \
+          && ! awk -F "$SB_SEP" -v r="$remotename" -v s="$(sb_git rev-parse -q --verify "$ref")" \
+            -v h="refs/heads/${ref#refs/remotes/"$remotename"/}" \
+            '$1 == r && $2 == s && $3 == h { found = 1 } END { exit !found }' "$request_file"; then
+        sb_record unverified "$branch" "$sha" "${ref#refs/remotes/} does not match the remote; fetch it to confirm the merge" "$wt_path"
+        continue
+      fi
+      evidence="merged into ${ref#refs/remotes/}; ${upstream#refs/remotes/} is kept"
+    else
+      if sb_is_protected "$branch"; then
+        sb_record review "$branch" "$sha" "protected branch; upstream ${upstream#refs/remotes/} is gone" "$wt_path"
+        continue
+      fi
+      if ! sb_git config --get "remote.$remotename.url" >/dev/null 2>&1; then
+        sb_record review "$branch" "$sha" "remote '$remotename' is no longer configured" "$wt_path"
+        continue
+      fi
+      if [[ -n "$failed_file" && -f "$failed_file" ]] && grep -qxF "$remotename" "$failed_file"; then
+        sb_record unverified "$branch" "$sha" "could not fetch $remotename" "$wt_path"
+        continue
+      fi
+      if [[ "${remoteref#refs/heads/}" != "$branch" ]]; then
+        sb_record review "$branch" "$sha" "tracked ${upstream#refs/remotes/}, not its own remote branch" "$wt_path"
+        continue
+      fi
+
+      if ! evidence=$(sb_safe_evidence "$sha" "$remotename" "$request_file"); then
+        if sb_was_pushed "$branch" "$sha" "$remotename" "$snapshot_file"; then
+          detail="was pushed to $remotename/$branch, but is not merged or in a pull request"
+        else
+          unique=$(sb_git rev-list --count "$sha" --not --remotes 2>/dev/null) || unique="?"
+          detail="upstream gone; $unique commit(s) not found on any remote"
+        fi
+        if [[ -n "$wt" && "$wt" -ne 0 ]]; then
+          dirt=$(sb_worktree_dirt "$wt_path")
+          [[ -n "$dirt" ]] && detail+="; worktree has $dirt"
+        fi
+        sb_record review "$branch" "$sha" "$detail" "$wt_path"
+        continue
+      fi
     fi
 
     if busy=$(sb_busy_for_branch "$branch"); then

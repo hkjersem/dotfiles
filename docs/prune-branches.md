@@ -11,6 +11,13 @@ contained in a branch the remote still advertises, or rebased or
 squash-merged into the remote's default branch so that merging it would
 change nothing.
 
+With `--include-merged`, a branch whose same-named remote branch still exists
+is also deleted when its commit is already in the remote's default branch
+after the fetch, as after a merge-commit or fast-forward pull request. Only
+the local branch (and its clean worktree) is removed; the remote branch is
+kept. Squash-merged or rebased branches whose remote branch still exists are
+not detected this way.
+
 Anything else is listed for review, including branches that were pushed but
 then deleted on the remote without being merged, since your copy may be the
 last one. Branches that were never pushed, repositories without a remote,
@@ -30,9 +37,11 @@ checked-out worktrees, and branches with a rebase or bisect in progress.
 
 Detached worktrees are never removed; clean ones whose commit is already on a
 remote are reported as looking stale, together with never-pushed or untracked
-branches older than `--stale-days` (default 90). A branch without an upstream
-that exists on a remote under the same name is shown as not tracking it, with
-how far it is ahead or behind.
+branches older than `--stale-days` (default 90), and branches already merged
+into the default branch whose remote branch still exists (pass
+`--include-merged` or delete the remote branch to prune them). A branch
+without an upstream that exists on a remote under the same name is shown as
+not tracking it, with how far it is ahead or behind.
 
 ## Records and recovery
 

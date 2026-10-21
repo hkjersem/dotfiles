@@ -172,13 +172,17 @@ worktree it checks that repository; elsewhere it searches subdirectories
 ```sh
 prune_branches                    # dry run: fetch, then show the plan
 prune_branches --apply            # show the plan, ask, then delete
+prune_branches --include-merged   # also merged branches whose remote branch still exists
 prune_branches --no-fetch ~/Developer   # read-only, uses the last fetch
 ```
 
 A branch is deleted only when its remote branch is gone and its commits are
 confirmed on the remote, for example through a merged pull request. Anything
-uncertain is listed for review instead. Never-pushed branches, repositories
-without a remote, and protected names such as `main` are never deleted. A
+uncertain is listed for review instead. With `--include-merged`, local
+branches already merged into the default branch are deleted too, even when
+their remote branch still exists; the remote branch is kept. Never-pushed
+branches, repositories without a remote, and protected names such as `main`
+are never deleted. A
 branch's linked worktree is removed first, and only when it has no
 uncommitted changes or unique commits; ignored generated artifacts such as
 `node_modules/` are discarded with it.
