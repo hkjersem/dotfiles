@@ -3,6 +3,7 @@
 from datetime import datetime, timedelta, timezone
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 import importlib.util
+import fcntl
 import io
 import json
 import os
@@ -1000,6 +1001,264 @@ class CodexResumeTests(unittest.TestCase):
         os.utime(path, (written, written))
 
     LOCAL_CHAT = {"id": "01a1-mine", "name": "Find current project status", "cwd": "/work/myntr", "host": None}
+
+    def limit_stop(self, turn):
+        return {"type": "task_complete", "turn_id": turn,
+                "error": {"message": "You've hit your usage limit.", "codex_error_info": "usage_limit_exceeded"}}
+
+    def test_stuck_chat_is_one_whose_latest_replies_all_stopped_at_a_usage_limit(self):
+        self.fake_queue([self.queued()])
+        first, last = (datetime.fromisoformat(moment) for moment in ("2026-10-20T19:00:00+02:00",
+                                                                     "2026-10-20T19:30:00+02:00"))
+        self.write_session_log("task_started", "task_complete", stamped=first - timedelta(hours=1))
+        self.write_session_log("task_started", self.limit_stop("t1"), stamped=first)
+        self.assertEqual(codex_resume.stuck_at_limit(self.LOCAL_CHAT), {"closed": first, "stopped": first})
+        # Messages sent while the limit is used up stop at it too; the chat stays stuck since the first stop.
+        self.write_session_log("task_started", self.limit_stop("t2"), stamped=last)
+        self.assertEqual(codex_resume.stuck_at_limit(self.LOCAL_CHAT), {"closed": first, "stopped": last})
+        # After a resume, only later stops count: the resumed reply hitting the limit again is a new stop.
+        resumed = first + timedelta(minutes=10)
+        self.assertEqual(codex_resume.stuck_at_limit(self.LOCAL_CHAT, resumed), {"closed": last, "stopped": last})
+        self.assertIsNone(codex_resume.stuck_at_limit(self.LOCAL_CHAT, last + timedelta(seconds=1)))
+        self.write_session_log("task_started")
+        self.assertIsNone(codex_resume.stuck_at_limit(self.LOCAL_CHAT))
+        self.write_session_log("task_complete")
+        self.assertIsNone(codex_resume.stuck_at_limit(self.LOCAL_CHAT))
+        self.write_session_log("task_started", self.limit_stop("t3"), "turn_aborted")
+        self.assertIsNone(codex_resume.stuck_at_limit(self.LOCAL_CHAT))
+        self.write_session_log({"type": "task_complete", "error": {"codex_error_info": "server_error"}})
+        self.assertIsNone(codex_resume.stuck_at_limit(self.LOCAL_CHAT))
+        self.write_session_log(self.limit_stop("t4"), stamped=last)
+        self.assertEqual(codex_resume.stuck_at_limit(self.LOCAL_CHAT), {"closed": last, "stopped": last})
+        # A stamp without a time zone cannot be compared with the others, so it counts as unreadable.
+        self.assertIsNone(codex_resume.record_time({"timestamp": "2026-10-20T20:00:00"}))
+        self.assertFalse(codex_resume.written_since({"timestamp": "2026-10-20T20:00:00"}, first))
+        self.assertEqual(codex_resume.record_time({"timestamp": "2026-10-20T18:00:00Z"}), first + timedelta(hours=1))
+        self.assertIsNone(codex_resume.stuck_at_limit({**self.LOCAL_CHAT, "id": "01a1-unknown"}))
+
+    def test_stuck_chats_are_local_recent_and_stopped_near_the_latest_limit_newest_first(self):
+        now = datetime.fromisoformat("2026-10-27T10:00:00+02:00")
+        closed = now - timedelta(days=6)
+        chats = {
+            "older": (closed, closed + timedelta(hours=2)),
+            "latest": (closed + timedelta(hours=3), closed + timedelta(hours=3)),
+            "edge": (closed - timedelta(hours=21), closed - timedelta(hours=21)),
+            "earlier-limit": (closed - timedelta(hours=22), closed),
+            "remote": (closed, closed + timedelta(hours=5)),
+            "stale": (closed, closed + timedelta(hours=5)),
+            "fine": None,
+        }
+        catalogue = [{"id": name, "name": name, "host": "mini" if name == "remote" else None,
+                      "updated": now - timedelta(days=9 if name == "stale" else 5)} for name in chats]
+
+        def stuck(chat, since):
+            self.assertIsNone(since)
+            self.assertIsNone(chat["host"])
+            self.assertNotEqual(chat["id"], "stale")
+            times = chats[chat["id"]]
+            return times and {"run": chat["id"], "closed": times[0], "stopped": times[1]}
+
+        with (patch.object(codex_resume, "load_chats", return_value=catalogue),
+              patch.object(codex_resume, "stuck_at_limit", side_effect=stuck)):
+            found = codex_resume.stuck_chats(now)
+        self.assertEqual([chat["id"] for chat in found], ["latest", "older", "edge"])
+        self.assertEqual(found[0]["name"], "latest")
+
+    def recurring(self, chats, allowed=True, state=None, queued=True, now="2026-10-21T10:00:00+02:00",
+                  stopped="2026-10-21T01:00:00+02:00"):
+        """Run one recurring check with chats stuck since stopped; return the chats it resumed, what it printed,
+        and the state it saved."""
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        state_path = Path(temporary.name) / "state/recurring.json"
+        if state is not None:
+            state_path.parent.mkdir()
+            state_path.write_text(state if isinstance(state, str) else json.dumps(state))
+        resumed = []
+
+        def resume(chat, message, stamp, fallback):
+            self.assertIsNone(message)
+            self.assertFalse(fallback)
+            # The resume is recorded before anything is queued, so a crash cannot send it twice.
+            self.assertEqual(json.loads(state_path.read_text())["resumed"][chat["id"]], now)
+            resumed.append(chat["id"])
+            return queued
+
+        def stuck(moment, since):
+            # As the real one does, stops before a chat's last resume do not count.
+            stop = datetime.fromisoformat(stopped)
+            return [{**self.LOCAL_CHAT, "id": name, "name": name, "stopped": stop}
+                    for name in chats if name not in since or since[name] < stop]
+
+        with (patch.object(codex_resume, "RECURRING_STATE_PATH", state_path),
+              patch.object(codex_resume, "stuck_chats", side_effect=stuck),
+              patch.object(codex_resume, "usage_allowed", return_value=allowed) as usage,
+              patch.object(codex_resume, "resume_through_queue", side_effect=resume),
+              patch.object(codex_resume, "log_stamp", return_value="[stamp] "),
+              redirect_stdout(io.StringIO()) as output):
+            self.usage = usage
+            codex_resume.recurring_check(datetime.fromisoformat(now))
+        return resumed, output.getvalue(), json.loads(state_path.read_text())
+
+    def test_recurring_check_resumes_up_to_three_stuck_chats_once_per_stop(self):
+        resumed, output, state = self.recurring(["a", "b", "c", "d"])
+        self.assertEqual(resumed, ["a", "b", "c"])
+        self.assertEqual(output.splitlines()[0], f"[stamp] Chat 'a' stopped at a usage limit "
+                                                 f"{shown('2026-10-21T01:00:00+02:00')}; resuming it.")
+        self.assertEqual(state["checked"], "2026-10-21T10:00:00+02:00")
+        self.assertEqual(sorted(state["resumed"]), ["a", "b", "c"])
+        # Within five hours the cap is spent; later, the next chat gets its turn, but never a resumed one again.
+        self.assertEqual(self.recurring(["a", "d"], state=state, now="2026-10-21T14:59:00+02:00")[0], [])
+        resumed, _, state = self.recurring(["a", "d"], state=state, now="2026-10-21T15:01:00+02:00")
+        self.assertEqual(resumed, ["d"])
+        self.assertEqual(self.recurring(["a", "b", "d"], state=state, now="2026-10-22T10:00:00+02:00")[0], [])
+        # A limit stop after their resumes makes chats due again.
+        self.assertEqual(self.recurring(["a", "b"], state=state, now="2026-10-22T10:00:00+02:00",
+                                        stopped="2026-10-21T12:00:00+02:00")[0], ["a", "b"])
+
+    def test_recurring_check_resumes_a_chat_again_after_its_resumed_reply_hits_the_limit(self):
+        self.fake_queue([self.queued()])
+        chat = {**self.LOCAL_CHAT, "updated": datetime.fromisoformat("2026-10-21T12:00:00+02:00")}
+        self.write_session_log("task_started", self.limit_stop("t1"),
+                               stamped=datetime.fromisoformat("2026-10-21T01:00:00+02:00"))
+        state_path = codex_resume.CODEX_HOME / "recurring.json"
+        sent = []
+        with (patch.object(codex_resume, "RECURRING_STATE_PATH", state_path),
+              patch.object(codex_resume, "load_chats", return_value=[chat]),
+              patch.object(codex_resume, "usage_allowed", return_value=True),
+              patch.object(codex_resume, "resume_through_queue",
+                           side_effect=lambda chat, *_, **__: sent.append(chat["id"]) or True),
+              redirect_stdout(io.StringIO())):
+            codex_resume.recurring_check(datetime.fromisoformat("2026-10-21T10:00:00+02:00"))
+            codex_resume.recurring_check(datetime.fromisoformat("2026-10-21T16:00:00+02:00"))
+            self.assertEqual(sent, ["01a1-mine"])
+            self.write_session_log("task_started", "token_count", self.limit_stop("t2"),
+                                   stamped=datetime.fromisoformat("2026-10-21T11:00:00+02:00"))
+            codex_resume.recurring_check(datetime.fromisoformat("2026-10-21T16:00:00+02:00"))
+        self.assertEqual(sent, ["01a1-mine", "01a1-mine"])
+
+    def test_recurring_check_stops_when_its_record_is_unreadable(self):
+        for state in ("{\"resumed\": {\"a\": ", "[]", '{"resumed": {"a": "yesterday"}}',
+                      '{"resumed": {"a": "2026-10-21T09:00:00"}}'):
+            with self.subTest(state=state):
+                with self.assertRaisesRegex(RuntimeError, "recurring.json .*; fix or delete it"):
+                    self.recurring(["a"], state=state)
+                self.usage.assert_not_called()
+
+    def test_recurring_check_skips_while_another_check_runs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            state_path = Path(temporary) / "recurring.json"
+            with (state_path.with_suffix(".lock").open("w") as lock,
+                  patch.object(codex_resume, "RECURRING_STATE_PATH", state_path),
+                  patch.object(codex_resume, "stuck_chats") as stuck):
+                fcntl.flock(lock, fcntl.LOCK_EX)
+                codex_resume.recurring_check()
+                stuck.assert_not_called()
+                fcntl.flock(lock, fcntl.LOCK_UN)
+                stuck.return_value = []
+                codex_resume.recurring_check()
+                stuck.assert_called_once()
+
+    def test_recurring_check_forgets_resumes_older_than_the_logs_it_scans(self):
+        state = {"resumed": {"a": "2026-10-13T09:59:00+02:00", "b": "2026-10-13T10:00:00+02:00"}}
+        resumed, _, state = self.recurring(["a", "b"], state=state, stopped="2026-10-13T08:00:00+02:00")
+        self.assertEqual(resumed, ["a"])
+        self.assertEqual(state["resumed"], {"b": "2026-10-13T10:00:00+02:00", "a": "2026-10-21T10:00:00+02:00"})
+
+    def test_recurring_check_sends_nothing_while_a_limit_is_used_up(self):
+        resumed, output, state = self.recurring(["a"], allowed=False)
+        self.assertEqual((resumed, output, state["resumed"]), ([], "", {}))
+        self.assertEqual(state["checked"], "2026-10-21T10:00:00+02:00")
+        # The limits are only read when there is a chat to resume.
+        self.recurring([])
+        self.usage.assert_not_called()
+
+    def test_recurring_check_retries_a_chat_when_nothing_was_queued(self):
+        resumed, _, state = self.recurring(["a"], queued=False)
+        self.assertEqual((resumed, state["resumed"]), (["a"], {}))
+        self.assertEqual(self.recurring(["a"], state=state)[0], ["a"])
+        earlier = {"resumed": {"a": "2026-10-20T10:00:00+02:00"}}
+        resumed, _, state = self.recurring(["a"], state=earlier, queued=False)
+        self.assertEqual((resumed, state["resumed"]), (["a"], earlier["resumed"]))
+
+    def test_usage_is_allowed_only_when_no_limit_is_used_up(self):
+        for result, allowed in (
+            ({"rateLimits": {"primary": {"usedPercent": 99}, "secondary": {"usedPercent": 40}}}, True),
+            ({"rateLimits": {"primary": {"usedPercent": 0}}, "ordinaryUsageAllowed": True}, True),
+            ({"rateLimits": {"primary": {"usedPercent": 100}, "secondary": {"usedPercent": 40}}}, False),
+            ({"rateLimits": {"primary": {"usedPercent": 5}, "secondary": {"usedPercent": 100}}}, False),
+            ({"rateLimits": {"primary": {"usedPercent": 5}}, "ordinaryUsageAllowed": False}, False),
+        ):
+            with self.subTest(result=result):
+                with patch.object(codex_resume, "app_server_request", return_value=result) as request:
+                    self.assertEqual(codex_resume.usage_allowed(), allowed)
+                request.assert_called_once_with("account/rateLimits/read")
+
+    def test_recurring_sets_up_and_stops_its_own_job_next_to_the_scheduled_one(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            plist_path = Path(temporary) / "recurring.plist"
+            scheduled_path = Path(temporary) / "job.plist"
+            scheduled_path.write_text("scheduled")
+            state_path = Path(temporary) / "recurring.json"
+            with (
+                patch.object(codex_resume, "RECURRING_PLIST_PATH", plist_path),
+                patch.object(codex_resume, "PLIST_PATH", scheduled_path),
+                patch.object(codex_resume, "RECURRING_STATE_PATH", state_path),
+                patch.object(codex_resume, "LOG_PATH", Path(temporary) / "codex-resume.log"),
+                patch.object(codex_resume, "launchctl") as launchctl,
+                redirect_stdout(io.StringIO()) as output,
+            ):
+                self.assertEqual(codex_resume.main(["--recurring", "15"]), 0)
+                with plist_path.open("rb") as agent_file:
+                    plist = plistlib.load(agent_file)
+                state_path.write_text(json.dumps({"checked": "2026-10-21T10:00:00+02:00", "resumed": {}}))
+                recurring_status = io.StringIO()
+                with redirect_stdout(recurring_status), patch.object(codex_resume, "PLIST_PATH",
+                                                                     Path(temporary) / "none.plist"):
+                    codex_resume.status()
+                    state_path.write_text("{")
+                    codex_resume.status()
+                self.assertEqual(codex_resume.main(["--recurring", "off"]), 0)
+                self.assertEqual(codex_resume.main(["--recurring", "off"]), 0)
+                self.assertTrue(scheduled_path.exists())
+
+            self.assertEqual(plist["Label"], codex_resume.RECURRING_LABEL)
+            self.assertNotEqual(plist["Label"], codex_resume.LABEL)
+            self.assertEqual(plist["StartInterval"], 15 * 60)
+            self.assertTrue(plist["RunAtLoad"])
+            self.assertEqual(plist["ProgramArguments"],
+                             [sys.executable, str(codex_resume.SCRIPT_PATH), "--recurring-check"])
+            self.assertFalse(plist_path.exists())
+            self.assertEqual(launchctl.call_args_list, [
+                call("bootstrap", codex_resume.agent_domain(), str(plist_path)),
+                call("bootout", f"{codex_resume.agent_domain()}/{codex_resume.RECURRING_LABEL}"),
+            ])
+            lines = output.getvalue().splitlines()
+            self.assertIn("Every 15 minutes", lines[0])
+            self.assertEqual(lines[1:], ["Recurring check stopped.", "No recurring check is set up."])
+            self.assertEqual(recurring_status.getvalue().splitlines(), [
+                f"{lines[0]} Last checked {shown('2026-10-21T10:00:00+02:00')}.",
+                "No Codex resume is scheduled.",
+                f"{lines[0]} Checks stop until this is fixed: cannot read {state_path} "
+                "(Expecting property name enclosed in double quotes: line 1 column 2 (char 1)); fix or delete it.",
+                "No Codex resume is scheduled.",
+            ])
+
+    def test_recurring_takes_off_or_at_least_five_minutes(self):
+        for value in ("4", "0", "-5", "5.5", "never", ""):
+            with self.subTest(value=value):
+                with (patch.object(codex_resume, "launchctl") as launchctl,
+                      redirect_stderr(io.StringIO()) as errors, self.assertRaises(SystemExit)):
+                    codex_resume.main(["--recurring", value])
+                launchctl.assert_not_called()
+                self.assertIn("--recurring takes 'off' or a number of minutes, at least 5", errors.getvalue())
+
+    def test_recurring_check_logs_errors_with_a_stamp(self):
+        with (patch.object(codex_resume, "recurring_check", side_effect=RuntimeError("app server is down")),
+              patch.object(codex_resume, "log_stamp", return_value="[stamp] "),
+              redirect_stderr(io.StringIO()) as errors):
+            self.assertEqual(codex_resume.main(["--recurring-check"]), 1)
+        self.assertEqual(errors.getvalue(), "[stamp] Recurring check stopped: app server is down\n")
 
     def test_queue_sends_the_message_once_the_app_takes_it(self):
         calls = self.fake_queue([self.queued("q1"), self.queued("other", cursor="c2"), self.queued("q1"),

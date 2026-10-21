@@ -19,6 +19,23 @@ and could send it twice. After the app takes the message, the log shows for up
 to 30 seconds whether the reply finished, stopped, or ended with an error such
 as a usage limit.
 
+--recurring MINUTES sets up a second LaunchAgent that checks that often for
+chats on this Mac stuck at a usage limit: their session log ends in replies
+that stopped with codex_error_info usage_limit_exceeded. Messages sent while a
+limit is used up stop at it too, so the stuck run starts at the first such
+stop. Only chats updated in the last eight days are read, since Codex keeps
+session logs uncompressed for over a week. Chats the limit stopped more than
+24 hours before it stopped the latest one were left stuck by an earlier limit
+and are skipped. Once the limits read through the CLI allow use, it queues
+continue to up to three chats, newest first, and at most three in any five
+hours. When each chat was last resumed is recorded before queueing in
+~/Library/Application Support/codex-resume/recurring.json, and only limit stops
+after that count, so each chat is resumed once per stop. An unreadable record
+stops the checks rather than risk sending twice, and a lock skips a check while
+another runs. It uses only the queue, never Accessibility, logs only what it
+sends and errors, and does not inhibit sleep.
+--recurring off removes it; --cancel leaves it alone.
+
 Accessibility requires macOS, Python 3, Swift (Xcode Command Line Tools), and
 Accessibility permission for the execution context. Terminal permission may
 not cover launchd.
@@ -114,6 +131,7 @@ it sends unless that is the case, also when the limits cannot be read.
 
 from datetime import datetime, time as dt_time, timedelta
 import argparse
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -133,6 +151,15 @@ import uuid
 LABEL = "com.hkjersem.codex-resume"
 PLIST_PATH = Path.home() / "Library/LaunchAgents" / f"{LABEL}.plist"
 LOG_PATH = Path.home() / "Library/Logs/codex-resume.log"
+RECURRING_LABEL = f"{LABEL}.recurring"
+RECURRING_PLIST_PATH = PLIST_PATH.with_name(f"{RECURRING_LABEL}.plist")
+RECURRING_STATE_PATH = Path.home() / "Library/Application Support/codex-resume/recurring.json"
+RECURRING_CHATS = 3
+RECURRING_PERIOD = timedelta(hours=5)
+RECURRING_LOOKBACK = timedelta(hours=24)
+# Codex keeps session logs uncompressed for over a week, longer than a weekly limit stays used up.
+RECURRING_SCAN = timedelta(days=8)
+USAGE_LIMIT_ERROR = "usage_limit_exceeded"
 SCRIPT_PATH = Path(__file__).resolve()
 TIME_PATTERN = re.compile(r"([01][0-9]|2[0-3])[:.]?([0-5][0-9])\Z")
 SCHEDULE_DELAY_SECONDS = 3
@@ -468,16 +495,28 @@ def chat_log(chat):
     return max(found, key=lambda path: path.stat().st_mtime) if found else None
 
 
+def record_time(record):
+    """When a session log record was written, or None when its stamp is unreadable or has no time zone."""
+    try:
+        moment = datetime.fromisoformat(record["timestamp"].replace("Z", "+00:00"))
+    except (KeyError, AttributeError, TypeError, ValueError):
+        return None
+    return moment if moment.tzinfo is not None else None
+
+
 def written_since(record, since):
     """Whether a session log record is stamped at or after since; an unreadable stamp counts as older."""
-    try:
-        return datetime.fromisoformat(record["timestamp"].replace("Z", "+00:00")) >= since
-    except (KeyError, AttributeError, TypeError, ValueError):
-        return False
+    moment = record_time(record)
+    return moment is not None and moment >= since
 
 
 def turn_events(path, offset=0, since=None):
     """Reply start and end events in a session log, from a byte offset and, if given, a time."""
+    return [payload for _, payload in turn_records(path, offset, since)]
+
+
+def turn_records(path, offset=0, since=None):
+    """Reply start and end events with their log records, from a byte offset and, if given, a time."""
     events = []
     with path.open("rb") as log:
         log.seek(offset)
@@ -492,7 +531,7 @@ def turn_events(path, offset=0, since=None):
             if since is not None and not written_since(record, since):
                 continue
             if record.get("type") == "event_msg" and payload.get("type") in TURN_EVENTS:
-                events.append(payload)
+                events.append((record, payload))
     return events
 
 
@@ -529,8 +568,9 @@ def report_reply(path, offset, stamp, since=None):
         time.sleep(QUEUE_POLL_SECONDS)
 
 
-def resume_through_queue(chat, message, stamp=lambda: ""):
+def resume_through_queue(chat, message, stamp=lambda: "", fallback=True):
     """Send the message through the queue; return False, with nothing left queued, to use the app's controls."""
+    instead = "; using the app's Accessibility controls instead." if fallback else "."
     busy = replying(chat)
     if busy and message is None:
         print(f"{stamp()}Codex is already replying in chat {chat_label(chat)}; not sending '{DEFAULT_MESSAGE}'.",
@@ -547,8 +587,7 @@ def resume_through_queue(chat, message, stamp=lambda: ""):
             "clientUserMessageId": str(uuid.uuid4()),
         })["queuedSubmission"]["id"]
     except AppServerRejectedError as error:
-        print(f"{stamp()}Could not queue the message ({error}); using the app's Accessibility controls instead.",
-              flush=True)
+        print(f"{stamp()}Could not queue the message ({error}){instead}", flush=True)
         return False
     except RuntimeError as error:
         raise RuntimeError(f"The message may have been queued: {error} Check the chat before retrying.") from error
@@ -565,8 +604,7 @@ def resume_through_queue(chat, message, stamp=lambda: ""):
                     "thread/queue/delete", {"threadId": chat["id"], "queuedSubmissionId": item})
                 if deleted.get("deleted"):
                     print(f"{stamp()}The app did not take the message within {QUEUE_PICKUP_SECONDS // 60} "
-                          "minutes, so it was removed from the queue; using the app's Accessibility controls "
-                          "instead.", flush=True)
+                          f"minutes, so it was removed from the queue{instead}", flush=True)
                     return False
                 break
             time.sleep(QUEUE_POLL_SECONDS)
@@ -720,6 +758,118 @@ def wait_for_early_reset(timestamp, minutes, used_up):
         print(f"{log_stamp()}Not sending yet ({detail}); {then}.", flush=True)
 
 
+def limit_stop(payload):
+    error = payload.get("error")
+    return (payload["type"] == "task_complete" and isinstance(error, dict)
+            and error.get("codex_error_info") == USAGE_LIMIT_ERROR)
+
+
+def stuck_at_limit(chat, since=None):
+    """For a chat whose latest replies, since a time if given, all stopped at a usage limit, when the limit first
+    stopped it and when it last did; None when its last reply ended otherwise or is still running."""
+    path = chat_log(chat)
+    if path is None:
+        return None
+    stops, running = [], False
+    for record, payload in turn_records(path, since=since):
+        running = payload["type"] == "task_started"
+        if running:
+            continue
+        # Each message sent while the limit is used up stops at it too, so the chat stays stuck.
+        stops = [*stops, (record, payload)] if limit_stop(payload) else []
+    if running or not stops or record_time(stops[0][0]) is None or record_time(stops[-1][0]) is None:
+        return None
+    return {"closed": record_time(stops[0][0]), "stopped": record_time(stops[-1][0])}
+
+
+def stuck_chats(now=None, resumed=None):
+    """Chats on this Mac stuck at a usage limit, newest first, that the limit stopped no more than a day before
+    it stopped the latest one, so chats left stuck after an earlier limit are not resumed. For a chat in resumed,
+    only stops after it was last resumed count."""
+    now = now or datetime.now().astimezone()
+    resumed = resumed or {}
+    found = []
+    for chat in load_chats():
+        if chat["host"] is None and chat["updated"] >= now - RECURRING_SCAN:
+            stuck = stuck_at_limit(chat, resumed.get(chat["id"]))
+            if stuck is not None:
+                found.append({**chat, **stuck})
+    if not found:
+        return []
+    closed = max(chat["closed"] for chat in found)
+    return sorted((chat for chat in found if chat["closed"] >= closed - RECURRING_LOOKBACK),
+                  key=lambda chat: chat["stopped"], reverse=True)
+
+
+def usage_allowed():
+    result = app_server_request("account/rateLimits/read")
+    limits = result.get("rateLimits") or {}
+    return result.get("ordinaryUsageAllowed") is not False and all(
+        (limits.get(key) or {}).get("usedPercent", 0) < 100 for key in ("primary", "secondary"))
+
+
+def load_recurring_state():
+    """The last check and when each chat was last resumed; an unreadable file is an error, since resuming
+    without it could send twice."""
+    try:
+        state = json.loads(RECURRING_STATE_PATH.read_text())
+    except FileNotFoundError:
+        return {"resumed": {}}
+    except (OSError, ValueError) as error:
+        raise RuntimeError(f"cannot read {RECURRING_STATE_PATH} ({error}); fix or delete it") from None
+    try:
+        resumed = {chat: datetime.fromisoformat(at) for chat, at in state["resumed"].items()}
+        if any(at.tzinfo is None for at in resumed.values()):
+            raise ValueError("a time has no time zone")
+    except (KeyError, AttributeError, TypeError, ValueError) as error:
+        raise RuntimeError(f"unexpected contents in {RECURRING_STATE_PATH} ({error}); fix or delete it") from None
+    return {**state, "resumed": resumed}
+
+
+def save_recurring_state(state):
+    temporary = RECURRING_STATE_PATH.with_suffix(".tmp")
+    temporary.write_text(json.dumps(
+        {**state, "resumed": {chat: at.isoformat() for chat, at in state["resumed"].items()}}, indent=1))
+    temporary.replace(RECURRING_STATE_PATH)
+
+
+def recurring_check(now=None):
+    """Queue continue to up to three chats stuck at a usage limit once the limits allow it; each chat once per
+    limit stop. Returns without checking while another check runs."""
+    RECURRING_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with RECURRING_STATE_PATH.with_suffix(".lock").open("w") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return
+        check_stuck_chats(now or datetime.now().astimezone())
+
+
+def check_stuck_chats(now):
+    state = load_recurring_state()
+    resumed = {chat: at for chat, at in state["resumed"].items() if at >= now - RECURRING_SCAN}
+    state.update(checked=now.isoformat(), resumed=resumed)
+    try:
+        chats = stuck_chats(now, resumed)
+        if not chats or not usage_allowed():
+            return
+        recent = sum(at >= now - RECURRING_PERIOD for at in resumed.values())
+        for chat in chats[:max(0, RECURRING_CHATS - recent)]:
+            print(f"{log_stamp()}Chat {chat_label(chat)} stopped at a usage limit "
+                  f"{format_time(chat['stopped'].astimezone())}; resuming it.", flush=True)
+            # Recorded first, so a message that may have been queued is never sent twice.
+            previous = resumed.get(chat["id"])
+            resumed[chat["id"]] = now
+            save_recurring_state(state)
+            if not resume_through_queue(chat, None, log_stamp, fallback=False):
+                if previous is None:
+                    del resumed[chat["id"]]
+                else:
+                    resumed[chat["id"]] = previous
+    finally:
+        save_recurring_state(state)
+
+
 def launchctl(*arguments):
     executable = shutil.which("launchctl")
     if executable is None:
@@ -735,20 +885,53 @@ def agent_domain():
     return f"gui/{os.getuid()}"
 
 
-def remove_agent():
-    if not PLIST_PATH.exists():
+def remove_agent(label=LABEL, path=None):
+    path = path or PLIST_PATH
+    if not path.exists():
         return False
-    launchctl("bootout", f"{agent_domain()}/{LABEL}")
-    PLIST_PATH.unlink()
+    launchctl("bootout", f"{agent_domain()}/{label}")
+    path.unlink()
     return True
 
 
-def schedule(scheduled, message=None, chat=None, project=None, start_window=False, every=None, used_up=()):
-    if PLIST_PATH.exists():
-        remove_agent()
-
-    PLIST_PATH.parent.mkdir(parents=True, exist_ok=True)
+def install_agent(plist, path):
+    if path.exists():
+        remove_agent(plist["Label"], path)
+    path.parent.mkdir(parents=True, exist_ok=True)
     LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="wb", dir=path.parent, prefix=f".{plist['Label']}.", delete=False
+    ) as temporary:
+        temporary_path = Path(temporary.name)
+        plistlib.dump(plist, temporary)
+    temporary_path.chmod(0o600)
+    temporary_path.replace(path)
+    try:
+        launchctl("bootstrap", agent_domain(), str(path))
+    except RuntimeError:
+        path.unlink(missing_ok=True)
+        raise
+
+
+def set_up_recurring(minutes):
+    # No caffeinate: a check missed while the Mac sleeps runs when it wakes.
+    install_agent({
+        "Label": RECURRING_LABEL,
+        "ProgramArguments": [sys.executable, str(SCRIPT_PATH), "--recurring-check"],
+        "StartInterval": minutes * 60,
+        "RunAtLoad": True,
+        "StandardOutPath": str(LOG_PATH),
+        "StandardErrorPath": str(LOG_PATH),
+    }, RECURRING_PLIST_PATH)
+    print(recurring_summary(minutes))
+
+
+def recurring_summary(minutes):
+    return (f"Every {minutes} minutes, once the usage limits allow it, up to {RECURRING_CHATS} chats on this Mac "
+            "that stopped at a usage limit get continue via the Codex queue.")
+
+
+def schedule(scheduled, message=None, chat=None, project=None, start_window=False, every=None, used_up=()):
     plist = {
         "Label": LABEL,
         "ProgramArguments": [
@@ -772,20 +955,7 @@ def schedule(scheduled, message=None, chat=None, project=None, start_window=Fals
         "StandardOutPath": str(LOG_PATH),
         "StandardErrorPath": str(LOG_PATH),
     }
-    with tempfile.NamedTemporaryFile(
-        mode="wb", dir=PLIST_PATH.parent, prefix=f".{LABEL}.", delete=False
-    ) as temporary:
-        temporary_path = Path(temporary.name)
-        plistlib.dump(plist, temporary)
-    temporary_path.chmod(0o600)
-    temporary_path.replace(PLIST_PATH)
-
-    try:
-        launchctl("bootstrap", agent_domain(), str(PLIST_PATH))
-    except RuntimeError:
-        PLIST_PATH.unlink(missing_ok=True)
-        raise
-
+    install_agent(plist, PLIST_PATH)
     print(scheduled_summary(scheduled, message, None if project is not None else chat, project, start_window,
                             every))
 
@@ -809,6 +979,15 @@ def scheduled_summary(scheduled, message, chat=None, project=None, start_window=
 
 
 def status():
+    if RECURRING_PLIST_PATH.exists():
+        with RECURRING_PLIST_PATH.open("rb") as agent_file:
+            minutes = plistlib.load(agent_file).get("StartInterval", 0) // 60
+        try:
+            checked = load_recurring_state().get("checked")
+            last = f" Last checked {format_time(datetime.fromisoformat(checked).astimezone())}." if checked else ""
+        except RuntimeError as error:
+            last = f" Checks stop until this is fixed: {error}."
+        print(recurring_summary(minutes) + last)
     if not PLIST_PATH.exists():
         print("No Codex resume is scheduled.")
         return
@@ -998,7 +1177,14 @@ def argument_parser():
         "--list", nargs="?", const="", metavar="QUERY",
         help="list your recent chats, optionally only those matching QUERY",
     )
-    actions.add_argument("--status", action="store_true", help="show the scheduled resume")
+    actions.add_argument(
+        "--recurring", metavar="MINUTES|off",
+        help=f"check this often (at least {MIN_RESET_CHECK_MINUTES} minutes) for chats a usage limit stopped, and "
+             f"queue continue to up to {RECURRING_CHATS} of them, newest first, once the limits allow it; "
+             "'off' stops the checks",
+    )
+    actions.add_argument("--recurring-check", action="store_true", help=argparse.SUPPRESS)
+    actions.add_argument("--status", action="store_true", help="show the scheduled resume and recurring check")
     actions.add_argument("--cancel", action="store_true", help="cancel the scheduled resume")
     actions.add_argument(
         "--now", action="store_true",
@@ -1079,6 +1265,22 @@ def main(arguments):
         return 0
     if options.limits:
         print(describe_limits(usage_limits()))
+        return 0
+    if options.recurring is not None:
+        if options.recurring == "off":
+            print("Recurring check stopped." if remove_agent(RECURRING_LABEL, RECURRING_PLIST_PATH)
+                  else "No recurring check is set up.")
+            return 0
+        if not options.recurring.isdigit() or int(options.recurring) < MIN_RESET_CHECK_MINUTES:
+            parser.error(f"--recurring takes 'off' or a number of minutes, at least {MIN_RESET_CHECK_MINUTES}")
+        set_up_recurring(int(options.recurring))
+        return 0
+    if options.recurring_check:
+        try:
+            recurring_check()
+        except (OSError, RuntimeError, ValueError) as error:
+            print(f"{log_stamp()}Recurring check stopped: {error}", file=sys.stderr, flush=True)
+            return 1
         return 0
     if options.status:
         status()

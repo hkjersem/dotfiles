@@ -30,6 +30,23 @@ is running, so the message starts a new one, for example at midnight to get an
 earlier reset. When the run starts, it checks the limits; if a window is
 already running or a limit is used up, it logs why and sends nothing.
 
+## Resume chats stopped by a usage limit
+
+`codex-resume --recurring 15` checks every 15 minutes, at least 5, for chats on
+this Mac whose last replies stopped at a usage limit. Once no limit is used up,
+it sends `continue` through the Codex queue to up to three of them, newest
+first, and to at most three in any five hours. Each chat is resumed once per
+limit stop. If its reply hits the limit again, it is resumed after the next
+reset.
+
+Only chats updated in the last eight days are checked. A chat stopped more than
+24 hours before the most recently stopped chat is skipped: an earlier limit
+stopped it, and it was likely left on purpose. The check runs alongside a
+scheduled resume, needs the app running, and logs only what it sends and any
+errors. `--status` shows when it last checked; `--recurring off` stops it. If
+its record of resumed chats can't be read, it stops sending rather than risk
+sending twice, and `--status` and the log say which file to fix or delete.
+
 ## Choose a chat
 
 Add `--chat` to `--time`, `--reset`, `--now`, `--check` or `--inspect` to
