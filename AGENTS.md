@@ -96,7 +96,7 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 - **After making changes** that affect symlinks, brew formulae, plugins, or npm globals — run `bash scripts/audit.sh` to verify the repo and installed state are consistent
 - **After installing or removing skills** via `npx skills` — run `bash scripts/audit-skills.sh --fix-symlinks` to sync symlinks across all preferred agent providers
 - **Repo-authored skills** belong in `agents/skills/` and are linked with `bash scripts/sync-agent-skills.sh`. Existing names are conflicts and must never be overwritten automatically.
-- **Skills that run this repository's commands** are named `dotfiles-<command>`, are the only repo-authored skills that may reference this repository, and must not trigger automatically: set `disable-model-invocation: true` in `SKILL.md` and `policy.allow_implicit_invocation: false` in `agents/openai.yaml`.
+- **This repository's commands for other repositories** go in the single `agents/skills/dotfiles/` skill, one reference file per command; it is the only repo-authored skill that may reference this repository. It loads only when the user says "dotfiles", and runs a command only on a direct request, previewing before any change.
 - **Repo-authored skills must support repositories with and without a remote** — where a skill compares against the default branch, use the remote-tracking ref (e.g. `origin/main`) when a remote exists, and the local default branch in local-only repositories.
 - **Global agent instructions** belong in `agents/AGENTS.md`, never in a tool-specific global file. Keep it short and free of repository-specific rules.
 - **Skills owned by another repository** stay in that repository; list its skill directory as `~/path` in `agents/skills/sources.txt` instead of copying the skill here.
@@ -113,7 +113,7 @@ These rules have been broken before and are checked by `scripts/tests/test_repo_
 | Paths to `~/.dotfiles/...` in shell config point to files that exist | `test_shell_config_references_existing_repo_files` |
 | Bash files avoid Bash 4+ syntax (`bash -n` in CI does not catch it) | `test_bash_scripts_avoid_bash4_only_syntax` |
 | No hardcoded `/Users/<name>` paths | `test_no_hardcoded_home_paths` |
-| Repo-authored skills, other than `dotfiles-*`, do not reference this repository | `test_repo_authored_skills_do_not_reference_this_repository` |
+| Repo-authored skills, other than `dotfiles`, do not reference this repository; paths to `~/.dotfiles/...` in `dotfiles` point to files that exist | `test_repo_authored_skills_do_not_reference_this_repository` |
 
 ## Roadmap
 

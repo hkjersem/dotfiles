@@ -38,12 +38,15 @@ is one vendor's study, not a general rule.
 
 ## Skills for dotfiles commands
 
-Skills named `dotfiles-<command>` let agents in other repositories run a
-command from this repository, such as `codex-resume`. They run only when asked
-for by name: `disable-model-invocation: true` in `SKILL.md` covers Claude Code
-and Copilot CLI, and `policy.allow_implicit_invocation: false` in
-`agents/openai.yaml` covers Codex. They are the only repo-authored skills that
-may reference this repository.
+The `dotfiles` skill lets agents in other repositories run `codex-resume`,
+`prune_branches`, `audit-repo`, `pmu` and `pma`, for example "run dotfiles
+prune branches". Its description makes agents load it only when a message
+says "dotfiles" together with one of these commands, and its body runs a
+command only on a direct request, so mentioning one in discussion does
+nothing. Each command has a reference file in `references/` with the
+preview-before-change and approval steps agents follow. It is the only
+repo-authored skill that may reference this repository. Add another command
+as a reference file and a row in its table, not as a separate skill.
 
 ## Skills from other repositories
 

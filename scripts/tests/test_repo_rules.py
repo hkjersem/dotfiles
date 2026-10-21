@@ -105,14 +105,23 @@ class RepoRulesTests(unittest.TestCase):
 
     def test_repo_authored_skills_do_not_reference_this_repository(self):
         found = []
+        broken = []
         for path in repo_files("agents/skills/"):
-            # dotfiles-* skills exist to run this repository's commands from other repositories.
-            if path.parent == PurePosixPath("agents/skills") or path.parts[2].startswith("dotfiles-"):
+            if path.parent == PurePosixPath("agents/skills"):
+                continue
+            # The dotfiles skill exists to run this repository's commands from other repositories.
+            if path.parts[2] == "dotfiles":
+                for number, line in text_lines(path):
+                    for match in DOTFILES_REF.finditer(line):
+                        target = match.group(1).rstrip(".")
+                        if not (REPO / target).exists():
+                            broken.append(f"{path}:{number}: ~/.dotfiles/{target}")
                 continue
             for number, line in text_lines(path):
                 if SKILL_COUPLING.search(line):
                     found.append(f"{path}:{number}: {line.strip()}")
         self.assert_no_violations(found, "Skills must stand alone without repository-specific references")
+        self.assert_no_violations(broken, "The dotfiles skill points to repository files that do not exist")
 
 
 class RuleCheckSelfTests(unittest.TestCase):
