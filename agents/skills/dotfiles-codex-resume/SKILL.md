@@ -13,13 +13,14 @@ details are in `~/.dotfiles/docs/codex-resume.md`.
 
 ## Choose the chat
 
-- `--list [QUERY]` shows recent chats with their id, name and project.
+- `--list [QUERY]` shows recent chats on this Mac with their id, name and
+  project.
 - `--chat QUERY` takes an id, id prefix or name; `--project QUERY` takes the
   latest chat in a project folder, chosen when the message is sent.
 - If several chats match, the command lists them and sends nothing. Show the
   list and ask which one; never pick one yourself.
-- Without `--chat` or `--project`, the message goes to whichever chat is open
-  in the app, which needs an unlocked screen. Prefer naming the chat.
+- Without `--chat` or `--project`, the message goes to the chat with the
+  latest activity, chosen when it is sent. Prefer naming the chat.
 
 ## Send
 

@@ -1,23 +1,24 @@
 #!/usr/bin/env python3
-"""Schedule a one-time submission in the Codex desktop app.
+"""Send continue, or a message, to a Codex desktop chat on this Mac: now, at a
+set time, or when a usage limit resets.
 
-A chat on this Mac, chosen with --chat or --project, gets its message through
-the Codex queue: the app server's experimental thread/queue/add, reached
-through the Codex CLI. The app checks the queue about every ten seconds and
-sends the message once it has the chat loaded and not busy, without
-Accessibility, focus or an unlocked screen. A draft in the composer is left
-alone and the message is sent by itself. If queueing is rejected, or the app
-has not taken the message within two minutes, it is removed from the queue
-and the Accessibility path below is used instead. Remote-control chats, and
-the open chat when neither option is given, use Accessibility.
+The message goes through the Codex queue: the app server's experimental
+thread/queue/add, reached through the Codex CLI bundled with the app. The app
+checks the queue about every ten seconds and sends the message once the chat
+is not busy, also for a chat it has not loaded, without Accessibility, focus or
+an unlocked screen. A draft in the composer is left alone. When the app is not
+running, it is opened in the background. If the app has not taken the message
+within two minutes, it stays queued and the app sends it later. The chat is
+chosen with --chat or --project; without them it is the chat on this Mac with
+the latest activity, chosen when the message is sent.
+
 Whether Codex is replying comes from the chat's session log in
 ~/.codex/sessions: a reply started and not ended, in a log written within 30
 minutes. Then continue is dropped, while a --message is queued for the app to
-send after the reply. If it is unclear whether a queued message was sent, it
-stops instead of typing it, since typing would likely fail on a locked screen
-and could send it twice. After the app takes the message, the log shows for up
-to 30 seconds whether the reply finished, stopped, or ended with an error such
-as a usage limit.
+send after the reply. After the app takes the message, the log shows for up to
+30 seconds whether the reply finished, stopped, or ended with an error such as
+a usage limit. If it is unclear whether a message was queued or taken, it says
+to check the chat before retrying.
 
 --recurring MINUTES sets up a second LaunchAgent that checks that often for
 chats on this Mac stuck at a usage limit: their session log ends in replies
@@ -32,93 +33,30 @@ hours. When each chat was last resumed is recorded before queueing in
 ~/Library/Application Support/codex-resume/recurring.json, and only limit stops
 after that count, so each chat is resumed once per stop. An unreadable record
 stops the checks rather than risk sending twice, and a lock skips a check while
-another runs. It uses only the queue, never Accessibility, logs only what it
-sends and errors, and does not inhibit sleep.
---recurring off removes it; --cancel leaves it alone.
+another runs. It logs only what it sends and errors, and does not inhibit
+sleep. --recurring off removes it; --cancel leaves it alone.
 
-Accessibility requires macOS, Python 3, Swift (Xcode Command Line Tools), and
-Accessibility permission for the execution context. Terminal permission may
-not cover launchd.
-
-The user LaunchAgent starts immediately under caffeinate -i, or -di when the
-target needs Accessibility (a remote chat or the open chat), so the display
-stays on and an idle lock does not start before the run; it waits until three
-seconds after the requested local minute, then sends. Accessibility runs of
-lib/codex-resume.swift go under caffeinate -du, which wakes the display and
-keeps it on until the helper ends. Late starts submit immediately and are
-logged as late. Completion, failure, or cancellation unloads the job and
-releases the sleep assertions. --now does not inhibit idle sleep.
-This does not unlock the Mac or prevent manual/policy locks or lid-close sleep.
-The first scheduled attempt runs regardless of recent keyboard/mouse activity.
-Failures known to precede all input can retry once per minute, up to ten times;
-only retries require 60 seconds of inactivity. Any possibly injected text or
-Return prevents automatic retries to avoid duplicates.
-
-The helper locates the Codex app by bundle ID (even when named ChatGPT),
-excluding the separate ChatGPT chat app. It reads the composer and nearby Send
-control, preserving drafts or inserting continue when empty. An empty composer
-may show a voice chat button instead of Send; text is then typed, and Return
-waits for Send to replace it. --message replaces continue with a single-line
-custom message. After a draft, it moves the caret to the end (Cmd+Down), adds a
-blank line (Shift+Return twice) and types the message, so both are sent
-together; Return follows only when the composer shows exactly the draft and the
-message. An unrecognised composer stops before any input, retryably when
-scheduled. This app exposes its placeholder (sometimes with a newline) as
-AXValue when empty. A placeholder match ignoring surrounding whitespace is
-treated as empty, even if deliberately typed. If no composer label is
-recognised, it activates the app and sends only Return to its existing focus,
-without typing text. This fallback cannot verify what has focus or whether a
-message was sent, and never retries after Return. When the window exposes no
-text areas at all, scheduled runs retry first and use this fallback only on the
-final attempt; --now uses it immediately. Unreadable or ambiguous controls still
-fail; they do not use the fallback.
-
-Submission activates the app and verifies composer focus and unchanged text.
-For an empty composer it types continue using keyboard events, since setting
-AXValue did not enable Send. If typing fails, the text is left in place and
-reported, never cleared over potential user edits. In the recognised-composer
-path Return is sent only when Send is enabled. AXPress on Send did not submit
-in live tests. The helper attempts to restore the previous app if Codex is still
-active. Inspection/checks do not activate the app. Scheduling does not pin a thread;
-leave the intended conversation open in an unlocked graphical session.
-Secure Keyboard Entry in another app can block macOS from activating Codex.
-The helper reports its owner and refuses rather than bypassing that protection.
-
-UI confirmation is not proof of server acceptance or a reset usage limit.
-An unconfirmed attempt may have sent the message: check before retrying.
-Scheduled output/errors go to ~/Library/Logs/codex-resume.log, without drafts
-or custom messages. A scheduled message is stored in the LaunchAgent plist.
-The helper uses current Swift syntax; when it fails to compile on Swift older
-than 6.2, the error says to update the Command Line Tools.
-Codex's web view builds its Accessibility tree only on request, so the helper
-turns AXEnhancedUserInterface on while it runs (about two seconds to appear) and
-off again afterwards, unless it was already on.
-App updates or UI language changes can affect control discovery.
+A scheduled resume is a user LaunchAgent that starts immediately under
+caffeinate -i, so the Mac does not idle-sleep before the run, and waits until
+three seconds after the requested local minute. Late starts send immediately
+and are logged as late. Completion or failure unloads the job and releases the
+sleep assertion. --now does not inhibit sleep, and closing the lid still puts
+the Mac to sleep. Scheduled output and errors go to
+~/Library/Logs/codex-resume.log, without custom messages; a scheduled message
+is stored in the LaunchAgent plist.
 
 --start-window reads the limits when the run starts and sends nothing while a
 5-hour window is running or ordinary usage is blocked. A 5-hour window counts
 as not running when it is absent, has reset, or reports 0% with a reset a full
 window ahead; the live response without a running window is unverified.
 
---list shows your unarchived chats from the Codex app's sidebar catalogue,
-newest first, without subagent or review threads. It includes chats on another
-Mac the app reaches through remote control, marked (remote): they run on that
-Mac, but this Mac must be awake and unlocked to type into them. --chat picks
-one by id, id prefix, or name: the whole name, part of it, or the starts of its
+--list shows your unarchived chats on this Mac from the Codex app's sidebar
+catalogue, newest first, without subagent or review threads. --chat picks one
+by id, id prefix, or name: the whole name, part of it, or the starts of its
 words in any order; several matches are listed with their last activity
-instead of guessing. The helper opens it through its codex://threads/<id> link
-(with ?hostId= for a remote chat) only after any idle check passes, then waits
-for the window title to show the chat's name, and checks it again just before
-typing and before Return. A chat whose name another chat shares is refused,
-since the title could not tell them apart, and a title shortened with an
-ellipsis that another chat's name also fits does not count. A wrong title or a
-disabled composer, as when the remote Mac is disconnected, stops before any
-input and is retryable.
---project picks a project by its folder name (or full path) with the same
-name matching, and opens its most recently active chat; a scheduled run stores
-the folder and picks that chat when it starts.
---check and --inspect add the window title and, when exactly one chat in the
-catalogue has that name, the open chat's id, project and folder.
+instead of guessing. --project picks a project by its folder name (or full
+path) with the same name matching, and uses its most recently active chat; a
+scheduled run stores the folder and picks that chat when it starts.
 --limits and --reset read the usage limits live through the Codex CLI's app
 server (account/rateLimits/read, read-only). --reset schedules a minute after
 the latest reset among the limits that are used up. --reset MINUTES also reads
@@ -180,30 +118,23 @@ FIVE_HOUR_MINUTES = 300
 # An unused window may report 0% with a reset a full window ahead; allow for clock and rounding drift.
 IDLE_WINDOW_TOLERANCE_SECONDS = 120
 DEFAULT_MESSAGE = "continue"
-# The app checks the queue every ten seconds, and only for a chat it has loaded that is not busy.
+# The app checks the queue every ten seconds and sends to a chat once it is not busy.
 QUEUE_PICKUP_SECONDS = 120
 QUEUE_POLL_SECONDS = 5
 TURN_EVENTS = ("task_started", "task_complete", "turn_aborted")
 # An unfinished reply this old in the session log is treated as abandoned, as after a crash.
 REPLY_STALE_SECONDS = 30 * 60
 REPLY_RESULT_SECONDS = 30
-RETRY_INTERVAL_SECONDS = 60
-MAX_SCHEDULED_RETRIES = 10
-HELPER_PATH = SCRIPT_PATH.parent / "lib/codex-resume.swift"
-SCHEDULED_ACTIONS = (
-    "--scheduled-initial-submit", "--scheduled-submit", "--scheduled-final-submit",
-)
-MIN_SWIFT_VERSION = (6, 2)
-SWIFT_VERSION_PATTERN = re.compile(r"Swift version (\d+)\.(\d+)")
-SWIFT_COMPILE_ERROR_PATTERN = re.compile(r"\.swift:\d+:\d+: error:")
-
-
-class RetryableAutomationError(RuntimeError):
-    """The native helper confirms that no input was injected."""
+# The Codex desktop app, even when named ChatGPT; the separate ChatGPT chat app is com.openai.chat.
+APP_BUNDLE_ID = "com.openai.codex"
 
 
 class AppServerRejectedError(RuntimeError):
     """The app server could not be started or answered with an error, so it did nothing."""
+
+
+class NotQueuedError(RuntimeError):
+    """The message was not queued, so nothing will be sent."""
 
 
 def next_occurrence(clock_text, now=None):
@@ -228,11 +159,10 @@ def validate_message(text):
         raise ValueError("--message must not be empty.")
     if any(unicodedata.category(character) == "Cc" for character in message):
         raise ValueError(
-            "--message must be a single line without control characters, "
-            "since a typed newline would send it early."
+            "--message must be a single line without control characters."
         )
     if message.startswith("/"):
-        raise ValueError("--message must not start with '/', which opens the app's command menu.")
+        raise ValueError("--message must not start with '/', which the app reads as a command.")
     return message
 
 
@@ -241,13 +171,12 @@ def format_time(moment):
 
 
 def load_chats():
-    # The app's sidebar catalogue: unarchived chats on this Mac and on Macs it reaches by remote control.
+    # The app's sidebar catalogue: unarchived chats on this Mac, without those on Macs it reaches remotely.
     query = """
         SELECT c.thread_id, c.display_title, c.cwd,
-               COALESCE(NULLIF(c.source_recency_at, 0), c.source_updated_at),
-               CASE h.host_kind WHEN 'local' THEN NULL ELSE c.host_id END
+               COALESCE(NULLIF(c.source_recency_at, 0), c.source_updated_at)
         FROM local_thread_catalog c JOIN local_thread_catalog_hosts h USING (host_id)
-        WHERE h.host_kind IN ('local', 'remote-control') AND c.missing_candidate = 0
+        WHERE h.host_kind = 'local' AND c.missing_candidate = 0
           AND COALESCE(c.thread_source, '') NOT IN ('subagent', 'guardian_review')
         ORDER BY 4 DESC
     """
@@ -268,10 +197,16 @@ def load_chats():
             "name": " ".join((name or "").split()),
             "cwd": cwd,
             "updated": datetime.fromtimestamp(updated).astimezone(),
-            "host": host,
         }
-        for chat_id, name, cwd, updated, host in rows
+        for chat_id, name, cwd, updated in rows
     ]
+
+
+def latest_chat():
+    chats = load_chats()
+    if not chats:
+        raise RuntimeError("No Codex chats on this Mac were found.")
+    return chats[0]
 
 
 def describe_chats(chats):
@@ -281,8 +216,6 @@ def describe_chats(chats):
     for chat in chats:
         name = chat["name"] if len(chat["name"]) <= width else chat["name"][:width - 1] + "…"
         folder = Path(chat["cwd"]).name if chat["cwd"] else ""
-        if chat["host"] is not None:
-            folder = f"{folder} (remote)".lstrip()
         lines.append(f"{format_time(chat['updated'])}  {chat['id']}  {name:<{width}}  {folder}".rstrip())
     return "\n".join(lines)
 
@@ -320,21 +253,8 @@ def matching_chats(query, chats):
     ))
 
 
-def same_title(first, second):
-    """Mirror the helper's window-title check, where either name may be shortened with an ellipsis."""
-    first, second = " ".join(first.split()), " ".join(second.split())
-    if first == second:
-        return True
-    for shortened, full in ((first, second), (second, first)):
-        stem = shortened[:-1].rstrip() if shortened.endswith("…") else ""
-        if stem and full.startswith(stem):
-            return True
-    return False
-
-
 def resolve_chat(query):
-    chats = load_chats()
-    found = matching_chats(query, chats)
+    found = matching_chats(query, load_chats())
     if not found:
         raise RuntimeError(f"No chat matches {query!r}; run codex-resume --list to see your chats.")
     if len(found) > 1:
@@ -342,22 +262,11 @@ def resolve_chat(query):
             f"{len(found)} chats match {query!r}; pass --chat with one of these ids:\n"
             + describe_chats(found)
         )
-    return confirmable(found[0], chats)
-
-
-def confirmable(chat, chats):
-    # The helper confirms the open chat by its window title, so a shared name could hide a wrong chat.
-    namesakes = [other for other in chats if other is not chat and same_title(other["name"], chat["name"])]
-    if namesakes:
-        raise RuntimeError(
-            f"Another chat has the same name as {chat['name']!r}, so the window title cannot confirm "
-            "which one is open; rename one of them in the app first:\n" + describe_chats([chat, *namesakes])
-        )
-    return chat
+    return found[0]
 
 
 def project_label(project):
-    return f"{project['name']!r}" + (" (remote)" if project["host"] is not None else "")
+    return f"{project['name']!r}"
 
 
 def load_projects(chats):
@@ -365,17 +274,15 @@ def load_projects(chats):
     projects = {}
     for chat in chats:
         if chat["cwd"]:
-            key = (chat["host"], chat["cwd"])
-            projects.setdefault(key, {
-                "name": Path(chat["cwd"]).name, "cwd": chat["cwd"], "host": chat["host"], "chats": [],
+            projects.setdefault(chat["cwd"], {
+                "name": Path(chat["cwd"]).name, "cwd": chat["cwd"], "chats": [],
             })["chats"].append(chat)
     return list(projects.values())
 
 
 def resolve_project(query):
     """Return the latest chat in the project matching query, by folder path or project name."""
-    chats = load_chats()
-    found = first_matches(load_projects(chats), (lambda project: project["cwd"] == query.strip(), *name_rules(query)))
+    found = first_matches(load_projects(load_chats()), (lambda project: project["cwd"] == query.strip(), *name_rules(query)))
     if not found:
         raise RuntimeError(f"No project matches {query!r}; run codex-resume --list to see your chats' projects.")
     if len(found) > 1:
@@ -384,7 +291,7 @@ def resolve_project(query):
             + "\n".join(f"{project['cwd']}  {project_label(project)}" for project in found)
         )
     project = found[0]
-    return project, confirmable(project["chats"][0], chats)
+    return project, project["chats"][0]
 
 
 def list_chats(query=None):
@@ -464,15 +371,6 @@ def app_server_request(method, params=None):
         raise AppServerRejectedError(
             f"The Codex app server rejected {method}: {reply['error'].get('message', reply['error'])}")
     return reply["result"]
-
-
-def uses_queue(target):
-    """A chat or project on this Mac takes a queued message; a remote one needs the app's controls here."""
-    return target is not None and target["host"] is None
-
-
-def delivery_label(target):
-    return "via the Codex queue" if uses_queue(target) else "via the app's Accessibility controls"
 
 
 def still_queued(chat, item):
@@ -568,14 +466,33 @@ def report_reply(path, offset, stamp, since=None):
         time.sleep(QUEUE_POLL_SECONDS)
 
 
-def resume_through_queue(chat, message, stamp=lambda: "", fallback=True):
-    """Send the message through the queue; return False, with nothing left queued, to use the app's controls."""
-    instead = "; using the app's Accessibility controls instead." if fallback else "."
+def open_app(stamp):
+    """Open the Codex app in the background when it is not running, since only the app sends queued messages."""
+    try:
+        # Prints the app's ASN when it runs, and nothing when it does not.
+        running = subprocess.run(["/usr/bin/lsappinfo", "find", f"bundleid={APP_BUNDLE_ID}"],
+                                 text=True, capture_output=True, timeout=10)
+        if "ASN:" in running.stdout:
+            return
+        result = subprocess.run(["/usr/bin/open", "-g", "-b", APP_BUNDLE_ID],
+                                text=True, capture_output=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        detail = str(error)
+    else:
+        if result.returncode == 0:
+            print(f"{stamp()}Opened the Codex app in the background.", flush=True)
+            return
+        detail = (result.stderr or result.stdout).strip()
+    print(f"{stamp()}Could not open the Codex app ({detail}); it sends the message once it runs.", flush=True)
+
+
+def resume_through_queue(chat, message, stamp=lambda: ""):
+    """Queue the message for the app to send in the chat; NotQueuedError means nothing was queued."""
     busy = replying(chat)
     if busy and message is None:
         print(f"{stamp()}Codex is already replying in chat {chat_label(chat)}; not sending '{DEFAULT_MESSAGE}'.",
               flush=True)
-        return True
+        return
     path = chat_log(chat)
     offset = path.stat().st_size if path is not None else 0
     # Session logs stamp to the millisecond, so a whole second keeps the comparison from cutting a reply off.
@@ -587,26 +504,24 @@ def resume_through_queue(chat, message, stamp=lambda: "", fallback=True):
             "clientUserMessageId": str(uuid.uuid4()),
         })["queuedSubmission"]["id"]
     except AppServerRejectedError as error:
-        print(f"{stamp()}Could not queue the message ({error}){instead}", flush=True)
-        return False
+        raise NotQueuedError(f"Could not queue the message, so nothing was sent: {error}") from error
     except RuntimeError as error:
         raise RuntimeError(f"The message may have been queued: {error} Check the chat before retrying.") from error
     if busy:
         print(f"{stamp()}Codex is replying in chat {chat_label(chat)}; queued the message, and the app "
               "sends it when the reply ends.", flush=True)
-        return True
+        # A crashed app can leave a reply looking unfinished, so the app may still need opening.
+        open_app(stamp)
+        return
     print(f"{stamp()}Queued the message in chat {chat_label(chat)}; waiting for the app to take it.", flush=True)
+    open_app(stamp)
     deadline = time.monotonic() + QUEUE_PICKUP_SECONDS
     try:
         while still_queued(chat, item):
             if time.monotonic() >= deadline:
-                deleted = app_server_request(
-                    "thread/queue/delete", {"threadId": chat["id"], "queuedSubmissionId": item})
-                if deleted.get("deleted"):
-                    print(f"{stamp()}The app did not take the message within {QUEUE_PICKUP_SECONDS // 60} "
-                          f"minutes, so it was removed from the queue{instead}", flush=True)
-                    return False
-                break
+                print(f"{stamp()}The app has not taken the message within {QUEUE_PICKUP_SECONDS // 60} minutes; "
+                      "it stays queued, and the app sends it once it gets to the chat.", flush=True)
+                return
             time.sleep(QUEUE_POLL_SECONDS)
     except RuntimeError as error:
         raise RuntimeError(f"The message was queued, but whether the app took it is unknown: {error} "
@@ -618,7 +533,6 @@ def resume_through_queue(chat, message, stamp=lambda: "", fallback=True):
         # Codex compresses idle chats' logs and unpacks one again before writing to it, so a log found only
         # now holds earlier replies too; only events from after queueing belong to this one.
         report_reply(chat_log(chat), 0, stamp, since=queued_at)
-    return True
 
 
 def usage_limits():
@@ -790,7 +704,7 @@ def stuck_chats(now=None, resumed=None):
     resumed = resumed or {}
     found = []
     for chat in load_chats():
-        if chat["host"] is None and chat["updated"] >= now - RECURRING_SCAN:
+        if chat["updated"] >= now - RECURRING_SCAN:
             stuck = stuck_at_limit(chat, resumed.get(chat["id"]))
             if stuck is not None:
                 found.append({**chat, **stuck})
@@ -861,7 +775,10 @@ def check_stuck_chats(now):
             previous = resumed.get(chat["id"])
             resumed[chat["id"]] = now
             save_recurring_state(state)
-            if not resume_through_queue(chat, None, log_stamp, fallback=False):
+            try:
+                resume_through_queue(chat, None, log_stamp)
+            except NotQueuedError as error:
+                print(f"{log_stamp()}{error}", file=sys.stderr, flush=True)
                 if previous is None:
                     del resumed[chat["id"]]
                 else:
@@ -935,10 +852,8 @@ def schedule(scheduled, message=None, chat=None, project=None, start_window=Fals
     plist = {
         "Label": LABEL,
         "ProgramArguments": [
-            # Typing needs an unlocked screen, so keep the display on and the idle lock off until the run;
-            # a queued message needs neither.
             "/usr/bin/caffeinate",
-            "-i" if uses_queue(project or chat) else "-di",
+            "-i",
             sys.executable,
             str(SCRIPT_PATH),
             *(["--message", message] if message is not None else []),
@@ -961,7 +876,7 @@ def schedule(scheduled, message=None, chat=None, project=None, start_window=Fals
 
 
 def chat_label(chat):
-    return f"{chat['name']!r}" + (" (remote)" if chat["host"] is not None else "")
+    return f"{chat['name']!r}"
 
 
 def scheduled_summary(scheduled, message, chat=None, project=None, start_window=False, every=None):
@@ -972,7 +887,8 @@ def scheduled_summary(scheduled, message, chat=None, project=None, start_window=
         summary += f" in the latest chat in project {project_label(project)}"
     elif chat is not None:
         summary += f" in chat {chat_label(chat)}"
-    summary += f" {delivery_label(project or chat)}"
+    else:
+        summary += " in the latest chat on this Mac"
     if start_window:
         summary += ", only if no 5-hour window is running"
     return f"{summary} with message: {message}" if message is not None else f"{summary}."
@@ -1000,14 +916,14 @@ def status():
     chat = project = None
     if "--project" in arguments:
         folder = arguments[arguments.index("--project") + 1]
-        unknown = {"name": Path(folder).name, "cwd": folder, "host": None}
+        unknown = {"name": Path(folder).name, "cwd": folder}
         try:
             project = next((project for project in load_projects(load_chats()) if project["cwd"] == folder), unknown)
         except RuntimeError:
             project = unknown
     if "--chat" in arguments:
         chat_id = arguments[arguments.index("--chat") + 1]
-        unknown = {"id": chat_id, "name": chat_id, "host": None}
+        unknown = {"id": chat_id, "name": chat_id}
         try:
             chat = next((chat for chat in load_chats() if chat["id"] == chat_id), unknown)
         except RuntimeError:
@@ -1016,148 +932,22 @@ def status():
     print(scheduled_summary(scheduled, message, chat, project, "--start-window" in arguments, every))
 
 
-def swift_version(executable):
-    try:
-        result = subprocess.run(
-            [executable, "--version"], text=True, capture_output=True, timeout=30,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    match = SWIFT_VERSION_PATTERN.search(result.stdout + result.stderr)
-    return tuple(int(part) for part in match.groups()) if match else None
-
-
-def run_automation(action, message=None, chat=None):
-    executable = shutil.which("swift")
-    if executable is None:
-        raise RuntimeError(
-            "Swift is unavailable; install Apple's Xcode Command Line Tools."
-        )
-    command = [executable, str(HELPER_PATH), action]
-    if action in SCHEDULED_ACTIONS:
-        # The scheduled job only holds off idle sleep, so wake the display and keep it on for the helper.
-        command = ["/usr/bin/caffeinate", "-du", *command]
-    if message is not None:
-        command += ["--message", message]
-    if chat is not None:
-        command += ["--chat", chat["id"], "--chat-title", chat["name"]]
-        if chat["host"] is not None:
-            command += ["--chat-host", chat["host"]]
-        # The window title may be shortened, so the helper needs the other names to tell them apart.
-        others = [other["name"] for other in load_chats() if other["id"] != chat["id"]]
-        command += ["--other-titles", json.dumps(others)]
-    try:
-        result = subprocess.run(
-            command,
-            text=True, capture_output=True, timeout=60,
-        )
-    except subprocess.TimeoutExpired as error:
-        raise RuntimeError(
-            "Typing into the app timed out, so whether the message was sent is unknown. "
-            "Check the chat before retrying."
-        ) from error
-    if result.returncode == 3:
-        raise RuntimeError(
-            "Return was pressed, but sending could not be confirmed. "
-            "The message may have been sent; check the chat before retrying. "
-            + (result.stderr or result.stdout).strip()
-        )
-    if result.returncode == 4 and action in SCHEDULED_ACTIONS:
-        raise RetryableAutomationError((result.stderr or result.stdout).strip())
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout).strip()
-        if SWIFT_COMPILE_ERROR_PATTERN.search(detail):
-            version = swift_version(executable)
-            if version is not None and version < MIN_SWIFT_VERSION:
-                raise RuntimeError(
-                    f"Swift {version[0]}.{version[1]} cannot compile the helper; it needs Swift "
-                    f"{MIN_SWIFT_VERSION[0]}.{MIN_SWIFT_VERSION[1]} or newer. Update the Command "
-                    "Line Tools (dotfiles-update does this), then try again. Nothing was sent."
-                )
-        raise RuntimeError(f"Codex automation failed: {detail}")
-    if action in ("--check", "--inspect"):
-        report = json.loads(result.stdout)
-        report["chat"] = identify_open_chat(report.get("windowTitle"))
-        print(json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False), flush=True)
-        return
-    stamp = log_stamp() if action in SCHEDULED_ACTIONS else ""
-    print("".join(stamp + line for line in result.stdout.splitlines(keepends=True)), end="", flush=True)
-
-
-def identify_open_chat(title):
-    """Identify the chat the window shows, when exactly one chat has that name."""
-    try:
-        found = [chat for chat in load_chats() if title and same_title(chat["name"], title)]
-    except RuntimeError:
-        return None
-    if len(found) != 1:
-        return None
-    chat = found[0]
-    return {
-        "id": chat["id"], "name": chat["name"], "remote": chat["host"] is not None,
-        "project": Path(chat["cwd"]).name if chat["cwd"] else None, "folder": chat["cwd"],
-    }
-
-
-def submit(action="--submit", message=None, chat=None):
-    run_automation(action, message, chat)
-
-
-def scheduled_action(attempt):
-    if attempt == 0:
-        return "--scheduled-initial-submit"
-    if attempt == MAX_SCHEDULED_RETRIES:
-        return "--scheduled-final-submit"
-    return "--scheduled-submit"
-
-
 def log_stamp():
     return f"[{datetime.now():%d.%m.%Y kl. %H.%M.%S}] "
-
-
-def submit_scheduled(message=None, chat=None):
-    for attempt in range(MAX_SCHEDULED_RETRIES + 1):
-        started = time.monotonic()
-        where = f"chat {chat_label(chat)}" if chat is not None else "the open chat"
-        print(f"{log_stamp()}Sending in {where} through the app's Accessibility controls, "
-              f"attempt {attempt + 1} of {MAX_SCHEDULED_RETRIES + 1}.", flush=True)
-        try:
-            submit(scheduled_action(attempt), message, chat)
-            return
-        except RetryableAutomationError as error:
-            print(f"{log_stamp()}{error}", file=sys.stderr, flush=True)
-            if attempt == MAX_SCHEDULED_RETRIES:
-                raise RuntimeError(
-                    f"Gave up after {MAX_SCHEDULED_RETRIES + 1} attempts; nothing was sent."
-                ) from error
-            delay = RETRY_INTERVAL_SECONDS - (time.monotonic() - started)
-            if delay > 0:
-                time.sleep(delay)
 
 
 def argument_parser():
     parser = argparse.ArgumentParser(
         prog="codex-resume",
         description=(
-            "Schedule or control a one-time submission in the "
-            "Codex desktop app. Times use local 24-hour HH:MM, HH.MM, or HHMM format."
+            "Send continue, or a message, to a Codex desktop chat on this Mac now, at a set time, "
+            "or when a usage limit resets. Times use local 24-hour HH:MM, HH.MM, or HHMM format."
         ),
         epilog=(
-            "A chat on this Mac chosen with --chat or --project gets its message through "
-            "the Codex queue, which needs no Accessibility or unlocked screen and leaves "
-            "any draft alone; if the app has not taken it within two minutes, it is "
-            "removed and the steps below are used instead. "
-            "Submission activates the app and sends Return, verifying composer focus "
-            "when recognised. If unrecognised, it sends only Return to the app's "
-            "existing focus, without typing text or retrying after Return. "
-            "Inspection does not activate the app. "
-            "An empty composer is filled with 'continue', or with --message; existing "
-            "drafts are preserved, and --message is added after a draft with a blank line. "
-            "Scheduled jobs inhibit idle system/display sleep while waiting, "
-            "but cannot prevent manual or policy-enforced locking. "
-            "The first scheduled attempt ignores recent activity. Up to ten "
-            "one-minute retries require 60 seconds of inactivity and are allowed "
-            "only when no input has been sent."
+            "The message goes through the Codex queue, and the app sends it once the chat is not busy, "
+            "also with a locked screen; a draft in the composer is left alone. The app is opened in the "
+            "background when it is not running. Without --chat or --project, the chat on this Mac with the "
+            "latest activity is used. Scheduled jobs keep the Mac from idle-sleeping while they wait."
         ),
     )
     actions = parser.add_mutually_exclusive_group(required=True)
@@ -1186,34 +976,22 @@ def argument_parser():
     actions.add_argument("--recurring-check", action="store_true", help=argparse.SUPPRESS)
     actions.add_argument("--status", action="store_true", help="show the scheduled resume and recurring check")
     actions.add_argument("--cancel", action="store_true", help="cancel the scheduled resume")
-    actions.add_argument(
-        "--now", action="store_true",
-        help="submit the detected composer now",
-    )
-    actions.add_argument(
-        "--inspect", action="store_true",
-        help="print the composer text without modifying or submitting it",
-    )
-    actions.add_argument(
-        "--check", action="store_true",
-        help="check Accessibility controls without printing or changing the draft",
-    )
+    actions.add_argument("--now", action="store_true", help="send now")
     actions.add_argument("--scheduled", metavar="TIMESTAMP", help=argparse.SUPPRESS)
     parser.add_argument("--every", type=int, help=argparse.SUPPRESS)
     parser.add_argument("--used-up", default="", help=argparse.SUPPRESS)
     parser.add_argument(
         "--message", metavar="TEXT",
-        help="with --time, --reset or --now, type this single-line message instead of 'continue'",
+        help="with --time, --reset or --now, send this single-line message instead of 'continue'",
     )
     parser.add_argument(
         "--chat", metavar="QUERY",
-        help="open this chat (id, id prefix or name) first; works with --time, --reset, "
-             "--now, --check and --inspect",
+        help="send to this chat (id, id prefix or name) instead of the latest one; works with --time, "
+             "--reset and --now",
     )
     parser.add_argument(
         "--project", metavar="QUERY",
-        help="like --chat, but open the latest chat in this project (folder name), "
-             "chosen when the message is sent",
+        help="like --chat, but the latest chat in this project (folder name), chosen when the message is sent",
     )
     parser.add_argument(
         "--start-window", action="store_true",
@@ -1233,10 +1011,9 @@ def main(arguments):
         message = validate_message(options.message)
     for name, value in (("--chat", options.chat), ("--project", options.project)):
         if value is not None and not (
-            options.time or options.reset is not None or options.now or options.check
-            or options.inspect or options.scheduled
+            options.time or options.reset is not None or options.now or options.scheduled
         ):
-            parser.error(f"{name} requires --time, --reset, --now, --check or --inspect")
+            parser.error(f"{name} requires --time, --reset or --now")
     if options.chat is not None and options.project is not None:
         parser.error("use either --chat or --project, not both")
     if options.start_window and not (options.time or options.now or options.scheduled):
@@ -1259,6 +1036,10 @@ def main(arguments):
         if options.project is not None:
             return resolve_project(options.project)
         return None, resolve_chat(options.chat) if options.chat is not None else None
+
+    def chosen_chat():
+        """The chat to send to; the latest one is only known when the message is sent."""
+        return target()[1] or latest_chat()
 
     if options.list is not None:
         list_chats(options.list)
@@ -1304,10 +1085,8 @@ def main(arguments):
                     print(f"{log_stamp()}Running now ({late}).", flush=True)
             if skip_start_window():
                 return 0
-            # Resolved at run time, so a project gets its latest chat and a failure still unloads the job.
-            _, chat = target()
-            if not (uses_queue(chat) and resume_through_queue(chat, message, log_stamp)):
-                submit_scheduled(message, chat)
+            # Resolved at run time, so the latest chat is current and a failure still unloads the job.
+            resume_through_queue(chosen_chat(), message, log_stamp)
         except (OSError, RuntimeError, ValueError) as error:
             # bootout can terminate us before the outer error handler runs.
             print(f"{log_stamp()}Stopped: {error}", file=sys.stderr, flush=True)
@@ -1321,19 +1100,14 @@ def main(arguments):
     if options.now:
         if skip_start_window():
             return 0
-        if chat is not None:
-            where = f" in project {project_label(project)}" if project is not None else ""
-            print(f"Resuming in chat {chat_label(chat)}{where} {delivery_label(chat)}.", flush=True)
+        if project is not None:
+            print(f"Resuming in chat {chat_label(chat)} in project {project_label(project)}.", flush=True)
+        elif chat is not None:
+            print(f"Resuming in chat {chat_label(chat)}.", flush=True)
         else:
-            print(f"Resuming in the open chat {delivery_label(None)}.", flush=True)
-        if not (uses_queue(chat) and resume_through_queue(chat, message)):
-            submit(message=message, chat=chat)
-        return 0
-    if options.inspect:
-        run_automation("--inspect", chat=chat)
-        return 0
-    if options.check:
-        run_automation("--check", chat=chat)
+            chat = latest_chat()
+            print(f"Resuming in the latest chat, {chat_label(chat)}.", flush=True)
+        resume_through_queue(chat, message)
         return 0
     used_up = ()
     if options.reset is not None:

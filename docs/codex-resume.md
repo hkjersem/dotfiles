@@ -4,16 +4,13 @@
 
 ## Schedule
 
-`codex-resume --time 15.03` submits the open Codex conversation's draft three
-seconds after the next occurrence of that local time, or inserts `continue`
-if empty. Accepts `15:03`, `15.03`, or `1503`. Use `--status`, `--cancel`,
-`--now`, or `--help`; `--inspect` reads the draft and `--check` checks controls.
-If the input field isn't recognised, sends only Enter to Codex's existing focus,
-without typing text or retrying afterward. Scheduled runs that find no input
-field at all retry first and send that Enter only on the last attempt.
+`codex-resume --time 15.03` sends `continue` to a Codex chat on this Mac three
+seconds after the next occurrence of that local time. Accepts `15:03`, `15.03`,
+or `1503`. `--now` sends right away; use `--status`, `--cancel`, or `--help`
+for the rest.
 
 `codex-resume --reset` waits for the used-up 5-hour or weekly limit instead,
-or the later one if both are, and submits a minute after it resets.
+or the later one if both are, and sends a minute after it resets.
 `--limits` shows both limits, read live through the Codex CLI.
 
 Add a number of minutes, at least 5, such as `--reset 30`, to also read the
@@ -42,64 +39,50 @@ reset.
 Only chats updated in the last eight days are checked. A chat stopped more than
 24 hours before the most recently stopped chat is skipped: an earlier limit
 stopped it, and it was likely left on purpose. The check runs alongside a
-scheduled resume, needs the app running, and logs only what it sends and any
+scheduled resume, opens the app if it isn't running, and logs only what it sends and any
 errors. `--status` shows when it last checked; `--recurring off` stops it. If
 its record of resumed chats can't be read, it stops sending rather than risk
 sending twice, and `--status` and the log say which file to fix or delete.
 
 ## Choose a chat
 
-Add `--chat` to `--time`, `--reset`, `--now`, `--check` or `--inspect` to
-open a specific chat first, by id, id prefix or name; the starts of the name's
-words in any order also work, such as `explore pwa`. `--list [text]` shows your
-recent chats with their ids and last activity. When several chats match, they
-are listed instead of guessing. The chat is confirmed by its name in the window
-title, checked again just before typing and before Return, so a chat whose
-name another chat shares is refused until one is renamed. A shortened title
-that another chat's name also fits doesn't count as a match. Chats on another
-Mac that the app reaches through remote control are listed as `(remote)` and
-can be chosen the same way; they run on that Mac, but this Mac must be awake
-and unlocked. If that Mac is disconnected, scheduled attempts retry without
-typing anything.
+Without a choice, the message goes to the chat on this Mac with the latest
+activity, chosen when it is sent. Add `--chat` to `--time`, `--reset` or
+`--now` to pick one by id, id prefix or name; the starts of the name's words in
+any order also work, such as `explore pwa`. `--list [text]` shows your recent
+chats on this Mac with their ids and last activity. When several chats match,
+they are listed instead of guessing. Chats on another Mac that the app reaches
+through remote control are left out: run `codex-resume` on that Mac instead.
 
-Use `--project name` instead of `--chat` to open the most recently active chat
-in a project, matched by its folder name the same way, such as `local-relay`
-for a remote project. A scheduled run picks that chat when it starts, so a chat
-started after scheduling is used. `--check` and `--inspect` also report the
-window title and, when exactly one Codex chat has that name, the chat's id,
-project and folder.
+Use `--project name` instead of `--chat` for the most recently active chat in
+a project, matched by its folder name the same way, such as `local-relay`. A
+scheduled run picks that chat when it starts, so a chat started after
+scheduling is used.
 
 ## Delivery
 
-A chat on this Mac, chosen with `--chat` or `--project`, gets its message
-through the Codex queue instead of the input field. It works while the screen
-is locked, needs no Accessibility permission, and leaves any draft alone. The
-app sends the message within about ten seconds if it has the chat loaded and
-not busy. If it hasn't taken the message within two minutes, the message is
-removed from the queue and typed into the input field instead. Scheduling and
-`--now` say which way they send. Remote chats and the open chat without
-`--chat` always use the input field.
+Every message goes through the Codex queue, through the CLI bundled with the
+app. It works while the screen is locked, needs no Accessibility permission,
+and leaves any draft alone. The app sends the message within about ten seconds
+once the chat is not busy, also for a chat it hasn't loaded. If the app isn't
+running, it is opened in the background. If it hasn't taken the message within
+two minutes, the message stays queued and the app sends it later; the command
+doesn't wait for that.
 
 If Codex is still replying in that chat, `continue` is dropped, while a
-`--message` is queued to follow the reply. When it's unclear whether a queued
-message went out, the run stops instead of typing it again. The log then says
-whether the reply finished or ended with an error, such as a usage limit.
+`--message` is queued to follow the reply. When it's unclear whether a message
+was queued or taken, the run says to check the chat before retrying. After the
+app takes it, the log says whether the reply finished or ended with an error,
+such as a usage limit.
 
 Add `--message "text"` to `--time`, `--reset` or `--now` to send that text
-instead. It must be one line and not start with `/`. When typed into the input
-field and it already holds text, the message is added after it with a blank
-line between, and both are sent together. Without a recognised input field
-nothing is sent.
+instead. It must be one line and not start with `/`.
 
 ## Requirements and logs
 
-Prevents idle sleep while waiting. Chats on this Mac let the display turn off;
-remote chats and the open chat keep it on, so an idle lock doesn't stop the
-input field path, though a manual lock still does. Closing the lid
-still puts the Mac to sleep; a run that starts late says so in the log. The
-input field path wakes the display while it runs, briefly takes app focus
-to submit, and requires an unlocked session and Accessibility permission. The
-first scheduled attempt runs regardless of recent activity; up to ten
-one-minute retries require one minute of inactivity and no previous input sent.
-Logs: `~/Library/Logs/codex-resume.log`. Requirements and implementation notes
+A scheduled resume prevents idle sleep while it waits, through `caffeinate -i`;
+the display still turns off and the screen locks. macOS shows a "Background
+Items Added" notification for each scheduled job. Closing the lid still puts
+the Mac to sleep; a run that starts late says so in the log. The recurring
+check doesn't prevent sleep. Logs: `~/Library/Logs/codex-resume.log`. Requirements and implementation notes
 are in [`scripts/codex-resume.py`](../scripts/codex-resume.py).

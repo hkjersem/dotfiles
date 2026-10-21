@@ -42,12 +42,11 @@ repo's scripts still match them.
      `zsh/conf.d/`
    - dotbot: `install`, `install.conf.yaml`
    - Codex desktop app and its bundled CLI: `scripts/codex-resume.py`,
-     `scripts/lib/codex-resume.swift`, `docs/codex-resume.md`. Look for
-     changes to the queue API (`thread/queue/*`), session logs, the chat
-     database and the input field. Then run `codex-resume --limits`,
-     `codex-resume --check --chat <id>` (input-field path, read-only) and
+     `docs/codex-resume.md`. Look for changes to the queue API
+     (`thread/queue/*`), the rate-limit API, session logs and the chat
+     database. Then run `codex-resume --limits`, `codex-resume --list` and
      `codex-resume --now --chat <id> --message "Reply with OK only."`, which
-     should report sending via the Codex queue.
+     should report that the app took the message and the reply finished.
 3. Check the version baselines against the projects in `~/Developer` (skip
    `fagtorsdag` and `worktrees`). Read `packageManager`, `devEngines`,
    `engines.node`, `.nvmrc` and `.node-version`, and compare them with the

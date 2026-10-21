@@ -91,6 +91,7 @@ for line in sys.stdin:
         print(json.dumps(reply), flush=True)
 """
 REAL_APP_SERVER_REQUEST = codex_resume.app_server_request
+REAL_OPEN_APP = codex_resume.open_app
 
 
 class CodexResumeTests(unittest.TestCase):
@@ -100,22 +101,9 @@ class CodexResumeTests(unittest.TestCase):
                              side_effect=AssertionError("unexpected Codex app server request"))
         guard.start()
         self.addCleanup(guard.stop)
-    @unittest.skipUnless(
-        sys.platform == "darwin" and shutil.which("swift"),
-        "Native Accessibility self-tests require macOS and Swift.",
-    )
-    def test_native_composer_selection_and_submission_guards(self):
-        result = subprocess.run(
-            ["swift", str(codex_resume.HELPER_PATH), "--self-test"],
-            text=True, capture_output=True, timeout=60,
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        summary = re.search(r"(\d+)/(\d+) self-tests passed", result.stdout)
-        self.assertIsNotNone(summary, result.stdout)
-        passed, total = (int(count) for count in summary.groups())
-        self.assertGreater(total, 0)
-        self.assertEqual(passed, total, result.stdout)
-
+        app = patch.object(codex_resume, "open_app")
+        self.open_app = app.start()
+        self.addCleanup(app.stop)
     def test_requires_valid_24_hour_time(self):
         for value in (
             "4:15", "24:00", "12:60", "+5h", "12:30pm",
@@ -182,207 +170,23 @@ class CodexResumeTests(unittest.TestCase):
             codex_resume.wait_until_scheduled_time(target, now)
         sleep.assert_not_called()
 
-    def test_automation_invokes_native_helper_and_preserves_output(self):
-        output = io.StringIO()
-        result = subprocess.CompletedProcess([], 0, "Composer text:\n test \n", "")
-        with (
-            patch.object(codex_resume.shutil, "which", return_value="/usr/bin/swift"),
-            patch.object(codex_resume.subprocess, "run", return_value=result) as run,
-            redirect_stdout(output),
-        ):
-            codex_resume.run_automation("--submit")
-        run.assert_called_once_with(
-            ["/usr/bin/swift", str(codex_resume.HELPER_PATH), "--submit"],
-            text=True, capture_output=True, timeout=60,
-        )
-        self.assertEqual(output.getvalue(), result.stdout)
-
-    def test_scheduled_automation_wakes_the_display_while_the_helper_runs(self):
-        result = subprocess.CompletedProcess([], 0, "", "")
-        with (
-            patch.object(codex_resume.shutil, "which", return_value="/usr/bin/swift"),
-            patch.object(codex_resume.subprocess, "run", return_value=result) as run,
-            redirect_stdout(io.StringIO()),
-        ):
-            for action in codex_resume.SCHEDULED_ACTIONS:
-                codex_resume.run_automation(action)
-        self.assertEqual([command.args[0] for command in run.call_args_list], [
-            ["/usr/bin/caffeinate", "-du", "/usr/bin/swift", str(codex_resume.HELPER_PATH), action]
-            for action in codex_resume.SCHEDULED_ACTIONS
-        ])
-
-    def test_scheduled_helper_output_is_timestamped_in_the_log(self):
-        result = subprocess.CompletedProcess([], 0, "Pressed Return.\nThe reply started.\n", "")
-        with (
-            patch.object(codex_resume.shutil, "which", return_value="/usr/bin/swift"),
-            patch.object(codex_resume.subprocess, "run", return_value=result),
-            patch.object(codex_resume, "log_stamp", return_value="[t] "),
-            redirect_stdout(io.StringIO()) as output,
-        ):
-            codex_resume.run_automation("--scheduled-submit")
-        self.assertEqual(output.getvalue(), "[t] Pressed Return.\n[t] The reply started.\n")
-
     def test_a_late_scheduled_run_says_how_late_it_is(self):
         planned = datetime.now().astimezone() - timedelta(hours=2, minutes=36, seconds=10)
         with tempfile.TemporaryDirectory() as temporary:
             with (
                 patch.object(codex_resume, "PLIST_PATH", Path(temporary) / "job.plist"),
                 patch.object(codex_resume, "log_stamp", return_value=""),
-                patch.object(codex_resume, "submit_scheduled") as submit,
+                patch.object(codex_resume, "latest_chat", return_value=self.LOCAL_CHAT),
+                patch.object(codex_resume, "resume_through_queue") as queue,
                 redirect_stdout(io.StringIO()) as output,
             ):
                 self.assertEqual(codex_resume.main(["--scheduled", planned.isoformat()]), 0)
-        submit.assert_called_once_with(None, None)
+        self.assertEqual(queue.call_args.args[:2], (self.LOCAL_CHAT, None))
         self.assertEqual(output.getvalue(),
                          "Running now (2 h 36 min late; the Mac was probably asleep or off).\n")
         self.assertEqual(codex_resume.late_note(planned, planned + timedelta(seconds=119)), "")
         self.assertEqual(codex_resume.late_note(planned, planned + timedelta(minutes=5)),
                          "5 min late; the Mac was probably asleep or off")
-
-    def test_automation_failure_is_not_reported_as_success(self):
-        result = subprocess.CompletedProcess([], 1, "", "Composer is ambiguous.")
-        with (
-            patch.object(codex_resume.shutil, "which", return_value="/usr/bin/swift"),
-            patch.object(codex_resume.subprocess, "run", return_value=result),
-        ):
-            with self.assertRaisesRegex(RuntimeError, "Composer is ambiguous"):
-                codex_resume.run_automation("--submit")
-
-    def test_unconfirmed_press_warns_against_duplicate_submission(self):
-        result = subprocess.CompletedProcess([], 3, "", "Composer did not clear.")
-        with (
-            patch.object(codex_resume.shutil, "which", return_value="/usr/bin/swift"),
-            patch.object(codex_resume.subprocess, "run", return_value=result),
-        ):
-            with self.assertRaisesRegex(RuntimeError, "message may have been sent"):
-                codex_resume.run_automation("--submit")
-
-    def test_native_retry_status_is_only_retryable_in_scheduled_mode(self):
-        result = subprocess.CompletedProcess([], 4, "", "Mac is active; no input sent.")
-        with (
-            patch.object(codex_resume.shutil, "which", return_value="/usr/bin/swift"),
-            patch.object(codex_resume.subprocess, "run", return_value=result),
-        ):
-            for action in codex_resume.SCHEDULED_ACTIONS:
-                with self.assertRaises(codex_resume.RetryableAutomationError):
-                    codex_resume.run_automation(action)
-            with self.assertRaises(RuntimeError) as error:
-                codex_resume.run_automation("--submit")
-            self.assertNotIsInstance(error.exception, codex_resume.RetryableAutomationError)
-
-    def test_schedule_retries_a_safe_failure_then_stops_on_success(self):
-        with (
-            patch.object(codex_resume, "submit", side_effect=[
-                codex_resume.RetryableAutomationError("No focused window; no input sent."),
-                None,
-            ]) as submit,
-            patch.object(codex_resume.time, "monotonic", side_effect=[0, 10, 60]),
-            patch.object(codex_resume.time, "sleep") as sleep,
-            redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()),
-        ):
-            codex_resume.submit_scheduled()
-        self.assertEqual(submit.call_args_list, [
-            call("--scheduled-initial-submit", None, None), call("--scheduled-submit", None, None),
-        ])
-        sleep.assert_called_once_with(50)
-
-    def test_native_exit_codes_drive_retry_without_repeating_uncertain_submission(self):
-        for outcomes, expected_calls in (
-            ([
-                subprocess.CompletedProcess([], 4, "", "No focused window; no input sent."),
-                subprocess.CompletedProcess([], 0, "Submission confirmed.\n", ""),
-            ], 2),
-            ([subprocess.CompletedProcess([], 3, "", "Return sent; not confirmed.")], 1),
-        ):
-            with self.subTest(expected_calls=expected_calls):
-                with (
-                    patch.object(codex_resume.shutil, "which",
-                                 return_value="/usr/bin/swift"),
-                    patch.object(codex_resume.subprocess, "run",
-                                 side_effect=outcomes) as run,
-                    patch.object(codex_resume.time, "monotonic", return_value=0),
-                    patch.object(codex_resume.time, "sleep") as sleep,
-                    redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()),
-                ):
-                    if expected_calls == 1:
-                        with self.assertRaisesRegex(RuntimeError, "may have been sent"):
-                            codex_resume.submit_scheduled()
-                    else:
-                        codex_resume.submit_scheduled()
-                self.assertEqual(run.call_count, expected_calls)
-                self.assertEqual(
-                    [entry.args[0][-1] for entry in run.call_args_list],
-                    ["--scheduled-initial-submit"]
-                    + ["--scheduled-submit"] * (expected_calls - 1),
-                )
-                self.assertEqual(sleep.call_count, expected_calls - 1)
-
-    def test_schedule_exhausts_ten_retries_without_infinite_wait(self):
-        with (
-            patch.object(codex_resume, "submit", side_effect=
-                         codex_resume.RetryableAutomationError("Mac is active.")) as submit,
-            patch.object(codex_resume.time, "monotonic", return_value=0),
-            patch.object(codex_resume.time, "sleep") as sleep,
-            patch.object(codex_resume, "log_stamp", return_value="[t] "),
-            redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as errors,
-        ):
-            with self.assertRaisesRegex(RuntimeError, "Gave up after 11 attempts; nothing was sent"):
-                codex_resume.submit_scheduled()
-        self.assertEqual(errors.getvalue(), "[t] Mac is active.\n" * 11)
-        self.assertEqual(submit.call_count, 11)
-        self.assertEqual(
-            submit.call_args_list,
-            [call("--scheduled-initial-submit", None, None)] + [call("--scheduled-submit", None, None)] * 9
-            + [call("--scheduled-final-submit", None, None)],
-        )
-        self.assertEqual(sleep.call_args_list, [call(60)] * 10)
-
-    def test_schedule_never_retries_uncertain_or_permanent_failure(self):
-        for error in (
-            RuntimeError("message may have been sent"),
-            RuntimeError("Composer is ambiguous"),
-            RuntimeError("Typed continue, but Send is still disabled"),
-        ):
-            with self.subTest(error=str(error)):
-                with (
-                    patch.object(codex_resume, "submit", side_effect=error) as submit,
-                    patch.object(codex_resume.time, "sleep") as sleep,
-                    redirect_stdout(io.StringIO()),
-                ):
-                    with self.assertRaises(RuntimeError) as raised:
-                        codex_resume.submit_scheduled()
-                self.assertIs(raised.exception, error)
-                submit.assert_called_once_with("--scheduled-initial-submit", None, None)
-                sleep.assert_not_called()
-
-    def test_schedule_stops_retrying_if_a_later_attempt_may_have_sent_input(self):
-        with (
-            patch.object(codex_resume, "submit", side_effect=[
-                codex_resume.RetryableAutomationError("No focused window"),
-                RuntimeError("Submission state is unknown"),
-            ]) as submit,
-            patch.object(codex_resume.time, "monotonic", return_value=0),
-            patch.object(codex_resume.time, "sleep") as sleep,
-            redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()),
-        ):
-            with self.assertRaisesRegex(RuntimeError, "Submission state is unknown"):
-                codex_resume.submit_scheduled()
-        self.assertEqual(submit.call_count, 2)
-        sleep.assert_called_once_with(60)
-
-    def test_automation_timeout_reports_unknown_submission_state(self):
-        with (
-            patch.object(codex_resume.shutil, "which", return_value="/usr/bin/swift"),
-            patch.object(codex_resume.subprocess, "run",
-                         side_effect=subprocess.TimeoutExpired("swift", 60)),
-        ):
-            with self.assertRaisesRegex(RuntimeError, "whether the message was sent is unknown"):
-                codex_resume.run_automation("--submit")
-
-    def test_missing_swift_reports_requirement(self):
-        with patch.object(codex_resume.shutil, "which", return_value=None):
-            with self.assertRaisesRegex(RuntimeError, "Xcode Command Line Tools"):
-                codex_resume.run_automation("--check")
 
     def test_help_lists_supported_flags(self):
         output = io.StringIO()
@@ -390,10 +194,12 @@ class CodexResumeTests(unittest.TestCase):
             with self.assertRaises(SystemExit) as exit_code:
                 codex_resume.main(["--help"])
         self.assertEqual(exit_code.exception.code, 0)
-        for flag in ("--time", "--status", "--cancel", "--now", "--inspect", "--check"):
+        for flag in ("--time", "--reset", "--limits", "--list", "--recurring", "--status", "--cancel", "--now",
+                     "--message", "--chat", "--project", "--start-window"):
             self.assertIn(flag, output.getvalue())
-        self.assertNotIn("--scheduled", output.getvalue())
-        self.assertIn("Submission activates the app", output.getvalue())
+        for hidden in ("--scheduled", "--recurring-check", "--every", "--used-up"):
+            self.assertNotIn(hidden, output.getvalue())
+        self.assertIn("goes through the Codex queue", output.getvalue())
 
     def test_actions_are_flags_and_must_be_selected_once(self):
         with self.assertRaises(SystemExit) as no_action:
@@ -402,16 +208,6 @@ class CodexResumeTests(unittest.TestCase):
         with self.assertRaises(SystemExit) as multiple_actions:
             codex_resume.main(["--status", "--cancel"])
         self.assertEqual(multiple_actions.exception.code, 2)
-
-    def test_inspect_check_and_now_dispatch_separate_actions(self):
-        for flag, expected in (
-            ("--inspect", call("--inspect", chat=None)), ("--check", call("--check", chat=None)),
-            ("--now", call("--submit", None, None)),
-        ):
-            with self.subTest(flag=flag):
-                with patch.object(codex_resume, "run_automation") as run:
-                    self.assertEqual(codex_resume.main([flag]), 0)
-                self.assertEqual(run.call_args_list, [expected])
 
     def test_schedule_starts_caffeinate_immediately_until_submission_finishes(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -427,16 +223,12 @@ class CodexResumeTests(unittest.TestCase):
                 codex_resume.schedule(at_half_past_four)
                 with plist_path.open("rb") as agent_file:
                     plist = plistlib.load(agent_file)
-                # Typing into the open chat or a remote one needs the screen unlocked, so the display stays on.
-                for chat, flags in ((self.LOCAL_CHAT, "-i"), ({**self.LOCAL_CHAT, "host": "mini"}, "-di")):
-                    codex_resume.schedule(at_half_past_four, chat=chat)
-                    with plist_path.open("rb") as agent_file:
-                        self.assertEqual(plistlib.load(agent_file)["ProgramArguments"][1], flags)
 
             self.assertEqual(plist["Label"], codex_resume.LABEL)
             self.assertTrue(plist["RunAtLoad"])
             self.assertNotIn("StartCalendarInterval", plist)
-            self.assertEqual(plist["ProgramArguments"][:2], ["/usr/bin/caffeinate", "-di"])
+            # Only idle sleep is held off; the display may sleep and the screen lock.
+            self.assertEqual(plist["ProgramArguments"][:2], ["/usr/bin/caffeinate", "-i"])
             self.assertEqual(plist["ProgramArguments"][2:4], [
                 sys.executable, str(codex_resume.SCRIPT_PATH),
             ])
@@ -485,14 +277,15 @@ class CodexResumeTests(unittest.TestCase):
                     codex_resume.schedule(datetime.fromisoformat("2026-10-16T16:30:00+02:00"))
             self.assertFalse(plist_path.exists())
 
-    def test_scheduled_run_submits_and_unloads_agent(self):
+    def test_scheduled_run_queues_to_the_latest_chat_and_unloads_agent(self):
         with tempfile.TemporaryDirectory() as temporary:
             plist_path = Path(temporary) / "job.plist"
             plist_path.write_text("scheduled")
             with (
                 patch.object(codex_resume, "PLIST_PATH", plist_path),
                 patch.object(codex_resume, "wait_until_scheduled_time") as wait,
-                patch.object(codex_resume, "submit") as submit,
+                patch.object(codex_resume, "latest_chat", return_value=self.LOCAL_CHAT),
+                patch.object(codex_resume, "resume_through_queue") as queue,
                 patch.object(codex_resume, "launchctl") as launchctl,
             ):
                 self.assertEqual(
@@ -500,7 +293,7 @@ class CodexResumeTests(unittest.TestCase):
                     0,
                 )
             wait.assert_called_once_with("2026-10-16T16:30:00+02:00")
-            submit.assert_called_once_with("--scheduled-initial-submit", None, None)
+            queue.assert_called_once_with(self.LOCAL_CHAT, None, codex_resume.log_stamp)
             launchctl.assert_called_once_with(
                 "bootout", f"{codex_resume.agent_domain()}/{codex_resume.LABEL}"
             )
@@ -519,7 +312,8 @@ class CodexResumeTests(unittest.TestCase):
             with (
                 patch.object(codex_resume, "PLIST_PATH", plist_path),
                 patch.object(codex_resume, "wait_until_scheduled_time"),
-                patch.object(codex_resume, "submit", side_effect=RuntimeError("Send failed")),
+                patch.object(codex_resume, "latest_chat", return_value=self.LOCAL_CHAT),
+                patch.object(codex_resume, "resume_through_queue", side_effect=RuntimeError("Send failed")),
                 patch.object(codex_resume, "launchctl", side_effect=bootout),
                 redirect_stderr(stderr),
             ):
@@ -527,67 +321,40 @@ class CodexResumeTests(unittest.TestCase):
                     codex_resume.main(["--scheduled", "2026-10-16T16:30:00+02:00"])
             self.assertFalse(plist_path.exists())
 
-    def test_exhausted_retries_unload_job_and_remove_schedule(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            plist_path = Path(temporary) / "job.plist"
-            plist_path.write_text("scheduled")
-            with (
-                patch.object(codex_resume, "PLIST_PATH", plist_path),
-                patch.object(codex_resume, "wait_until_scheduled_time"),
-                patch.object(codex_resume, "submit", side_effect=
-                             codex_resume.RetryableAutomationError("Mac is active.")) as submit,
-                patch.object(codex_resume.time, "monotonic", return_value=0),
-                patch.object(codex_resume.time, "sleep"),
-                patch.object(codex_resume, "launchctl") as launchctl,
-                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()),
-            ):
-                self.assertEqual(
-                    codex_resume.main(["--scheduled", "2026-10-16T16:30:00+02:00"]), 1
-                )
-            self.assertEqual(submit.call_count, 11)
-            self.assertFalse(plist_path.exists())
-            launchctl.assert_called_once_with(
-                "bootout", f"{codex_resume.agent_domain()}/{codex_resume.LABEL}"
-            )
-
-    def test_message_is_validated_and_passed_to_the_helper(self):
-        result = subprocess.CompletedProcess([], 0, "Sent.\n", "")
+    def test_message_is_validated_and_queued_in_the_latest_chat(self):
         with (
-            patch.object(codex_resume.shutil, "which", return_value="/usr/bin/swift"),
-            patch.object(codex_resume.subprocess, "run", return_value=result) as run,
-            redirect_stdout(io.StringIO()),
+            patch.object(codex_resume, "latest_chat", return_value=self.LOCAL_CHAT),
+            patch.object(codex_resume, "resume_through_queue") as queue,
+            redirect_stdout(io.StringIO()) as output,
         ):
             self.assertEqual(codex_resume.main(["--now", "--message", "  Resume if cut off  "]), 0)
-        run.assert_called_once_with(
-            ["/usr/bin/swift", str(codex_resume.HELPER_PATH), "--submit",
-             "--message", "Resume if cut off"],
-            text=True, capture_output=True, timeout=60,
-        )
+        queue.assert_called_once_with(self.LOCAL_CHAT, "Resume if cut off")
+        self.assertEqual(output.getvalue(), "Resuming in the latest chat, 'Find current project status'.\n")
 
-    def test_invalid_messages_are_rejected_before_any_automation(self):
+    def test_invalid_messages_are_rejected_before_anything_is_queued(self):
         for value, fragment in (
             ("   ", "must not be empty"), ("one\ntwo", "single line"),
             ("tab\there", "single line"), ("/compact", "must not start with '/'"),
         ):
             with self.subTest(value=value):
-                with patch.object(codex_resume, "run_automation") as run:
+                with patch.object(codex_resume, "resume_through_queue") as queue:
                     with self.assertRaisesRegex(ValueError, fragment):
                         codex_resume.main(["--now", "--message", value])
-                run.assert_not_called()
+                queue.assert_not_called()
 
     def test_message_requires_time_or_now(self):
-        for action in (["--status"], ["--cancel"], ["--check"], ["--inspect"]):
+        for action in (["--status"], ["--cancel"], ["--list"], ["--limits"]):
             with self.subTest(action=action):
                 with (
-                    patch.object(codex_resume, "run_automation") as run,
+                    patch.object(codex_resume, "resume_through_queue") as queue,
                     redirect_stderr(io.StringIO()),
                 ):
                     with self.assertRaises(SystemExit) as error:
                         codex_resume.main([*action, "--message", "resume"])
                 self.assertEqual(error.exception.code, 2)
-                run.assert_not_called()
+                queue.assert_not_called()
 
-    def test_scheduled_message_is_stored_shown_and_used_for_every_attempt(self):
+    def test_scheduled_message_is_stored_shown_and_used_when_it_runs(self):
         with tempfile.TemporaryDirectory() as temporary:
             plist_path = Path(temporary) / "com.hkjersem.codex-resume.plist"
             output = io.StringIO()
@@ -607,26 +374,20 @@ class CodexResumeTests(unittest.TestCase):
                 "--message", "Resume now", "--scheduled", "2026-10-16T16:30:00+02:00",
             ])
             self.assertEqual(output.getvalue().splitlines(), [
-                "Codex resume scheduled for 16.10.2026 kl. 16.30 via the app's Accessibility controls "
+                "Codex resume scheduled for 16.10.2026 kl. 16.30 in the latest chat on this Mac "
                 "with message: Resume now",
             ] * 2)
 
             with (
                 patch.object(codex_resume, "PLIST_PATH", plist_path),
                 patch.object(codex_resume, "wait_until_scheduled_time"),
-                patch.object(codex_resume, "submit", side_effect=[
-                    codex_resume.RetryableAutomationError("The composer holds a draft"), None,
-                ]) as submit,
-                patch.object(codex_resume.time, "monotonic", return_value=0),
-                patch.object(codex_resume.time, "sleep"),
+                patch.object(codex_resume, "latest_chat", return_value=self.LOCAL_CHAT),
+                patch.object(codex_resume, "resume_through_queue") as queue,
                 patch.object(codex_resume, "launchctl"),
-                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()),
+                redirect_stdout(io.StringIO()),
             ):
                 self.assertEqual(codex_resume.main(arguments[4:]), 0)
-            self.assertEqual(submit.call_args_list, [
-                call("--scheduled-initial-submit", "Resume now", None),
-                call("--scheduled-submit", "Resume now", None),
-            ])
+            self.assertEqual(queue.call_args.args[:2], (self.LOCAL_CHAT, "Resume now"))
 
     def chat_rows(self):
         return [
@@ -658,13 +419,13 @@ class CodexResumeTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
         return home
 
-    def test_chat_list_shows_this_and_remote_macs_chats_newest_first(self):
+    def test_chat_list_shows_this_macs_chats_newest_first(self):
         self.with_chats()
         chats = codex_resume.load_chats()
-        self.assertEqual([chat["id"] for chat in chats],
-                         ["01a2-new", "01a7-mini", "01a1-mine", "01a4-old", "01a6-status"])
+        # Chats on a Mac the app reaches remotely, and plain ChatGPT chats, are left out.
+        self.assertEqual([chat["id"] for chat in chats], ["01a2-new", "01a1-mine", "01a4-old", "01a6-status"])
         self.assertEqual(chats[0]["name"], "Fresh prompt")
-        self.assertEqual([chat["host"] for chat in chats[:2]], [None, REMOTE_HOST])
+        self.assertEqual(codex_resume.latest_chat()["id"], "01a2-new")
         output = io.StringIO()
         with redirect_stdout(output):
             codex_resume.list_chats("status")
@@ -672,7 +433,8 @@ class CodexResumeTests(unittest.TestCase):
         lines = output.getvalue().splitlines()
         self.assertEqual(len(lines), 3)
         self.assertRegex(lines[0], rf"^{shown('2026-09-04T13:56:00+02:00')}  01a1-mine  Find current project status\s+myntr$")
-        self.assertEqual(lines[2], f"{shown('2026-10-10T08:00:00+02:00')}  01a7-mini  Explore PWA roadmap  local-relay (remote)")
+        self.assertRegex(lines[1], rf"^{shown('2026-07-01T10:00:00+02:00')}  01a6-status  Status board\s+work$")
+        self.assertEqual(lines[2], "No matching chats.")
         self.assertNotIn("Guardian", output.getvalue())
 
     def test_missing_chat_catalog_is_reported(self):
@@ -700,58 +462,20 @@ class CodexResumeTests(unittest.TestCase):
         self.assertIn("2 chats match", message)
         self.assertIn(f"{shown('2026-09-04T13:56:00+02:00')}  01a1-mine", message)
         self.assertIn(f"{shown('2026-08-01T10:00:00+02:00')}  01a4-old", message)
-        for query in ("guardian", "removed", "plain chatgpt", "nothing like this"):
+        for query in ("guardian", "removed", "plain chatgpt", "explore pwa", "nothing like this"):
             with self.subTest(query=query), self.assertRaisesRegex(RuntimeError, "No chat matches"):
                 codex_resume.resolve_chat(query)
 
-    def test_chat_sharing_its_window_title_with_another_is_refused(self):
-        def chat(chat_id, name):
-            return {"id": chat_id, "name": name, "cwd": None, "updated": datetime.now().astimezone(), "host": None}
-
-        for other in ("Plan the move", "Plan  the move", "Plan the…", "Plan the move and more"):
-            with self.subTest(other=other):
-                with patch.object(codex_resume, "load_chats", return_value=[chat("a", "Plan the move"), chat("b", other)]):
-                    clash = other != "Plan the move and more"
-                    if clash:
-                        with self.assertRaisesRegex(RuntimeError, "same name as 'Plan the move'.*\n.*  a  .*\n.*  b  "):
-                            codex_resume.resolve_chat("a")
-                    else:
-                        self.assertEqual(codex_resume.resolve_chat("a")["id"], "a")
-
-    def test_chat_is_passed_to_the_helper_and_stored_for_scheduled_runs(self):
+    def test_chat_is_resolved_now_and_stored_for_scheduled_runs(self):
         self.with_chats()
-        result = subprocess.CompletedProcess([], 0, "", "")
         with (
-            patch.object(codex_resume.shutil, "which", return_value="/usr/bin/swift"),
-            patch.object(codex_resume.subprocess, "run", return_value=result) as run,
-            patch.object(codex_resume, "resume_through_queue", return_value=False) as queue,
+            patch.object(codex_resume, "resume_through_queue") as queue,
             redirect_stdout(io.StringIO()) as output,
         ):
             self.assertEqual(codex_resume.main(["--now", "--chat", "01a1"]), 0)
-            now_arguments = run.call_args.args[0][2:]
-            self.assertEqual(codex_resume.main(["--now", "--chat", "explore pwa"]), 0)
-        self.assertEqual([entry.args[0]["id"] for entry in queue.call_args_list], ["01a1-mine"])
-        self.assertEqual(now_arguments[:6], [
-            "--submit", "--chat", "01a1-mine", "--chat-title", "Find current project status", "--other-titles",
-        ])
-        others = json.loads(now_arguments[6])
-        self.assertIn("Explore PWA roadmap", others)
-        self.assertNotIn("Find current project status", others)
-        self.assertEqual(output.getvalue().splitlines(), [
-            "Resuming in chat 'Find current project status' via the Codex queue.",
-            "Resuming in chat 'Explore PWA roadmap' (remote) via the app's Accessibility controls.",
-        ])
-        report = subprocess.CompletedProcess([], 0, '{"windowTitle": "Explore PWA roadmap"}', "")
-        with (
-            patch.object(codex_resume.shutil, "which", return_value="/usr/bin/swift"),
-            patch.object(codex_resume.subprocess, "run", return_value=report) as run,
-            redirect_stdout(io.StringIO()),
-        ):
-            self.assertEqual(codex_resume.main(["--check", "--chat", "explore pwa"]), 0)
-        self.assertEqual(run.call_args.args[0][2:-1], [
-            "--check", "--chat", "01a7-mini", "--chat-title", "Explore PWA roadmap", "--chat-host", REMOTE_HOST,
-            "--other-titles",
-        ])
+        queue.assert_called_once()
+        self.assertEqual(queue.call_args.args[0]["id"], "01a1-mine")
+        self.assertEqual(output.getvalue(), "Resuming in chat 'Find current project status'.\n")
         with tempfile.TemporaryDirectory() as temporary:
             plist_path = Path(temporary) / "job.plist"
             output = io.StringIO()
@@ -766,63 +490,37 @@ class CodexResumeTests(unittest.TestCase):
             with plist_path.open("rb") as agent_file:
                 arguments = plistlib.load(agent_file)["ProgramArguments"]
             self.assertEqual(arguments[-4:-2], ["--chat", "01a6-status"])
-            self.assertEqual(output.getvalue().count("in chat 'Status board' via the Codex queue."), 2)
+            self.assertEqual(output.getvalue().count("in chat 'Status board'."), 2)
             with (
                 patch.object(codex_resume, "PLIST_PATH", plist_path),
                 patch.object(codex_resume, "wait_until_scheduled_time"),
-                patch.object(codex_resume, "resume_through_queue", return_value=False),
-                patch.object(codex_resume, "submit") as submit,
+                patch.object(codex_resume, "resume_through_queue") as queue,
                 patch.object(codex_resume, "launchctl"),
-                redirect_stdout(io.StringIO()) as log,
+                redirect_stdout(io.StringIO()),
             ):
                 self.assertEqual(codex_resume.main(arguments[4:]), 0)
-            self.assertEqual(submit.call_args.args[2]["name"], "Status board")
-            self.assertIn("in chat 'Status board' through the app's Accessibility controls, attempt 1 of 11.", log.getvalue())
-
-    def test_check_and_inspect_identify_the_open_chat_and_its_project(self):
-        self.with_chats()
-        for title, chat in (
-            ("Explore PWA roadmap", {"id": "01a7-mini", "name": "Explore PWA roadmap", "remote": True,
-                                     "project": "local-relay", "folder": "/mini/local-relay"}),
-            ("Find current project…", None),
-            ("Codex", None),
-        ):
-            for action in ("--check", "--inspect"):
-                with self.subTest(title=title, action=action):
-                    result = subprocess.CompletedProcess([], 0, json.dumps({"windowTitle": title, "empty": True}), "")
-                    with (
-                        patch.object(codex_resume.shutil, "which", return_value="/usr/bin/swift"),
-                        patch.object(codex_resume.subprocess, "run", return_value=result),
-                        redirect_stdout(io.StringIO()) as output,
-                    ):
-                        codex_resume.run_automation(action)
-                    self.assertEqual(json.loads(output.getvalue()),
-                                     {"windowTitle": title, "empty": True, "chat": chat})
+            self.assertEqual(queue.call_args.args[0]["name"], "Status board")
 
     def test_project_matches_folder_names_and_picks_its_latest_chat(self):
         self.with_chats()
-        for query, chat_id in (("myntr", "01a1-mine"), ("LOCAL rel", "01a7-mini"), ("/work", "01a6-status")):
+        for query, chat_id in (("myntr", "01a1-mine"), ("DAS", "01a2-new"), ("/work", "01a6-status")):
             with self.subTest(query=query):
                 self.assertEqual(codex_resume.resolve_project(query)[1]["id"], chat_id)
         with self.assertRaisesRegex(RuntimeError, "projects match 'o'") as error:
             codex_resume.resolve_project("o")
-        self.assertIn("/mini/local-relay  'local-relay' (remote)", str(error.exception))
-        with self.assertRaisesRegex(RuntimeError, "No project matches 'remote'"):
-            codex_resume.resolve_project("remote")
+        self.assertIn("/work/old  'old'", str(error.exception))
+        with self.assertRaisesRegex(RuntimeError, "No project matches 'local-relay'"):
+            codex_resume.resolve_project("local-relay")
 
-    def test_scheduled_project_opens_the_chat_that_is_latest_when_it_runs(self):
+    def test_scheduled_project_uses_the_chat_that_is_latest_when_it_runs(self):
         home = self.with_chats()
-        result = subprocess.CompletedProcess([], 0, "", "")
         with (
-            patch.object(codex_resume.shutil, "which", return_value="/usr/bin/swift"),
-            patch.object(codex_resume.subprocess, "run", return_value=result) as run,
+            patch.object(codex_resume, "resume_through_queue") as queue,
             redirect_stdout(io.StringIO()) as output,
         ):
-            self.assertEqual(codex_resume.main(["--now", "--project", "local-relay"]), 0)
-        self.assertEqual(run.call_args.args[0][3:5], ["--chat", "01a7-mini"])
-        self.assertEqual(output.getvalue(),
-                         "Resuming in chat 'Explore PWA roadmap' (remote) in project 'local-relay' (remote) "
-                         "via the app's Accessibility controls.\n")
+            self.assertEqual(codex_resume.main(["--now", "--project", "myntr"]), 0)
+        self.assertEqual(queue.call_args.args[0]["id"], "01a1-mine")
+        self.assertEqual(output.getvalue(), "Resuming in chat 'Find current project status' in project 'myntr'.\n")
         with tempfile.TemporaryDirectory() as temporary:
             plist_path = Path(temporary) / "job.plist"
             output = io.StringIO()
@@ -837,7 +535,7 @@ class CodexResumeTests(unittest.TestCase):
             with plist_path.open("rb") as agent_file:
                 arguments = plistlib.load(agent_file)["ProgramArguments"]
             self.assertEqual(arguments[-4:-2], ["--project", "/work/myntr"])
-            self.assertEqual(output.getvalue().count("in the latest chat in project 'myntr' via the Codex queue."), 2)
+            self.assertEqual(output.getvalue().count("in the latest chat in project 'myntr'."), 2)
             self.assertNotIn("in chat", output.getvalue())
             (home / codex_resume.CHAT_CATALOG).unlink()
             write_catalog(home / codex_resume.CHAT_CATALOG, self.chat_rows() + [
@@ -847,14 +545,12 @@ class CodexResumeTests(unittest.TestCase):
             with (
                 patch.object(codex_resume, "PLIST_PATH", plist_path),
                 patch.object(codex_resume, "wait_until_scheduled_time"),
-                patch.object(codex_resume, "resume_through_queue", return_value=True) as queue,
-                patch.object(codex_resume, "submit") as submit,
+                patch.object(codex_resume, "resume_through_queue") as queue,
                 patch.object(codex_resume, "launchctl"),
                 redirect_stdout(io.StringIO()),
             ):
                 self.assertEqual(codex_resume.main(arguments[4:]), 0)
             self.assertEqual(queue.call_args.args[0]["id"], "01a8-later")
-            submit.assert_not_called()
 
     def test_scheduled_project_without_chats_fails_and_unloads(self):
         self.with_chats()
@@ -864,13 +560,13 @@ class CodexResumeTests(unittest.TestCase):
             with (
                 patch.object(codex_resume, "PLIST_PATH", plist_path),
                 patch.object(codex_resume, "wait_until_scheduled_time"),
-                patch.object(codex_resume, "submit") as submit,
+                patch.object(codex_resume, "resume_through_queue") as queue,
                 patch.object(codex_resume, "launchctl") as launchctl,
                 redirect_stderr(io.StringIO()) as errors,
             ):
                 self.assertEqual(codex_resume.main(
                     ["--project", "/work/deleted", "--scheduled", "2026-10-19T16:30:00+02:00"]), 1)
-            submit.assert_not_called()
+            queue.assert_not_called()
             launchctl.assert_called_once()
             self.assertFalse(plist_path.exists())
             self.assertIn("No project matches '/work/deleted'", errors.getvalue())
@@ -947,7 +643,7 @@ class CodexResumeTests(unittest.TestCase):
         self.assertNotIsInstance(error.exception, codex_resume.AppServerRejectedError)
         process.kill.assert_called_once()
 
-    def fake_queue(self, listings, deleted=True, add_error=None, on_add=None, home=None):
+    def fake_queue(self, listings, add_error=None, on_add=None, home=None):
         """Fake the app server's queue; each list request takes the next listing, repeating the last one."""
         calls = []
 
@@ -964,8 +660,6 @@ class CodexResumeTests(unittest.TestCase):
                 if isinstance(listing, Exception):
                     raise listing
                 return listing
-            if method == "thread/queue/delete":
-                return {"deleted": deleted}
             raise AssertionError(f"unexpected {method}")
 
         if home is None:
@@ -1000,7 +694,7 @@ class CodexResumeTests(unittest.TestCase):
         written = datetime.now().timestamp() - age
         os.utime(path, (written, written))
 
-    LOCAL_CHAT = {"id": "01a1-mine", "name": "Find current project status", "cwd": "/work/myntr", "host": None}
+    LOCAL_CHAT = {"id": "01a1-mine", "name": "Find current project status", "cwd": "/work/myntr"}
 
     def limit_stop(self, turn):
         return {"type": "task_complete", "turn_id": turn,
@@ -1036,7 +730,7 @@ class CodexResumeTests(unittest.TestCase):
         self.assertEqual(codex_resume.record_time({"timestamp": "2026-10-20T18:00:00Z"}), first + timedelta(hours=1))
         self.assertIsNone(codex_resume.stuck_at_limit({**self.LOCAL_CHAT, "id": "01a1-unknown"}))
 
-    def test_stuck_chats_are_local_recent_and_stopped_near_the_latest_limit_newest_first(self):
+    def test_stuck_chats_are_recent_and_stopped_near_the_latest_limit_newest_first(self):
         now = datetime.fromisoformat("2026-10-27T10:00:00+02:00")
         closed = now - timedelta(days=6)
         chats = {
@@ -1044,16 +738,14 @@ class CodexResumeTests(unittest.TestCase):
             "latest": (closed + timedelta(hours=3), closed + timedelta(hours=3)),
             "edge": (closed - timedelta(hours=21), closed - timedelta(hours=21)),
             "earlier-limit": (closed - timedelta(hours=22), closed),
-            "remote": (closed, closed + timedelta(hours=5)),
             "stale": (closed, closed + timedelta(hours=5)),
             "fine": None,
         }
-        catalogue = [{"id": name, "name": name, "host": "mini" if name == "remote" else None,
-                      "updated": now - timedelta(days=9 if name == "stale" else 5)} for name in chats]
+        catalogue = [{"id": name, "name": name, "updated": now - timedelta(days=9 if name == "stale" else 5)}
+                     for name in chats]
 
         def stuck(chat, since):
             self.assertIsNone(since)
-            self.assertIsNone(chat["host"])
             self.assertNotEqual(chat["id"], "stale")
             times = chats[chat["id"]]
             return times and {"run": chat["id"], "closed": times[0], "stopped": times[1]}
@@ -1074,15 +766,18 @@ class CodexResumeTests(unittest.TestCase):
         if state is not None:
             state_path.parent.mkdir()
             state_path.write_text(state if isinstance(state, str) else json.dumps(state))
+        self.state_path = state_path
         resumed = []
 
-        def resume(chat, message, stamp, fallback):
+        def resume(chat, message, stamp):
             self.assertIsNone(message)
-            self.assertFalse(fallback)
             # The resume is recorded before anything is queued, so a crash cannot send it twice.
             self.assertEqual(json.loads(state_path.read_text())["resumed"][chat["id"]], now)
             resumed.append(chat["id"])
-            return queued
+            if isinstance(queued, Exception):
+                raise queued
+            if not queued:
+                raise codex_resume.NotQueuedError("Could not queue the message, so nothing was sent: rejected")
 
         def stuck(moment, since):
             # As the real one does, stops before a chat's last resume do not count.
@@ -1095,9 +790,12 @@ class CodexResumeTests(unittest.TestCase):
               patch.object(codex_resume, "usage_allowed", return_value=allowed) as usage,
               patch.object(codex_resume, "resume_through_queue", side_effect=resume),
               patch.object(codex_resume, "log_stamp", return_value="[stamp] "),
-              redirect_stdout(io.StringIO()) as output):
+              redirect_stdout(io.StringIO()) as output, redirect_stderr(io.StringIO()) as errors):
             self.usage = usage
-            codex_resume.recurring_check(datetime.fromisoformat(now))
+            try:
+                codex_resume.recurring_check(datetime.fromisoformat(now))
+            finally:
+                self.errors = errors.getvalue()
         return resumed, output.getvalue(), json.loads(state_path.read_text())
 
     def test_recurring_check_resumes_up_to_three_stuck_chats_once_per_stop(self):
@@ -1127,7 +825,7 @@ class CodexResumeTests(unittest.TestCase):
               patch.object(codex_resume, "load_chats", return_value=[chat]),
               patch.object(codex_resume, "usage_allowed", return_value=True),
               patch.object(codex_resume, "resume_through_queue",
-                           side_effect=lambda chat, *_, **__: sent.append(chat["id"]) or True),
+                           side_effect=lambda chat, *_, **__: sent.append(chat["id"])),
               redirect_stdout(io.StringIO())):
             codex_resume.recurring_check(datetime.fromisoformat("2026-10-21T10:00:00+02:00"))
             codex_resume.recurring_check(datetime.fromisoformat("2026-10-21T16:00:00+02:00"))
@@ -1176,10 +874,20 @@ class CodexResumeTests(unittest.TestCase):
     def test_recurring_check_retries_a_chat_when_nothing_was_queued(self):
         resumed, _, state = self.recurring(["a"], queued=False)
         self.assertEqual((resumed, state["resumed"]), (["a"], {}))
+        self.assertEqual(self.errors, "[stamp] Could not queue the message, so nothing was sent: rejected\n")
         self.assertEqual(self.recurring(["a"], state=state)[0], ["a"])
         earlier = {"resumed": {"a": "2026-10-20T10:00:00+02:00"}}
         resumed, _, state = self.recurring(["a"], state=earlier, queued=False)
         self.assertEqual((resumed, state["resumed"]), (["a"], earlier["resumed"]))
+
+    def test_recurring_check_keeps_the_resume_when_the_message_may_have_been_queued(self):
+        uncertain = RuntimeError("The message may have been queued: no reply. Check the chat before retrying.")
+        with self.assertRaisesRegex(RuntimeError, "may have been queued"):
+            self.recurring(["a", "b"], queued=uncertain)
+        state = json.loads(self.state_path.read_text())
+        # Only the first chat was tried, and its record stays so it is not sent twice.
+        self.assertEqual(state["resumed"], {"a": "2026-10-21T10:00:00+02:00"})
+        self.assertEqual(self.recurring(["a"], state=state)[0], [])
 
     def test_usage_is_allowed_only_when_no_limit_is_used_up(self):
         for result, allowed in (
@@ -1264,18 +972,19 @@ class CodexResumeTests(unittest.TestCase):
         calls = self.fake_queue([self.queued("q1"), self.queued("other", cursor="c2"), self.queued("q1"),
                                  self.queued("other")])
         with redirect_stdout(io.StringIO()) as output:
-            self.assertTrue(codex_resume.resume_through_queue(self.LOCAL_CHAT, None))
+            self.assertIsNone(codex_resume.resume_through_queue(self.LOCAL_CHAT, None))
         add = calls[0]
         self.assertEqual(add[0], "thread/queue/add")
         self.assertEqual(add[1]["threadId"], "01a1-mine")
         self.assertEqual(add[1]["input"], [{"type": "text", "text": "continue", "text_elements": []}])
         self.assertTrue(add[1]["clientUserMessageId"])
         self.assertEqual([call[1].get("cursor") for call in calls[1:]], [None, None, "c2", None])
-        self.assertNotIn("thread/queue/delete", [call[0] for call in calls])
         self.assertEqual(output.getvalue().splitlines(), [
             "Queued the message in chat 'Find current project status'; waiting for the app to take it.",
             "The app took the message from the queue.",
         ])
+        # Only the app sends queued messages, so it is opened if it is not running.
+        self.open_app.assert_called_once()
 
     def test_queue_reports_how_the_reply_it_started_ended(self):
         limit = {"type": "task_complete", "error": {"message": "You've hit your usage limit."}}
@@ -1290,7 +999,7 @@ class CodexResumeTests(unittest.TestCase):
                 # An earlier reply's end must not be mistaken for this one's.
                 self.write_session_log("task_started", "task_complete")
                 with redirect_stdout(io.StringIO()) as output:
-                    self.assertTrue(codex_resume.resume_through_queue(self.LOCAL_CHAT, None))
+                    self.assertIsNone(codex_resume.resume_through_queue(self.LOCAL_CHAT, None))
                 self.assertEqual(output.getvalue().splitlines()[-1], expected)
 
     def test_queue_reports_only_the_new_reply_when_the_log_was_compressed(self):
@@ -1308,7 +1017,7 @@ class CodexResumeTests(unittest.TestCase):
 
         self.fake_queue([self.queued()], on_add=unpack_and_reply, home=home)
         with redirect_stdout(io.StringIO()) as output:
-            self.assertTrue(codex_resume.resume_through_queue(self.LOCAL_CHAT, None))
+            self.assertIsNone(codex_resume.resume_through_queue(self.LOCAL_CHAT, None))
         self.assertEqual(output.getvalue().splitlines()[-1], "The reply ended with an error: Usage limit.")
         self.assertFalse(codex_resume.written_since({"timestamp": "unreadable"}, datetime.now().astimezone()))
         self.assertFalse(codex_resume.written_since({}, datetime.now().astimezone()))
@@ -1317,14 +1026,16 @@ class CodexResumeTests(unittest.TestCase):
         calls = self.fake_queue([self.queued("q1")])
         self.write_session_log("task_started", "task_complete", "task_started")
         with redirect_stdout(io.StringIO()) as output:
-            self.assertTrue(codex_resume.resume_through_queue(self.LOCAL_CHAT, None, lambda: "[t] "))
+            self.assertIsNone(codex_resume.resume_through_queue(self.LOCAL_CHAT, None, lambda: "[t] "))
         self.assertEqual(calls, [])
         self.assertEqual(output.getvalue(),
                          "[t] Codex is already replying in chat 'Find current project status'; not sending 'continue'.\n")
         with redirect_stdout(io.StringIO()) as output:
-            self.assertTrue(codex_resume.resume_through_queue(self.LOCAL_CHAT, "After this"))
+            self.assertIsNone(codex_resume.resume_through_queue(self.LOCAL_CHAT, "After this"))
         self.assertEqual([call[0] for call in calls], ["thread/queue/add"])
         self.assertIn("queued the message, and the app sends it when the reply ends", output.getvalue())
+        # A crashed app can leave a reply looking unfinished, so a queued message still opens the app.
+        self.open_app.assert_called_once()
 
     def test_reply_in_a_reverted_chats_new_log_counts_as_in_progress(self):
         self.fake_queue([self.queued()])
@@ -1350,33 +1061,52 @@ class CodexResumeTests(unittest.TestCase):
                 self.write_session_log(*events, age=age)
                 self.assertEqual(codex_resume.replying(self.LOCAL_CHAT), expected)
 
-    def test_queue_message_left_untaken_is_removed_before_the_app_controls_are_used(self):
+    def test_queue_message_left_untaken_stays_queued(self):
         calls = self.fake_queue([self.queued("q1")])
         with (
             patch.object(codex_resume, "QUEUE_PICKUP_SECONDS", 0),
             redirect_stdout(io.StringIO()) as output,
         ):
-            self.assertFalse(codex_resume.resume_through_queue(self.LOCAL_CHAT, "Resume now", lambda: "[t] "))
+            self.assertIsNone(codex_resume.resume_through_queue(self.LOCAL_CHAT, "Resume now", lambda: "[t] "))
         self.assertEqual(calls[0][1]["input"][0]["text"], "Resume now")
-        self.assertEqual(calls[-1], ("thread/queue/delete", {"threadId": "01a1-mine", "queuedSubmissionId": "q1"}))
-        self.assertIn("[t] The app did not take the message within 0 minutes, so it was removed",
-                      output.getvalue())
+        self.assertEqual([call[0] for call in calls], ["thread/queue/add", "thread/queue/list"])
+        self.assertEqual(output.getvalue().splitlines()[-1],
+                         "[t] The app has not taken the message within 0 minutes; it stays queued, "
+                         "and the app sends it once it gets to the chat.")
 
-    def test_queue_message_taken_while_removing_it_counts_as_sent(self):
-        self.fake_queue([self.queued("q1")], deleted=False)
-        with (
-            patch.object(codex_resume, "QUEUE_PICKUP_SECONDS", 0),
-            redirect_stdout(io.StringIO()) as output,
+    def test_app_is_opened_in_the_background_only_when_it_is_not_running(self):
+        def done(stdout="", code=0, stderr=""):
+            return subprocess.CompletedProcess([], code, stdout, stderr)
+
+        running = 'ASN:0x0-0x1b59b58-"ChatGPT":\n'
+        for results, expected in (
+            ([done(running)], ""),
+            ([done(), done()], "[t] Opened the Codex app in the background.\n"),
+            ([done(), done(code=1, stderr="LSOpenURLs failed\n")],
+             "[t] Could not open the Codex app (LSOpenURLs failed); it sends the message once it runs.\n"),
+            ([OSError("no lsappinfo")],
+             "[t] Could not open the Codex app (no lsappinfo); it sends the message once it runs.\n"),
         ):
-            self.assertTrue(codex_resume.resume_through_queue(self.LOCAL_CHAT, None))
-        self.assertTrue(output.getvalue().endswith("The app took the message from the queue.\n"))
+            with self.subTest(expected=expected):
+                with (
+                    patch.object(codex_resume.subprocess, "run", side_effect=results) as run,
+                    redirect_stdout(io.StringIO()) as output,
+                ):
+                    REAL_OPEN_APP(lambda: "[t] ")
+                self.assertEqual(output.getvalue(), expected)
+                self.assertEqual(run.call_args_list[0].args[0],
+                                 ["/usr/bin/lsappinfo", "find", "bundleid=com.openai.codex"])
+                if len(run.call_args_list) > 1:
+                    self.assertEqual(run.call_args_list[1].args[0], ["/usr/bin/open", "-g", "-b", "com.openai.codex"])
 
-    def test_queue_rejection_falls_back_and_uncertainty_stops(self):
+    def test_queue_rejection_and_uncertainty_are_reported(self):
         calls = self.fake_queue([self.queued()], add_error=codex_resume.AppServerRejectedError("thread not found"))
-        with redirect_stdout(io.StringIO()) as output:
-            self.assertFalse(codex_resume.resume_through_queue(self.LOCAL_CHAT, "Resume now"))
+        with redirect_stdout(io.StringIO()) as output, self.assertRaisesRegex(
+                codex_resume.NotQueuedError, "Could not queue the message, so nothing was sent: thread not found"):
+            codex_resume.resume_through_queue(self.LOCAL_CHAT, "Resume now")
         self.assertEqual([call[0] for call in calls], ["thread/queue/add"])
-        self.assertIn("Could not queue the message (thread not found)", output.getvalue())
+        self.assertEqual(output.getvalue(), "")
+        self.open_app.assert_not_called()
         timeout = RuntimeError("The Codex app server did not answer in time.")
         for kind, setup in (
             ("may have been queued", {"listings": [self.queued()], "add_error": timeout}),
@@ -1386,10 +1116,11 @@ class CodexResumeTests(unittest.TestCase):
                 with self.subTest(kind=kind, message=message):
                     self.fake_queue(**setup)
                     with redirect_stdout(io.StringIO()), \
-                            self.assertRaisesRegex(RuntimeError, f"{kind}.*Check the chat before retrying"):
+                            self.assertRaisesRegex(RuntimeError, f"{kind}.*Check the chat before retrying") as error:
                         codex_resume.resume_through_queue(self.LOCAL_CHAT, message)
+                    self.assertNotIsInstance(error.exception, codex_resume.NotQueuedError)
 
-    def test_scheduled_queue_uncertainty_stops_without_typing(self):
+    def test_scheduled_queue_uncertainty_is_logged_and_unloads(self):
         timeout = RuntimeError("The Codex app server did not answer in time.")
         for message in (None, "Resume now"):
             with self.subTest(message=message), tempfile.TemporaryDirectory() as temporary:
@@ -1399,7 +1130,6 @@ class CodexResumeTests(unittest.TestCase):
                 with (
                     patch.object(codex_resume, "PLIST_PATH", plist_path),
                     patch.object(codex_resume, "wait_until_scheduled_time"),
-                    patch.object(codex_resume, "submit") as submit,
                     patch.object(codex_resume, "launchctl") as launchctl,
                     redirect_stdout(io.StringIO()) as log,
                     redirect_stderr(io.StringIO()) as errors,
@@ -1407,7 +1137,6 @@ class CodexResumeTests(unittest.TestCase):
                     self.assertEqual(codex_resume.main(
                         [*(["--message", message] if message else []), "--chat", "01a1-mine",
                          "--scheduled", datetime.now().astimezone().isoformat()]), 1)
-                submit.assert_not_called()
                 launchctl.assert_called_once()
                 self.assertFalse(plist_path.exists())
                 self.assertRegex(log.getvalue(), r"^\[\d\d\.\d\d\.\d{4} kl\. \d\d\.\d\d\.\d\d\] Queued the message")
@@ -1478,8 +1207,7 @@ class CodexResumeTests(unittest.TestCase):
         self.assertEqual(arguments[4:-2], ["--chat", "01a1-mine", "--every", "30", "--used-up", "300"])
         lines = output.getvalue().splitlines()
         self.assertRegex(lines[-1], r"^Codex resume scheduled for \S+ kl\. \S+, or earlier if the limit resets "
-                                    r"first \(checked every 30 minutes\) in chat 'Find current project status' "
-                                    r"via the Codex queue\.$")
+                                    r"first \(checked every 30 minutes\) in chat 'Find current project status'\.$")
         self.assertEqual(lines[-2], lines[-1])
         for minutes in ("4", "0x"):
             with self.subTest(minutes=minutes), redirect_stderr(io.StringIO()):
@@ -1532,14 +1260,15 @@ class CodexResumeTests(unittest.TestCase):
                 patch.object(codex_resume.time, "sleep", side_effect=sleep),
                 patch.object(codex_resume, "app_server_request", side_effect=read),
                 patch.object(codex_resume, "log_stamp", return_value=""),
-                patch.object(codex_resume, "submit_scheduled") as submit,
+                patch.object(codex_resume, "latest_chat", return_value=self.LOCAL_CHAT),
+                patch.object(codex_resume, "resume_through_queue") as queue,
                 patch.object(codex_resume, "launchctl"),
                 redirect_stdout(io.StringIO()) as output,
             ):
                 self.assertEqual(codex_resume.main(
                     ["--every", "30", "--used-up", used_up, "--scheduled", deadline.isoformat()]), 0)
         self.assertEqual(readings, [])
-        return ([(moment - deadline).total_seconds() / 60 for moment in checks], submit.call_count,
+        return ([(moment - deadline).total_seconds() / 60 for moment in checks], queue.call_count,
                 output.getvalue().splitlines())
 
     def test_recurring_reset_sends_once_an_early_reset_leaves_the_limit_unused(self):
@@ -1636,14 +1365,15 @@ class CodexResumeTests(unittest.TestCase):
                     patch.object(codex_resume, "PLIST_PATH", plist_path),
                     patch.object(codex_resume, "wait_until_scheduled_time"),
                     patch.object(codex_resume, "start_window_skip_reason", return_value=reason),
-                    patch.object(codex_resume, "submit") as submit,
+                    patch.object(codex_resume, "latest_chat", return_value=self.LOCAL_CHAT),
+                    patch.object(codex_resume, "resume_through_queue") as queue,
                     patch.object(codex_resume, "launchctl") as launchctl,
                     redirect_stdout(output),
                 ):
                     self.assertEqual(codex_resume.main(
                         ["--start-window", "--scheduled", datetime.now().astimezone().isoformat()]), 0)
                     self.assertEqual(codex_resume.main(["--now", "--start-window"]), 0)
-                self.assertEqual(submit.call_count, 2 if sends else 0)
+                self.assertEqual(queue.call_count, 2 if sends else 0)
                 self.assertFalse(plist_path.exists())
                 launchctl.assert_called_once()
                 expected = ("No 5-hour window is running; sending to start one." if sends
@@ -1652,11 +1382,11 @@ class CodexResumeTests(unittest.TestCase):
                 self.assertRegex(lines[0], r"^\[\d\d\.\d\d\.\d{4} kl\. \d\d\.\d\d\.\d\d\] " + re.escape(expected) + "$")
                 if sends:
                     self.assertEqual(lines[-2:], [
-                        expected, "Resuming in the open chat via the app's Accessibility controls.",
+                        expected, "Resuming in the latest chat, 'Find current project status'.",
                     ])
                 else:
                     self.assertEqual(lines[-1], expected)
-                self.assertEqual(len(lines), 4 if sends else 2)
+                self.assertEqual(len(lines), 3 if sends else 2)
 
     def test_start_window_is_stored_shown_and_needs_time_or_now(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -1678,32 +1408,15 @@ class CodexResumeTests(unittest.TestCase):
                 arguments = plistlib.load(agent_file)["ProgramArguments"]
         self.assertEqual(arguments[-3:], ["--start-window", "--scheduled", "2026-10-20T00:00:00+02:00"])
         self.assertEqual(output.getvalue().splitlines(), [
-            "Codex resume scheduled for 20.10.2026 kl. 00.00 via the app's Accessibility controls, "
+            "Codex resume scheduled for 20.10.2026 kl. 00.00 in the latest chat on this Mac, "
             "only if no 5-hour window is running.",
         ] * 2)
-        for action in (["--reset"], ["--status"], ["--check"]):
+        for action in (["--reset"], ["--status"], ["--list"]):
             with self.subTest(action=action), redirect_stderr(io.StringIO()):
                 with self.assertRaises(SystemExit) as error:
                     codex_resume.main([*action, "--start-window"])
                 self.assertEqual(error.exception.code, 2)
 
-    def test_compile_error_on_old_swift_explains_the_update(self):
-        compile_error = subprocess.CompletedProcess(
-            [], 1, "", "codex-resume.swift:280:23: error: variable binding in a condition",
-        )
-        for version_output, fragment in (
-            ("Apple Swift version 5.4 (swiftlang-1205.0.26.9)", "Swift 5.4 cannot compile"),
-            ("Apple Swift version 6.4 (swiftlang-6.4.0.34.1)", "Codex automation failed"),
-        ):
-            with self.subTest(version=version_output):
-                version = subprocess.CompletedProcess([], 0, version_output, "")
-                with (
-                    patch.object(codex_resume.shutil, "which", return_value="/usr/bin/swift"),
-                    patch.object(codex_resume.subprocess, "run",
-                                 side_effect=[compile_error, version]),
-                ):
-                    with self.assertRaisesRegex(RuntimeError, fragment):
-                        codex_resume.run_automation("--submit")
 
 
 if __name__ == "__main__":
