@@ -757,9 +757,11 @@ class CodexResumeTests(unittest.TestCase):
         self.assertEqual(found[0]["name"], "latest")
 
     def recurring(self, chats, allowed=True, state=None, queued=True, now="2026-10-21T10:00:00+02:00",
-                  stopped="2026-10-21T01:00:00+02:00"):
-        """Run one recurring check with chats stuck since stopped; return the chats it resumed, what it printed,
-        and the state it saved."""
+                  stopped="2026-10-21T01:00:00+02:00", minutes=15, resets=None, sent=None, after_wait=None):
+        """Run one recurring check, set up every minutes, with chats stuck since stopped and a used-up limit
+        resetting at resets; allowed is the answer, or the answers in turn, to whether the limits allow use.
+        A wait ends at sent, with the chats in after_wait (default: the same) still stuck.
+        Return the chats it resumed, what it printed, and the state it saved."""
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         state_path = Path(temporary.name) / "state/recurring.json"
@@ -767,12 +769,18 @@ class CodexResumeTests(unittest.TestCase):
             state_path.parent.mkdir()
             state_path.write_text(state if isinstance(state, str) else json.dumps(state))
         self.state_path = state_path
+        plist_path = Path(temporary.name) / "recurring.plist"
+        if minutes is not None:
+            plist_path.write_bytes(plistlib.dumps({"StartInterval": minutes * 60}))
+        windows = [{"name": "5-hour", "minutes": 300, "used": 100 if resets else 40,
+                    "resets": datetime.fromisoformat(resets or "2026-10-21T12:00:00+02:00").astimezone()}]
         resumed = []
 
         def resume(chat, message, stamp):
             self.assertIsNone(message)
             # The resume is recorded before anything is queued, so a crash cannot send it twice.
-            self.assertEqual(json.loads(state_path.read_text())["resumed"][chat["id"]], now)
+            self.assertEqual(datetime.fromisoformat(json.loads(state_path.read_text())["resumed"][chat["id"]]),
+                             datetime.fromisoformat(sent or now))
             resumed.append(chat["id"])
             if isinstance(queued, Exception):
                 raise queued
@@ -782,16 +790,22 @@ class CodexResumeTests(unittest.TestCase):
         def stuck(moment, since):
             # As the real one does, stops before a chat's last resume do not count.
             stop = datetime.fromisoformat(stopped)
+            waited = after_wait is not None and wait.called
             return [{**self.LOCAL_CHAT, "id": name, "name": name, "stopped": stop}
-                    for name in chats if name not in since or since[name] < stop]
+                    for name in (after_wait if waited else chats) if name not in since or since[name] < stop]
 
+        answers = {"side_effect": allowed} if isinstance(allowed, list) else {"return_value": allowed}
         with (patch.object(codex_resume, "RECURRING_STATE_PATH", state_path),
+              patch.object(codex_resume, "RECURRING_PLIST_PATH", plist_path),
               patch.object(codex_resume, "stuck_chats", side_effect=stuck),
-              patch.object(codex_resume, "usage_allowed", return_value=allowed) as usage,
+              patch.object(codex_resume, "usage_allowed", **answers) as usage,
+              patch.object(codex_resume, "usage_limits", return_value=windows),
+              patch.object(codex_resume, "wait_until_scheduled_time") as wait,
+              patch.object(codex_resume, "local_now", return_value=datetime.fromisoformat(sent or now)),
               patch.object(codex_resume, "resume_through_queue", side_effect=resume),
               patch.object(codex_resume, "log_stamp", return_value="[stamp] "),
               redirect_stdout(io.StringIO()) as output, redirect_stderr(io.StringIO()) as errors):
-            self.usage = usage
+            self.usage, self.wait = usage, wait
             try:
                 codex_resume.recurring_check(datetime.fromisoformat(now))
             finally:
@@ -870,6 +884,35 @@ class CodexResumeTests(unittest.TestCase):
         # The limits are only read when there is a chat to resume.
         self.recurring([])
         self.usage.assert_not_called()
+
+    def test_recurring_check_waits_for_a_reset_before_its_next_check_and_sends_a_minute_after(self):
+        # The resume is recorded when the wait actually ended, which can be late, as when the Mac slept.
+        resumed, output, state = self.recurring(["a"], allowed=[False, True], resets="2026-10-21T10:10:00+02:00",
+                                                sent="2026-10-21T16:00:00+02:00")
+        self.assertEqual(datetime.fromisoformat(self.wait.call_args.args[0]),
+                         datetime.fromisoformat("2026-10-21T10:11:00+02:00"))
+        self.assertEqual(resumed, ["a"])
+        self.assertEqual(datetime.fromisoformat(state["resumed"]["a"]),
+                         datetime.fromisoformat("2026-10-21T16:00:00+02:00"))
+        # Only chats still stuck after the wait are resumed, not one resumed meanwhile.
+        resumed, _, _ = self.recurring(["a", "b"], allowed=[False, True], resets="2026-10-21T10:10:00+02:00",
+                                       sent="2026-10-21T10:11:03+02:00", after_wait=["b"])
+        self.assertEqual(resumed, ["b"])
+        resumed, _, _ = self.recurring(["a"], allowed=[False], resets="2026-10-21T10:10:00+02:00",
+                                       sent="2026-10-21T10:11:03+02:00", after_wait=[])
+        self.assertEqual(resumed, [])
+        self.assertEqual(output.splitlines()[0], "[stamp] 1 chat(s) stopped at a usage limit; waiting until "
+                                                 f"{shown('2026-10-21T10:11:00+02:00')}, a minute after it resets.")
+        # A reset at or after the next check, a limit still used up after the wait, or a used-up limit with no
+        # reset time (or no recurring job to know the interval) is left to a later check.
+        for resets, allowed, minutes in (("2026-10-21T10:14:00+02:00", [False, True], 15),
+                                         ("2026-10-21T10:10:00+02:00", [False, False], 15),
+                                         (None, [False, True], 15),
+                                         ("2026-10-21T10:10:00+02:00", [False, True], None)):
+            with self.subTest(resets=resets, allowed=allowed, minutes=minutes):
+                resumed, _, state = self.recurring(["a"], allowed=allowed, resets=resets, minutes=minutes)
+                self.assertEqual((resumed, state["resumed"]), ([], {}))
+                self.assertEqual(self.wait.called, allowed == [False, False])
 
     def test_recurring_check_retries_a_chat_when_nothing_was_queued(self):
         resumed, _, state = self.recurring(["a"], queued=False)

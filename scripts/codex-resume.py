@@ -29,12 +29,13 @@ session logs uncompressed for over a week. Chats the limit stopped more than
 24 hours before it stopped the latest one were left stuck by an earlier limit
 and are skipped. Once the limits read through the CLI allow use, it queues
 continue to up to three chats, newest first, and at most three in any five
-hours. When each chat was last resumed is recorded before queueing in
+hours. When a used-up limit resets before the next check, the check waits and
+sends a minute after the reset, as --reset does. When each chat was last resumed is recorded before queueing in
 ~/Library/Application Support/codex-resume/recurring.json, and only limit stops
 after that count, so each chat is resumed once per stop. An unreadable record
 stops the checks rather than risk sending twice, and a lock skips a check while
-another runs. It logs only what it sends and errors, and does not inhibit
-sleep. --recurring off removes it; --cancel leaves it alone.
+another runs. It logs only what it sends, when it waits for a reset, and
+errors, and does not inhibit sleep. --recurring off removes it; --cancel leaves it alone.
 
 A scheduled resume is a user LaunchAgent that starts immediately under
 caffeinate -i, so the Mac does not idle-sleep before the run, and waits until
@@ -722,6 +723,27 @@ def usage_allowed():
         (limits.get(key) or {}).get("usedPercent", 0) < 100 for key in ("primary", "secondary"))
 
 
+def recurring_minutes():
+    """The interval of the recurring check, or None when it is not set up."""
+    try:
+        with RECURRING_PLIST_PATH.open("rb") as agent_file:
+            return plistlib.load(agent_file).get("StartInterval", 0) // 60 or None
+    except FileNotFoundError:
+        return None
+
+
+def reset_before_next_check(now):
+    """A minute after the used-up limit resets, as for --reset, when that comes before the next check."""
+    minutes = recurring_minutes()
+    if minutes is None:
+        return None
+    try:
+        resets = reset_time(usage_limits())
+    except RuntimeError:
+        return None
+    return resets if resets < now + timedelta(minutes=minutes) else None
+
+
 def load_recurring_state():
     """The last check and when each chat was last resumed; an unreadable file is an error, since resuming
     without it could send twice."""
@@ -747,6 +769,10 @@ def save_recurring_state(state):
     temporary.replace(RECURRING_STATE_PATH)
 
 
+def local_now():
+    return datetime.now().astimezone()
+
+
 def recurring_check(now=None):
     """Queue continue to up to three chats stuck at a usage limit once the limits allow it; each chat once per
     limit stop. Returns without checking while another check runs."""
@@ -765,8 +791,20 @@ def check_stuck_chats(now):
     state.update(checked=now.isoformat(), resumed=resumed)
     try:
         chats = stuck_chats(now, resumed)
-        if not chats or not usage_allowed():
+        if not chats:
             return
+        if not usage_allowed():
+            resets = reset_before_next_check(now)
+            if resets is None:
+                return
+            print(f"{log_stamp()}{len(chats)} chat(s) stopped at a usage limit; waiting until "
+                  f"{format_time(resets)}, a minute after it resets.", flush=True)
+            wait_until_scheduled_time(resets.isoformat())
+            # The wait can run late, as when the Mac slept, and chats can be resumed meanwhile.
+            now = local_now()
+            chats = stuck_chats(now, resumed)
+            if not chats or not usage_allowed():
+                return
         recent = sum(at >= now - RECURRING_PERIOD for at in resumed.values())
         for chat in chats[:max(0, RECURRING_CHATS - recent)]:
             print(f"{log_stamp()}Chat {chat_label(chat)} stopped at a usage limit "
@@ -895,9 +933,8 @@ def scheduled_summary(scheduled, message, chat=None, project=None, start_window=
 
 
 def status():
-    if RECURRING_PLIST_PATH.exists():
-        with RECURRING_PLIST_PATH.open("rb") as agent_file:
-            minutes = plistlib.load(agent_file).get("StartInterval", 0) // 60
+    minutes = recurring_minutes()
+    if minutes is not None:
         try:
             checked = load_recurring_state().get("checked")
             last = f" Last checked {format_time(datetime.fromisoformat(checked).astimezone())}." if checked else ""
