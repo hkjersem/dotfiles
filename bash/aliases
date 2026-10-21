@@ -67,6 +67,9 @@ alias dotfiles-profile='bash ~/.dotfiles/scripts/machine-profile.sh'
 # Schedule a one-time Codex submission using local 24-hour HH:MM, HH.MM, or HHMM time.
 codex-resume() { python3 "$HOME/.dotfiles/scripts/codex-resume.py" "$@"; }
 
+# Summarise due and pending items across roadmaps listed in ~/.config/dotfiles/roadmap-paths.
+roadmaps() { python3 "$HOME/.dotfiles/scripts/roadmaps.py" "$@"; }
+
 # Flush Directory Service cache
 alias flush="dscacheutil -flushcache && killall -HUP mDNSResponder"
 

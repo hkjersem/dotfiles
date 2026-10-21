@@ -682,6 +682,18 @@ def cmd_sync(args: argparse.Namespace) -> int:
 
 
 def cmd_check(args: argparse.Namespace) -> int:
+    report, briefs = check_report(args)
+    for line in report.errors:
+        print("error: " + line)
+    for line in report.warnings:
+        print("warning: " + line)
+    open_count = sum(1 for b in briefs if not b.archived)
+    print(f"{len(report.errors)} error(s), {len(report.warnings)} warning(s); "
+          f"{open_count} open brief(s), {len(briefs) - open_count} archived.")
+    return 1 if report.errors else 0
+
+
+def check_report(args: argparse.Namespace) -> Tuple[Report, List[Brief]]:
     root, index_path, brief_dir = paths(args)
     report = Report()
     if not os.path.isdir(brief_dir):
@@ -707,14 +719,7 @@ def cmd_check(args: argparse.Namespace) -> int:
     validate(briefs, index_path, root, args.strict, report)
     for brief in briefs:
         check_links(brief.path, brief.text, root, report)
-    for line in report.errors:
-        print("error: " + line)
-    for line in report.warnings:
-        print("warning: " + line)
-    open_count = sum(1 for b in briefs if not b.archived)
-    print(f"{len(report.errors)} error(s), {len(report.warnings)} warning(s); "
-          f"{open_count} open brief(s), {len(briefs) - open_count} archived.")
-    return 1 if report.errors else 0
+    return report, briefs
 
 
 def due_lines(briefs: List[Brief], today: datetime.date) -> List[Tuple[str, str]]:
@@ -748,6 +753,41 @@ def hold(item: Brief, status: Dict[str, str]) -> Optional[str]:
     return None
 
 
+class Overview:
+    """Due, in-progress and startable items in one roadmap."""
+
+    def __init__(self, briefs: List[Brief], today: datetime.date):
+        now, nxt, routines, _ = plan(briefs)
+        self.now = now + [b for b in routines if b.status == "active"]
+        self.next = nxt
+        status = {b.slug: b.status for b in briefs if b.valid}
+        self.held = {b.slug: hold(b, status) for b in nxt + routines}
+        by_slug = {b.slug: b for b in briefs}
+
+        def due_note(slug: str) -> Optional[str]:
+            b = by_slug[slug]
+            if b.status == "idea":
+                return "idea, not committed"
+            if b.get("when") and not b.routine:
+                return f"parked until: {b.get('when')}"
+            return self.held.get(slug)
+
+        self.due = [line + (f" ({due_note(slug)})" if due_note(slug) else "")
+                    for slug, line in due_lines(briefs, today)]
+        self.can_start: List[str] = []
+        self.needs_planning: List[str] = []
+        self.waiting: List[str] = []
+        for item in nxt + routines:
+            if self.held[item.slug]:
+                self.waiting.append(f"  {item.slug}: {self.held[item.slug]}")
+            elif item.routine:
+                continue
+            elif item.status == "ready":
+                self.can_start.append(f"  {item.slug}: {item.title}")
+            else:
+                self.needs_planning.append(f"  {item.slug}: {item.title}")
+
+
 def cmd_ready(args: argparse.Namespace) -> int:
     root, index_path, brief_dir = paths(args)
     report = Report()
@@ -757,22 +797,8 @@ def cmd_ready(args: argparse.Namespace) -> int:
     if today is None:
         print("--today must be a YYYY-MM-DD date.")
         return 1
-    now, nxt, routines, _ = plan(briefs)
-    now = now + [b for b in routines if b.status == "active"]
-    status = {b.slug: b.status for b in briefs if b.valid}
-    held = {b.slug: hold(b, status) for b in nxt + routines}
-    by_slug = {b.slug: b for b in briefs}
-
-    def due_note(slug: str) -> Optional[str]:
-        b = by_slug[slug]
-        if b.status == "idea":
-            return "idea, not committed"
-        if b.get("when") and not b.routine:
-            return f"parked until: {b.get('when')}"
-        return held.get(slug)
-
-    due = [line + (f" ({due_note(slug)})" if due_note(slug) else "")
-           for slug, line in due_lines(briefs, today)]
+    view = Overview(briefs, today)
+    now, due, waiting = view.now, view.due, view.waiting
     if due:
         print(f"Due (overdue or within {DUE_SOON_DAYS} days):")
         print("\n".join(due))
@@ -780,23 +806,13 @@ def cmd_ready(args: argparse.Namespace) -> int:
         print("In progress (reported, not locked):")
         for b in now:
             print(f"  {b.slug}: {b.status}" + (f", blocked: {b.get('blocked')}" if b.get("blocked") else ""))
-    can_start, needs_planning, waiting = [], [], []
-    for item in nxt + routines:
-        if held[item.slug]:
-            waiting.append(f"  {item.slug}: {held[item.slug]}")
-        elif item.routine:
-            continue
-        elif item.status == "ready":
-            can_start.append(f"  {item.slug}: {item.title}")
-        else:
-            needs_planning.append(f"  {item.slug}: {item.title}")
-    for label, rows in (("Ready to start:", can_start),
-                        ("Committed, decisions still open:", needs_planning),
+    for label, rows in (("Ready to start:", view.can_start),
+                        ("Committed, decisions still open:", view.needs_planning),
                         ("Waiting:", waiting)):
         if rows:
             print(label)
             print("\n".join(rows))
-    if not (now or nxt or due or waiting):
+    if not (now or view.next or due or waiting):
         print("Nothing in progress, committed or due.")
     if report.errors:
         print("\nThe roadmap has errors; fix them before relying on this list:")

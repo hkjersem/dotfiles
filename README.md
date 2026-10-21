@@ -38,6 +38,7 @@ commit or another install. Shell settings may require a new shell.
 | `dotfiles-defaults` | Apply macOS system preferences |
 | `dotfiles-audit` | Check for drift between repo and installed state (includes skills) |
 | `dotfiles-profile` | Show or choose the machine's personal/work profile |
+| `roadmaps` | Show due items, items awaiting acceptance, work in progress and errors across `roadmap` skill roadmaps in the repositories, or folders whose direct subfolders are repositories, listed one per line in the machine-local `~/.config/dotfiles/roadmap-paths`; or pass paths directly |
 
 `dotfiles-update` updates installed software, not this Git checkout. To get new
 dotfiles and reapply their symlinks:
