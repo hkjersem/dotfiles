@@ -17,6 +17,25 @@ source/repository|enabled-skill
 # disabled: source/repository|disabled-skill
 ```
 
+## What belongs in a skill
+
+Agents decide for themselves whether to load a skill, and sometimes don't. In
+[Vercel's evals](https://vercel.com/blog/agents-md-outperforms-skills-in-our-agent-evals),
+a small Next.js 16 suite targeting APIs missing from model training, an
+unprompted docs skill was never invoked in 56% of cases and was no better than
+no docs. A line in `AGENTS.md` telling the agent to use it raised the pass rate
+from 53% to 79%, and a compressed docs index in `AGENTS.md` reached 100%. This
+is one vendor's study, not a general rule.
+
+- Use skills for multi-step jobs and best-practice guidance, such as the
+  repo-authored skills and framework skills like `vue` or `nuxt`.
+- Docs for framework versions newer than the model's training belong in the
+  project's own `AGENTS.md`, for example via `npx @next/codemod agents-md` in
+  Next.js projects, not in a skill or in `agents/AGENTS.md`.
+- In projects that rely on a framework skill, name it in the project's
+  `AGENTS.md`, e.g. "Explore the project first, then use the vue skill". Vercel
+  found that "explore first" wording worked better than "you must invoke".
+
 ## Skills for dotfiles commands
 
 Skills named `dotfiles-<command>` let agents in other repositories run a
