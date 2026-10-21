@@ -504,7 +504,12 @@ confirm_apply() {
     printf "%s [y/N] " "$prompt"
   fi
   local confirm=""
-  IFS= read -r -s -n1 confirm
+  # Closed or empty input is no answer, not Enter; only Enter may accept the default.
+  if ! IFS= read -r -s -n1 confirm; then
+    echo ""
+    echo "Aborted: no answer."
+    return 1
+  fi
   echo ""
   if [[ "$default_yes" == "true" ]]; then
     case "$confirm" in

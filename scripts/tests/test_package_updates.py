@@ -99,13 +99,13 @@ class PackageUpdateTests(unittest.TestCase):
             "version": latest, "versions": [current, latest], "time": times,
         }
 
-    def invoke(self, *args):
+    def invoke(self, *args, input=""):
         if self.log.exists():
             self.log.unlink()
         self.fixture_path.write_text(json.dumps(self.fixture))
         return subprocess.run(
             ["/bin/bash", str(REPO / "scripts/package-manager/run.sh"), *args],
-            cwd=self.project, env=self.env, input="", text=True,
+            cwd=self.project, env=self.env, input=input, text=True,
             capture_output=True, timeout=30,
         )
 
@@ -321,6 +321,21 @@ class PackageUpdateTests(unittest.TestCase):
         self.assertEqual(json.loads((member / "package.json").read_text())["dependencies"],
                          {"@scope/pkg": "~1.2.0"})
         self.assertEqual(self.calls("npm").count(["npm", ["view", "@scope/pkg", "version"]]), 1)
+
+    def test_confirmation_needs_an_answer_and_enter_accepts(self):
+        self.package("pkg")
+        for pm in ("npm", "pnpm", "bun"):
+            with self.subTest(pm=pm):
+                self.manifest(pm, {"pkg": "^1.0.0"})
+                for answer in ("", "n"):
+                    result = self.invoke(input=answer)
+                    self.assert_success(result)
+                    self.assertIn("Aborted", result.stdout)
+                    self.assertEqual(self.dependencies(), {"pkg": "^1.0.0"})
+                    self.assertNotIn(["install"], [args for _, args in self.calls()])
+                result = self.invoke(input="\n")
+                self.assert_success(result)
+                self.assertEqual(self.dependencies(), {"pkg": "^1.2.0"})
 
     def test_install_failure_is_not_reported_as_success(self):
         self.package("pkg")
