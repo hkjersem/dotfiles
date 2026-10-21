@@ -1,6 +1,6 @@
 ---
 name: dotfiles
-description: Run the user's dotfiles commands from any repository - codex-resume, prune branches, audit-repo, and the pmu/pma package-manager wrappers. Use only when the user says "dotfiles" together with one of these commands, for example "run dotfiles prune branches" or "dotfiles codex-resume at 15.00".
+description: Run the user's dotfiles commands from any repository. Use only when the user says "dotfiles" and asks for a command or task, for example "run dotfiles prune branches".
 ---
 
 # Dotfiles commands
@@ -18,16 +18,17 @@ repository or chat is meant, ask before running.
 
 ## Commands
 
-| Request | Run | Read first |
-|---------|-----|------------|
-| Send `continue` or a message to a Codex desktop chat, now, later, or when a limit resets | `python3 ~/.dotfiles/scripts/codex-resume.py` | [references/codex-resume.md](references/codex-resume.md) |
-| Delete local branches whose remote branch is gone | `bash ~/.dotfiles/scripts/prune-branches.sh` | [references/prune-branches.md](references/prune-branches.md) |
-| Triage a repository | `bash ~/.dotfiles/scripts/audit-repo.sh` | [references/audit-repo.md](references/audit-repo.md) |
-| Update dependencies (`pmu`) or audit them (`pma`) | `bash ~/.dotfiles/scripts/package-manager/run.sh` or `bash ~/.dotfiles/scripts/package-manager/audit.sh` | [references/package-managers.md](references/package-managers.md) |
+| Command | Request | Run | Read first |
+|---------|---------|-----|------------|
+| `codex-resume` | Send `continue` or a message to a Codex desktop chat, now, at a time, or when a usage limit resets | `python3 ~/.dotfiles/scripts/codex-resume.py` | [references/codex-resume.md](references/codex-resume.md) |
+| `prune_branches` | Delete local branches, and their worktrees, whose remote branch is gone | `bash ~/.dotfiles/scripts/prune-branches.sh` | [references/prune-branches.md](references/prune-branches.md) |
+| `audit-repo` | Triage report for a repository: Git activity, tests, build, docs, packages | `bash ~/.dotfiles/scripts/audit-repo.sh` | [references/audit-repo.md](references/audit-repo.md) |
+| `pmu` | Update npm, pnpm or bun dependencies, skipping releases newer than a cooldown | `bash ~/.dotfiles/scripts/package-manager/run.sh` | [references/package-managers.md](references/package-managers.md) |
+| `pma` | Audit dependencies for vulnerabilities, and fix them on request | `bash ~/.dotfiles/scripts/package-manager/audit.sh` | [references/package-managers.md](references/package-managers.md) |
 
-Other dotfiles commands are not covered: say so rather than guessing a
-script. Read the reference before the first run in a conversation; each
-script also takes `--help`.
+Match the request by command name or by task. Other dotfiles commands are not
+covered: say so rather than guessing a script. Read the reference before the
+first run in a conversation; each script also takes `--help`.
 
 ## Rules
 
