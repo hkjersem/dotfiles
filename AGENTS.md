@@ -39,7 +39,6 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 | `agents/skills/sources.txt` | Optional `~/path` directories owned by other repositories (e.g. Minne); each `*/SKILL.md` is linked like a repo-authored skill, and missing directories are skipped |
 | `scripts/sync-agent-skills.sh` | Collision-safe agent skill sync — links repo-authored skills and installs missing entries from `agents/skills/skills.txt` without overwriting existing names |
 | `scripts/lib/skills-utils.sh` | Shared skills name/manifest validation and conservative link/cleanup helpers |
-| `audit.ignore` | Machine-local audit suppressions (gitignored) — silence known-safe warnings per machine |
 | `scripts/ensure-pm-config.sh` | Ensures package manager release-age cooldowns are set globally — `min-release-age` in `~/.npmrc`, pnpm `minimumReleaseAge` (if pnpm installed), and `minimumReleaseAge` in `~/.bunfig.toml [install]` (if bun installed) |
 | `scripts/corepack-defaults.sh` | Updates corepack's global pnpm/Yarn defaults within their current major, honouring the `~/.npmrc` release-age cooldown; new pnpm/Yarn/Bun majors are only reported (warning when >1 major behind), and Bun is checked in every fnm Node version. Called by `update.sh`; `audit.sh` reports the same state, plus per-Node corepack presence and version and a warning for Node majors with more than one installed version, and a note for end-of-life Node majors, via `scripts/lib/corepack-defaults.sh` (queries the npm registry and Node's release schedule) |
 | `scripts/install-node.sh` | Install a Node version via fnm, migrate globals (except npm/corepack), install corepack when not bundled (Node 25+), enable it, clean up old same-major versions |
@@ -90,6 +89,7 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 - **When adding a new zsh config** — add it to a file in `zsh/conf.d/` and add a `source` line in `zsh/zshrc`
 - **The `pm*` commands support every pnpm version from 10.29**, the oldest one a project still pins, not just the newest release of each major. Raise the floor only when the owner agrees. A feature that needs a newer pnpm must be opt-in, check `pnpm --version`, and fail with a clear message on older pnpm, as `pmu --actions` does. When behaviour differs between versions, test each one.
 - **When adding a new brew tool**: add it to `Brewfile` — this is the single source of truth for brew packages. `applications.sh` and `update.sh` both use `brew bundle` to install from it
+- **Machine-local settings for this repository's scripts** go in `~/.config/dotfiles/` (e.g. `profile`, `roadmap-paths`, `audit-ignore`), never in Git. The exceptions are files whose location a tool dictates (`~/.zshrc_local`, `~/.gitconfig_local*`).
 - **Machine profile** lives in `~/.config/dotfiles/profile`, never in Git. Load it through `scripts/machine-profile.sh`; conditional Brewfile entries use the exported `DOTFILES_PROFILE` for automatic installation only. Update and sync installed tools on either profile, regardless of their intended profile; never uninstall them automatically.
 - **Local machine overrides** belong in `~/.zshrc_local` (shell) and `~/.gitconfig_local` (git) — these files are intentionally untracked. Run `scripts/setup-git-local.sh` to generate the git local config interactively.
 - **Git identity is directory-based** — global default is the personal email; `~/.gitconfig_local` applies work identity under the work directory, with optional personal exceptions. Never hardcode emails in tracked files — `setup-git-local.sh` prompts for work email and reads the personal identity from the effective global Git configuration (`git config --global user.email` and `user.name`).
@@ -101,7 +101,7 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 - **Global agent instructions** belong in `agents/AGENTS.md`, never in a tool-specific global file. Keep it short and free of repository-specific rules.
 - **Skills owned by another repository** stay in that repository; list its skill directory as `~/path` in `agents/skills/sources.txt` instead of copying the skill here.
 - **Cross-machine third-party skills** belong in `agents/skills/skills.txt`; machine-specific skills remain installed locally and must not be added to the manifest.
-- **To suppress audit warnings** — add entries to `audit.ignore` with format `category:name` (e.g. `brew:tool`, `home:.config/dir`, `skills:dirname`). This file is gitignored and machine-specific.
+- **To suppress audit warnings** — add entries to `~/.config/dotfiles/audit-ignore` with format `category:name` (e.g. `brew:tool`, `home:.config/dir`, `skills:dirname`). The file is machine-specific and outside Git.
 
 ### Enforced rules
 

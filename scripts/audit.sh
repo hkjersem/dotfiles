@@ -7,7 +7,7 @@ DOTFILES="$HOME/.dotfiles"
 source "$DOTFILES/scripts/machine-profile.sh" || exit 1
 source "$DOTFILES/scripts/lib/command-line-tools.sh" || exit 1
 
-# Load local ignore list (audit.ignore is gitignored — machine-specific)
+# Load the machine-local ignore list (~/.config/dotfiles/audit-ignore)
 # Format: one entry per line, prefixed by category:
 #   brew:<formula>       — suppress brew package warnings
 #   home:<dirname>       — suppress home directory warnings
@@ -17,11 +17,12 @@ source "$DOTFILES/scripts/lib/command-line-tools.sh" || exit 1
 #   home:.npmrc
 #   skills:opencode
 LOCAL_IGNORE=()
-if [ -f "$DOTFILES/audit.ignore" ]; then
+AUDIT_IGNORE_FILE="$HOME/.config/dotfiles/audit-ignore"
+if [ -f "$AUDIT_IGNORE_FILE" ]; then
     while IFS= read -r line; do
         [[ -z "$line" || "$line" == \#* ]] && continue
         LOCAL_IGNORE+=("$line")
-    done < "$DOTFILES/audit.ignore"
+    done < "$AUDIT_IGNORE_FILE"
 fi
 
 is_ignored() {

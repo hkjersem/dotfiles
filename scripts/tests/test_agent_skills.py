@@ -286,6 +286,22 @@ class AgentSkillsTests(unittest.TestCase):
         self.assertEqual(self.snapshot(), before)
         self.assertIn("warning(s)", result.stdout)
 
+    def test_skills_suppressions_come_from_machine_config(self):
+        self.installed()
+        (self.home / ".cursor/skills").mkdir(parents=True)
+        (self.home / ".cursor/skills/custom.txt").write_text("precious")
+        warning = "real content or unmanaged links preserved"
+        self.assertIn(warning, self.run_script("audit-skills.sh").stdout)
+
+        (self.dotfiles / "audit.ignore").write_text("skills:.cursor\n")
+        self.assertIn(warning, self.run_script("audit-skills.sh").stdout,
+                      "the former location in the repository is no longer read")
+
+        config = self.home / ".config/dotfiles/audit-ignore"
+        config.parent.mkdir(parents=True)
+        config.write_text("# comment\nbrew:other\nskills:.cursor\n")
+        self.assertNotIn(warning, self.run_script("audit-skills.sh").stdout)
+
     def test_stale_cleanup_removes_only_links_and_empty_directories_even_in_quiet_mode(self):
         skill = self.installed()
         candidate = self.home / ".cursor"

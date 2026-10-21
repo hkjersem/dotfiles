@@ -162,11 +162,12 @@ source "$DOTFILES/scripts/lib/skills-utils.sh" || { return 1 2>/dev/null || exit
 REPO_SKILLS_DIR="$DOTFILES/agents/skills"
 SKILLS_MANIFEST="$REPO_SKILLS_DIR/skills.txt"
 SKILLS_SOURCES="$REPO_SKILLS_DIR/sources.txt"
-if [ -f "$DOTFILES/audit.ignore" ]; then
+SKILLS_IGNORE_FILE="$HOME/.config/dotfiles/audit-ignore"
+if [ -f "$SKILLS_IGNORE_FILE" ]; then
     while IFS= read -r line; do
         [[ -z "$line" || "$line" == \#* ]] && continue
         [[ "$line" == skills:* ]] && SKILLS_IGNORE+=("${line#skills:}")
-    done < "$DOTFILES/audit.ignore"
+    done < "$SKILLS_IGNORE_FILE"
 fi
 
 is_skills_ignored() {

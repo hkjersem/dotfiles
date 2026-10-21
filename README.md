@@ -49,8 +49,8 @@ bash ~/.dotfiles/install
 ```
 
 Audit reports missing declarations, unexpected installed items, and broken
-links. Machine-local suppressions go in the gitignored `audit.ignore`, one per
-line, such as `brew:tool` or `home:.config/dir`.
+links. Machine-local suppressions go in `~/.config/dotfiles/audit-ignore`, one
+per line, such as `brew:tool` or `home:.config/dir`.
 
 ## Resume Codex later
 
