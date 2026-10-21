@@ -169,14 +169,10 @@ gclone() { git clone "$@" && cd "${2:-$(basename "${1%.git}")}" || return; }
 # Serve current directory over HTTP: server [port] (default: 8080)
 server() { python3 -m http.server "${1:-8080}"; }
 
-# Prevent iCloud from syncing specific folders: nosync [folder...] (default: node_modules .git)
-nosync() {
-    [[ $# -eq 0 ]] && set -- "node_modules" ".git"
-    for arg in "$@"; do
-        mkdir -p "$arg"
-        xattr -w 'com.apple.fileprovider.ignore#P' 1 "$arg"
-    done
-}
+# Prevent iCloud from syncing folders: nosync [folder...] (default: node_modules .git)
+# Inspect the current folder or named folders: nosync --inspect [folder...]
+# Find matching folder names below here: nosync -r|--recursive [--inspect] [name...]
+nosync() { bash "$HOME/.dotfiles/scripts/nosync.sh" "$@"; }
 
 # Recursively delete all files/folders matching a name pattern from current dir
 # Usage: wipe <name> [--file|-f|--dir|-d]  (type auto-detected: --file if name has extension, --dir otherwise)
