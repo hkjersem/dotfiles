@@ -172,7 +172,8 @@ server() { python3 -m http.server "${1:-8080}"; }
 # Prevent iCloud from syncing folders: nosync [folder...] (default: node_modules .git)
 # Inspect the current folder or named folders: nosync --inspect [folder...]
 # Find matching folder names below here: nosync -r|--recursive [--inspect] [name...]
-nosync() { bash "$HOME/.dotfiles/scripts/nosync.sh" "$@"; }
+# Recursive searches stop at matching or already marked folders.
+nosync() { python3 "$HOME/.dotfiles/scripts/nosync.py" "$@"; }
 
 # Recursively delete all files/folders matching a name pattern from current dir
 # Usage: wipe <name> [--file|-f|--dir|-d]  (type auto-detected: --file if name has extension, --dir otherwise)
