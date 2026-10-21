@@ -75,6 +75,20 @@ sync_authored_skills() {
         }
     fi
 
+    for destination in "$CANONICAL_DIR"/*; do
+        skills_dangling_authored "$destination" "$AUTHORED_DIR" || continue
+        skill_name=$(basename "$destination")
+        if [ "$DRY_RUN" -eq 1 ]; then
+            CHANGES=$((CHANGES + 1))
+            info "would unlink: $skill_name (repo-authored skill no longer present)"
+        elif rm "$destination"; then
+            CHANGES=$((CHANGES + 1))
+            info "unlinked: $skill_name (repo-authored skill no longer present)"
+        else
+            error "could not remove dangling link $skill_name"
+        fi
+    done
+
     for source in "$AUTHORED_DIR"/*; do
         [ -d "$source" ] || continue
         [ -f "$source/SKILL.md" ] || {

@@ -238,6 +238,15 @@ skills_dangling_external() {
     return 1
 }
 
+# Usage: skills_dangling_authored LINK AUTHORED_DIR
+# True for a link to a repo-authored skill that has since been removed or renamed.
+skills_dangling_authored() {
+    local link="$1" target
+    [[ -L "$link" && ! -e "$link" ]] || return 1
+    target=$(readlink "$link") || return 1
+    [[ "$(dirname "$target")" == "$2" ]]
+}
+
 skills_is_external_link() {
     local link="$1" i
     [[ -L "$link" ]] || return 1

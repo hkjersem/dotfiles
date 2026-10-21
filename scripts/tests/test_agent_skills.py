@@ -500,6 +500,37 @@ echo "issues=$ISSUES"
         self.assertFalse((self.canonical / "ext").is_symlink())
         self.assertEqual((source / "ext/notes.txt").read_text(), "keep")
 
+    def test_removed_authored_skill_unlinks_only_its_own_dangling_link(self):
+        for name in ("old", "kept"):
+            (self.authored / name).mkdir()
+            (self.authored / name / "SKILL.md").write_text(name + "\n")
+        result = self.run_script("sync-agent-skills.sh")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        provider = self.provider()
+        (provider / "old").symlink_to("../../.agents/skills/old")
+        foreign = self.canonical / "foreign"
+        foreign.symlink_to(self.root / "missing")
+        nested = self.canonical / "nested"
+        nested.symlink_to(self.authored / "kept/missing")
+        (self.authored / "old").rename(self.authored / "new")
+        before = self.snapshot()
+        result = self.run_script("audit-skills.sh")
+        self.assertIn("old (repo-authored skill no longer present", result.stdout)
+        self.assertNotIn("foreign (repo-authored", result.stdout)
+        self.assertNotIn("nested (repo-authored", result.stdout)
+        result = self.run_script("sync-agent-skills.sh", "--dry-run")
+        self.assertIn("would unlink: old", result.stdout)
+        self.assertEqual(self.snapshot(), before)
+        self.run_script("sync-agent-skills.sh")
+        self.assertFalse((self.canonical / "old").is_symlink())
+        self.assertEqual(os.readlink(self.canonical / "new"), str(self.authored / "new"))
+        self.assertTrue(foreign.is_symlink())
+        self.assertTrue(nested.is_symlink())
+        self.run_script("audit-skills.sh", "--fix-symlinks")
+        self.assertFalse((provider / "old").is_symlink())
+        result = self.run_script("sync-agent-skills.sh")
+        self.assertNotIn("unlink", result.stdout)
+
     def test_invalid_external_sources_are_rejected_before_changes(self):
         for invalid in ("/absolute/skills", "relative/skills", "~/a/../b", "~/", "~/$(touch x)"):
             with self.subTest(invalid=invalid):

@@ -60,7 +60,9 @@ skills are reported and left unchanged.
 Without repair flags, the skills audit is read-only. `--fix-symlinks` creates
 missing links and repairs links whose targets are inside the canonical store;
 real files, directories, and foreign links are reported as conflicts and
-preserved. Codex and Copilot CLI read `~/.agents/skills` directly, so only
+preserved. When a repo-authored skill is removed or renamed, the next sync
+removes its link from `~/.agents/skills`, and `--fix-symlinks` then removes
+Claude Code's link to it. Codex and Copilot CLI read `~/.agents/skills` directly, so only
 Claude Code gets links. `--fix-symlinks` also removes managed links left in
 `~/.codex/skills`, `~/.copilot/skills`, `~/.gemini/skills` and
 `~/.config/agents/skills`, which no agent in use needs.

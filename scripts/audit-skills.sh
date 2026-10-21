@@ -237,6 +237,10 @@ if [ "${#REPO_SKILL_NAMES[@]}" -gt 0 ]; then
             fail "$skill_name (not linked — run: bash scripts/sync-agent-skills.sh)"
         fi
     done
+    for link in "$SKILLS_DIR"/*; do
+        skills_dangling_authored "$link" "$REPO_SKILLS_DIR" || continue
+        warn "$(basename "$link") (repo-authored skill no longer present — run: bash scripts/sync-agent-skills.sh)"
+    done
 
     [[ $SECTION_ISSUES -eq 0 && $SECTION_WARNINGS -eq 0 ]] && ok "all repo-authored skills linked"
     section_end
