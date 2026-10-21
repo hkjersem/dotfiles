@@ -17,6 +17,15 @@ source/repository|enabled-skill
 # disabled: source/repository|disabled-skill
 ```
 
+## Skills for dotfiles commands
+
+Skills named `dotfiles-<command>` let agents in other repositories run a
+command from this repository, such as `codex-resume`. They run only when asked
+for by name: `disable-model-invocation: true` in `SKILL.md` covers Claude Code
+and Copilot CLI, and `policy.allow_implicit_invocation: false` in
+`agents/openai.yaml` covers Codex. They are the only repo-authored skills that
+may reference this repository.
+
 ## Skills from other repositories
 
 `agents/skills/sources.txt` lists skill directories owned by other

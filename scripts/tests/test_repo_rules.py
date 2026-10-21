@@ -106,7 +106,8 @@ class RepoRulesTests(unittest.TestCase):
     def test_repo_authored_skills_do_not_reference_this_repository(self):
         found = []
         for path in repo_files("agents/skills/"):
-            if path.parent == PurePosixPath("agents/skills"):
+            # dotfiles-* skills exist to run this repository's commands from other repositories.
+            if path.parent == PurePosixPath("agents/skills") or path.parts[2].startswith("dotfiles-"):
                 continue
             for number, line in text_lines(path):
                 if SKILL_COUPLING.search(line):
