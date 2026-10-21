@@ -210,7 +210,7 @@ def validate_message(text):
 
 
 def format_time(moment):
-    return moment.strftime("%Y-%m-%d %H:%M")
+    return moment.strftime("%d.%m.%Y kl. %H.%M")
 
 
 def load_chats():

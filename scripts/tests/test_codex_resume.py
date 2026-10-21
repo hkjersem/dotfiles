@@ -51,7 +51,7 @@ def seconds(text):
 
 def shown(moment):
     """Format a fixed moment as the script shows it, in the local time zone, which differs in CI."""
-    return f"{datetime.fromisoformat(moment).astimezone():%Y-%m-%d %H:%M}"
+    return f"{datetime.fromisoformat(moment).astimezone():%d.%m.%Y kl. %H.%M}"
 
 
 @contextmanager
@@ -606,7 +606,7 @@ class CodexResumeTests(unittest.TestCase):
                 "--message", "Resume now", "--scheduled", "2026-10-16T16:30:00+02:00",
             ])
             self.assertEqual(output.getvalue().splitlines(), [
-                "Codex resume scheduled for 2026-10-16 16:30 via the app's Accessibility controls "
+                "Codex resume scheduled for 16.10.2026 kl. 16.30 via the app's Accessibility controls "
                 "with message: Resume now",
             ] * 2)
 
@@ -1176,7 +1176,7 @@ class CodexResumeTests(unittest.TestCase):
             codex_resume.reset_time(windows)
         self.assertIn("5-hour: 98% used, resets ", str(error.exception))
         self.assertIn(
-            f"weekly: 76% used, resets {datetime.fromisoformat('2026-10-25T02:55:00+02:00').astimezone():%Y-%m-%d %H:%M}",
+            f"weekly: 76% used, resets {datetime.fromisoformat('2026-10-25T02:55:00+02:00').astimezone():%d.%m.%Y kl. %H.%M}",
             str(error.exception))
 
     def test_reset_schedules_the_job_with_message_and_chat(self):
@@ -1218,7 +1218,7 @@ class CodexResumeTests(unittest.TestCase):
                 arguments = plistlib.load(agent_file)["ProgramArguments"]
         self.assertEqual(arguments[4:-2], ["--chat", "01a1-mine", "--every", "30", "--used-up", "300"])
         lines = output.getvalue().splitlines()
-        self.assertRegex(lines[-1], r"^Codex resume scheduled for \S+ \S+, or earlier if the limit resets "
+        self.assertRegex(lines[-1], r"^Codex resume scheduled for \S+ kl\. \S+, or earlier if the limit resets "
                                     r"first \(checked every 30 minutes\) in chat 'Find current project status' "
                                     r"via the Codex queue\.$")
         self.assertEqual(lines[-2], lines[-1])
@@ -1290,8 +1290,8 @@ class CodexResumeTests(unittest.TestCase):
         self.assertEqual(sends, 1)
         limits = "5-hour: {}% used, resets " + self.SHOWN_RESET + "; weekly: 40% used, resets not set"
         self.assertEqual(lines, [
-            f"Not sending yet ({limits.format(100)}); next check at 2026-10-20 13:00.",
-            "Not sending yet (the limits could not be read: no answer); next check at 2026-10-20 13:30.",
+            f"Not sending yet ({limits.format(100)}); next check at 20.10.2026 kl. 13.00.",
+            "Not sending yet (the limits could not be read: no answer); next check at 20.10.2026 kl. 13.30.",
             f"The limit has reset early and its new allowance is unused ({limits.format(0)}); sending.",
         ])
 
@@ -1334,7 +1334,7 @@ class CodexResumeTests(unittest.TestCase):
                 self.assertEqual(checks, [-40, -10, 0.05])
                 self.assertEqual(sends, 1)
                 self.assertEqual(lines[1], f"Not sending yet (5-hour: 100% used, resets {self.SHOWN_RESET}; weekly: "
-                                           "40% used, resets not set); last check at the reset, 2026-10-20 13:10.")
+                                           "40% used, resets not set); last check at the reset, 20.10.2026 kl. 13.10.")
                 self.assertTrue(lines[-1].startswith(expected), lines[-1])
 
     def window_limits(self, used, resets, allowed=True):
@@ -1349,7 +1349,7 @@ class CodexResumeTests(unittest.TestCase):
         now = datetime.fromisoformat("2026-10-20T00:00:00+02:00")
         for used, resets, allowed, fragment in (
             (55, now + timedelta(hours=2), False,
-             f"already running (55% used, resets {(now + timedelta(hours=2)).astimezone():%Y-%m-%d %H:%M})"),
+             f"already running (55% used, resets {(now + timedelta(hours=2)).astimezone():%d.%m.%Y kl. %H.%M})"),
             (1, now + timedelta(hours=4, minutes=59), True, "already running"),
             (0, now + timedelta(hours=3), True, "already running"),
             (0, now + timedelta(hours=5), True, None),
@@ -1419,7 +1419,7 @@ class CodexResumeTests(unittest.TestCase):
                 arguments = plistlib.load(agent_file)["ProgramArguments"]
         self.assertEqual(arguments[-3:], ["--start-window", "--scheduled", "2026-10-20T00:00:00+02:00"])
         self.assertEqual(output.getvalue().splitlines(), [
-            "Codex resume scheduled for 2026-10-20 00:00 via the app's Accessibility controls, "
+            "Codex resume scheduled for 20.10.2026 kl. 00.00 via the app's Accessibility controls, "
             "only if no 5-hour window is running.",
         ] * 2)
         for action in (["--reset"], ["--status"], ["--check"]):
