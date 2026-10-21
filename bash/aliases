@@ -154,7 +154,7 @@ pml() { bash "$HOME/.dotfiles/scripts/package-manager/link.sh" "$@"; }
 pmc() { bash "$HOME/.dotfiles/scripts/package-manager/clean.sh" "$@"; }
 
 # Audit and fix vulnerabilities (bun: reports only — no auto-fix available)
-# Usage: pma [--deep]
+# Usage: pma [--dry-run | --deep]
 pma() { bash "$HOME/.dotfiles/scripts/package-manager/audit.sh" "$@"; }
 
 # Create a directory and cd into it

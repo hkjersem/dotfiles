@@ -328,6 +328,23 @@ class PnpmWrapperTests(unittest.TestCase):
                                          [operation, "pkg", "--root"], cwd=self.member, pm=pm)
             self.assert_dispatch(self.invoke("install"), ["install"], pm=pm)
 
+    def test_audit_fixes_unless_dry_run_which_only_reports(self):
+        expected = {
+            "pnpm": ([["--version"], ["audit", "--fix"], ["install", "--lockfile-only"]], [["audit"]]),
+            "npm": ([["audit", "fix", "--package-lock-only", "--ignore-scripts"]],
+                    [["audit", "fix", "--dry-run", "--package-lock-only", "--ignore-scripts"]]),
+            "bun": ([["audit"]], [["audit"]]),
+        }
+        for pm, (fix, dry_run) in expected.items():
+            self.write_package(self.root, name="audited", packageManager=f"{pm}@10.0.0")
+            with self.subTest(pm=pm):
+                for args, calls in (((), fix), (("--dry-run",), dry_run)):
+                    result = self.invoke("audit", *args)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual([call["args"] for call in self.calls()], calls)
+                    self.assertEqual({call["pm"] for call in self.calls()}, {pm})
+        self.assert_rejected(self.invoke("audit", "--dry-run", "--deep"), "cannot be combined")
+
     @unittest.skipUnless(sys.platform == "darwin", "Apple Bash compatibility check")
     def test_system_bash_is_macos_bash_3_2(self):
         version = subprocess.run(["/bin/bash", "--version"], text=True, capture_output=True,

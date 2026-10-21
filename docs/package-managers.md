@@ -12,7 +12,8 @@ need a newer pnpm say so.
 `pmu` respects configured release-age cooldowns. `--cooldown <days>` overrides
 them, including `--cooldown 0` to disable the cooldown. Use `--yes` only when
 you intend to skip confirmation. `pma --deep` additionally refreshes pnpm's
-lockfile before auditing; it is not a read-only check.
+lockfile before auditing; it is not a read-only check. `pma` applies fixes
+straight away; `pma --dry-run` only reports, and can't be combined with `--deep`.
 
 With pnpm 12.7 or newer, `pmu --actions` updates the GitHub Actions in
 `.github/workflows` instead of packages. pnpm finds the updates, applies its own

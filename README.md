@@ -129,6 +129,7 @@ field or lockfile. The selected manager must already be installed.
 | `pmu --actions` | Update and pin GitHub Actions in a pnpm 12.7+ project |
 | `pmc --dry-run` | Preview manifest/catalog cleanup |
 | `pma` | Audit and apply supported fixes; Bun only reports findings |
+| `pma --dry-run` | Report findings without changing files; npm also lists the fixes it would make |
 
 `pmu` respects configured release-age cooldowns; `pma --deep` is not a
 read-only check. In zsh, `pnpm` and `yarn` run through corepack, as do `npm`
