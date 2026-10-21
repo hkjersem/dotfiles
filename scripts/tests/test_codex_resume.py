@@ -210,6 +210,17 @@ class CodexResumeTests(unittest.TestCase):
             for action in codex_resume.SCHEDULED_ACTIONS
         ])
 
+    def test_scheduled_helper_output_is_timestamped_in_the_log(self):
+        result = subprocess.CompletedProcess([], 0, "Pressed Return.\nThe reply started.\n", "")
+        with (
+            patch.object(codex_resume.shutil, "which", return_value="/usr/bin/swift"),
+            patch.object(codex_resume.subprocess, "run", return_value=result),
+            patch.object(codex_resume, "log_stamp", return_value="[t] "),
+            redirect_stdout(io.StringIO()) as output,
+        ):
+            codex_resume.run_automation("--scheduled-submit")
+        self.assertEqual(output.getvalue(), "[t] Pressed Return.\n[t] The reply started.\n")
+
     def test_a_late_scheduled_run_says_how_late_it_is(self):
         planned = datetime.now().astimezone() - timedelta(hours=2, minutes=36, seconds=10)
         with tempfile.TemporaryDirectory() as temporary:
@@ -311,10 +322,12 @@ class CodexResumeTests(unittest.TestCase):
                          codex_resume.RetryableAutomationError("Mac is active.")) as submit,
             patch.object(codex_resume.time, "monotonic", return_value=0),
             patch.object(codex_resume.time, "sleep") as sleep,
-            redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()),
+            patch.object(codex_resume, "log_stamp", return_value="[t] "),
+            redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as errors,
         ):
-            with self.assertRaisesRegex(RuntimeError, "retry window exhausted"):
+            with self.assertRaisesRegex(RuntimeError, "Gave up after 11 attempts; nothing was sent"):
                 codex_resume.submit_scheduled()
+        self.assertEqual(errors.getvalue(), "[t] Mac is active.\n" * 11)
         self.assertEqual(submit.call_count, 11)
         self.assertEqual(
             submit.call_args_list,
@@ -362,7 +375,7 @@ class CodexResumeTests(unittest.TestCase):
             patch.object(codex_resume.subprocess, "run",
                          side_effect=subprocess.TimeoutExpired("swift", 60)),
         ):
-            with self.assertRaisesRegex(RuntimeError, "submission state is unknown"):
+            with self.assertRaisesRegex(RuntimeError, "whether the message was sent is unknown"):
                 codex_resume.run_automation("--submit")
 
     def test_missing_swift_reports_requirement(self):
@@ -763,7 +776,7 @@ class CodexResumeTests(unittest.TestCase):
             ):
                 self.assertEqual(codex_resume.main(arguments[4:]), 0)
             self.assertEqual(submit.call_args.args[2]["name"], "Status board")
-            self.assertIn("attempt 1/11 in chat 'Status board'.", log.getvalue())
+            self.assertIn("in chat 'Status board' through the app's Accessibility controls, attempt 1 of 11.", log.getvalue())
 
     def test_check_and_inspect_identify_the_open_chat_and_its_project(self):
         self.with_chats()
@@ -1048,7 +1061,7 @@ class CodexResumeTests(unittest.TestCase):
             self.assertTrue(codex_resume.resume_through_queue(self.LOCAL_CHAT, None, lambda: "[t] "))
         self.assertEqual(calls, [])
         self.assertEqual(output.getvalue(),
-                         "[t] Codex is already replying in chat 'Find current project status'; not sending continue.\n")
+                         "[t] Codex is already replying in chat 'Find current project status'; not sending 'continue'.\n")
         with redirect_stdout(io.StringIO()) as output:
             self.assertTrue(codex_resume.resume_through_queue(self.LOCAL_CHAT, "After this"))
         self.assertEqual([call[0] for call in calls], ["thread/queue/add"])
@@ -1406,8 +1419,8 @@ class CodexResumeTests(unittest.TestCase):
                 arguments = plistlib.load(agent_file)["ProgramArguments"]
         self.assertEqual(arguments[-3:], ["--start-window", "--scheduled", "2026-10-20T00:00:00+02:00"])
         self.assertEqual(output.getvalue().splitlines(), [
-            "Codex resume scheduled for 2026-10-20 00:00, only if no 5-hour window is running "
-            "via the app's Accessibility controls.",
+            "Codex resume scheduled for 2026-10-20 00:00 via the app's Accessibility controls, "
+            "only if no 5-hour window is running.",
         ] * 2)
         for action in (["--reset"], ["--status"], ["--check"]):
             with self.subTest(action=action), redirect_stderr(io.StringIO()):

@@ -533,7 +533,7 @@ def resume_through_queue(chat, message, stamp=lambda: ""):
     """Send the message through the queue; return False, with nothing left queued, to use the app's controls."""
     busy = replying(chat)
     if busy and message is None:
-        print(f"{stamp()}Codex is already replying in chat {chat_label(chat)}; not sending {DEFAULT_MESSAGE}.",
+        print(f"{stamp()}Codex is already replying in chat {chat_label(chat)}; not sending '{DEFAULT_MESSAGE}'.",
               flush=True)
         return True
     path = chat_log(chat)
@@ -802,9 +802,9 @@ def scheduled_summary(scheduled, message, chat=None, project=None, start_window=
         summary += f" in the latest chat in project {project_label(project)}"
     elif chat is not None:
         summary += f" in chat {chat_label(chat)}"
+    summary += f" {delivery_label(project or chat)}"
     if start_window:
         summary += ", only if no 5-hour window is running"
-    summary += f" {delivery_label(project or chat)}"
     return f"{summary} with message: {message}" if message is not None else f"{summary}."
 
 
@@ -874,13 +874,13 @@ def run_automation(action, message=None, chat=None):
         )
     except subprocess.TimeoutExpired as error:
         raise RuntimeError(
-            "Accessibility automation timed out; submission state is unknown. "
-            "Check the app before retrying."
+            "Typing into the app timed out, so whether the message was sent is unknown. "
+            "Check the chat before retrying."
         ) from error
     if result.returncode == 3:
         raise RuntimeError(
-            "Submission was attempted, but could not be confirmed. "
-            "The message may have been sent; check the app before retrying. "
+            "Return was pressed, but sending could not be confirmed. "
+            "The message may have been sent; check the chat before retrying. "
             + (result.stderr or result.stdout).strip()
         )
     if result.returncode == 4 and action in SCHEDULED_ACTIONS:
@@ -901,7 +901,8 @@ def run_automation(action, message=None, chat=None):
         report["chat"] = identify_open_chat(report.get("windowTitle"))
         print(json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False), flush=True)
         return
-    print(result.stdout, end="", flush=True)
+    stamp = log_stamp() if action in SCHEDULED_ACTIONS else ""
+    print("".join(stamp + line for line in result.stdout.splitlines(keepends=True)), end="", flush=True)
 
 
 def identify_open_chat(title):
@@ -938,21 +939,17 @@ def log_stamp():
 def submit_scheduled(message=None, chat=None):
     for attempt in range(MAX_SCHEDULED_RETRIES + 1):
         started = time.monotonic()
-        print(
-            log_stamp()
-            + f"Scheduled Codex submission attempt {attempt + 1}/"
-            f"{MAX_SCHEDULED_RETRIES + 1}"
-            + (f" in chat {chat_label(chat)}." if chat is not None else "."),
-            flush=True,
-        )
+        where = f"chat {chat_label(chat)}" if chat is not None else "the open chat"
+        print(f"{log_stamp()}Sending in {where} through the app's Accessibility controls, "
+              f"attempt {attempt + 1} of {MAX_SCHEDULED_RETRIES + 1}.", flush=True)
         try:
             submit(scheduled_action(attempt), message, chat)
             return
         except RetryableAutomationError as error:
-            print(f"codex-resume: {error}", file=sys.stderr, flush=True)
+            print(f"{log_stamp()}{error}", file=sys.stderr, flush=True)
             if attempt == MAX_SCHEDULED_RETRIES:
                 raise RuntimeError(
-                    "Scheduled retry window exhausted; nothing was submitted."
+                    f"Gave up after {MAX_SCHEDULED_RETRIES + 1} attempts; nothing was sent."
                 ) from error
             delay = RETRY_INTERVAL_SECONDS - (time.monotonic() - started)
             if delay > 0:
@@ -1111,7 +1108,7 @@ def main(arguments):
                 submit_scheduled(message, chat)
         except (OSError, RuntimeError, ValueError) as error:
             # bootout can terminate us before the outer error handler runs.
-            print(f"codex-resume: {error}", file=sys.stderr, flush=True)
+            print(f"{log_stamp()}Stopped: {error}", file=sys.stderr, flush=True)
             return 1
         finally:
             if PLIST_PATH.exists():
