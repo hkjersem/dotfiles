@@ -10,11 +10,13 @@ show_help() {
   cat <<'EOF'
 Usage: pma [--dry-run | --deep]
 
-Audit and fix vulnerabilities for the detected package manager.
+Audits dependencies for known vulnerabilities and fixes them with the detected
+package manager.
 
 Options:
-  --dry-run  Report findings, and for npm the fixes it would make, without changing files
-  --deep     For pnpm only, refresh the lockfile deeply before the audit fix step
+  --dry-run   Report findings, and for npm the fixes it would make, without changing files
+  --deep      For pnpm only, refresh the lockfile deeply before the audit fix step
+  -h, --help  Show this help
 EOF
 }
 

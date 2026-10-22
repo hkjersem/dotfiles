@@ -11,7 +11,7 @@
 #   --dir PATH       Target directory (default: current dir)
 #   --since PERIOD   Git lookback for churn/firefighting (default: "1 year ago")
 #   --skip-security  Skip package manager security audit
-#   --help           Show usage
+#   -h, --help       Show this help
 
 set -uo pipefail
 
@@ -41,7 +41,7 @@ Options:
   --dir PATH        Target directory (default: current dir)
   --since PERIOD    Git lookback period (default: "1 year ago")
   --skip-security   Skip package manager security audit
-  --help            Show usage
+  -h, --help        Show this help
 EOF
 }
 

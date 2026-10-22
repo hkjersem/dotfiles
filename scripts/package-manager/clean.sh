@@ -15,6 +15,11 @@ Usage: pmc [--dry-run] [--yes]
 
 Cleans package-manager metadata for the detected package manager.
 
+Options:
+  -n, --dry-run  Show the cleanup without changing files
+  -y, --yes      Skip the confirmation prompt
+  -h, --help     Show this help
+
 Actions:
   - pnpm: remove unused top-level catalog entries from pnpm-workspace.yaml
   - pnpm: suggest packages that could be centralized in catalog

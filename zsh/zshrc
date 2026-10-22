@@ -7,6 +7,7 @@ source ~/.zsh_conf.d/plugins.zsh
 source ~/.zsh_conf.d/history.zsh
 source ~/.zsh_conf.d/env.zsh
 source ~/.zsh_conf.d/aliases.zsh
+source ~/.zsh_conf.d/completions.zsh
 source ~/.zsh_conf.d/prompt.zsh
 source ~/.zsh_conf.d/fnm.zsh
 source ~/.zsh_conf.d/fzf.zsh

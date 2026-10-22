@@ -13,7 +13,12 @@ show_help() {
   cat <<'EOF'
 Usage: pmr <package...> [flags]
 
-Removes dependencies for the detected package manager.
+Removes packages with the detected package manager.
+
+Options:
+  --root      With pnpm, remove from the workspace root package.json
+  -h, --help  Show this help
+Other flags pass through to the package manager.
 
 pnpm behavior:
   - In a workspace member, removes from that member.

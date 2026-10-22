@@ -16,6 +16,10 @@ Links a local library into the current project instead of the installed
 version, for trying out changes. --undo restores the installed version.
 Supports npm and pnpm 11 or newer.
 
+Options:
+  --undo      Restore the installed version
+  -h, --help  Show this help
+
 npm:  the project's files stay unchanged. --undo reinstalls from package.json
       and removes the global link npm created for the library.
 pnpm: pnpm records the link in pnpm-lock.yaml, and in package.json when the

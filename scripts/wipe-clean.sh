@@ -5,6 +5,25 @@
 
 set -euo pipefail
 
+show_help() {
+    cat <<'EOF'
+Usage: wipe_clean
+
+Deletes known build artifacts and dependency folders below the current
+directory, after listing them and asking for confirmation. Git directories
+and submodules are left alone.
+
+Options:
+  -h, --help  Show this help
+EOF
+}
+
+case "${1:-}" in
+    "") ;;
+    -h|--help) show_help; exit 0 ;;
+    *) echo "Usage: wipe_clean" >&2; exit 2 ;;
+esac
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/clean-targets.sh
 source "$SCRIPT_DIR/lib/clean-targets.sh"

@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Show what needs attention across roadmaps kept with the roadmap skill.
 
-Usage: roadmaps [PATH...] [--today YYYY-MM-DD]
-
 Each PATH is a repository or a folder whose direct subfolders are repositories.
 Without PATHs, they are read one per line from ~/.config/dotfiles/roadmap-paths
 (`#` starts a comment, `~` is expanded). Only roadmaps with the skill's
@@ -65,10 +63,11 @@ def find_roadmaps(folder: str, problems: List[str]) -> List[str]:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__,
+    parser = argparse.ArgumentParser(prog="roadmaps", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("paths", nargs="*", metavar="PATH")
-    parser.add_argument("--today", help="treat this YYYY-MM-DD date as today")
+    parser.add_argument("paths", nargs="*", metavar="PATH",
+                        help="a repository, or a folder whose direct subfolders are repositories")
+    parser.add_argument("--today", metavar="YYYY-MM-DD", help="treat this date as today")
     args = parser.parse_args(argv)
     today = rm.parse_date(args.today) if args.today else datetime.date.today()
     if today is None:

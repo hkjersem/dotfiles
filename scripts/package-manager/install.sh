@@ -14,7 +14,16 @@ show_help() {
   cat <<'EOF'
 Usage: pmi [<package...>] [flags]
 
-Installs dependencies for the detected package manager.
+Installs the project's dependencies, or adds packages, with the detected
+package manager.
+
+Options:
+  --root      With pnpm, install into the workspace root package.json
+  -D          Add as a dev dependency
+  -E          Pin the exact version
+  -g          Install globally
+  -h, --help  Show this help
+Other flags pass through to the package manager.
 
 pnpm behavior:
   - In a workspace member, installs into that member.

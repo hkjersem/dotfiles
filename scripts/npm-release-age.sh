@@ -16,6 +16,21 @@ for arg in "$@"; do
         --all|-a)   SHOW_ALL=true ;;
         --date|-d)  SORT_BY_DATE=true ;;
         --beta|-b)  SHOW_BETA=true ;;
+        --help|-h)
+            cat <<'EOF'
+Usage: npm_release_age <package>[@version] [--all] [--date] [--beta]
+
+Shows how many days ago versions of an npm package were released, for the
+last 10 versions by default.
+
+Options:
+  -a, --all   Show all versions
+  -d, --date  Sort by release date instead of version
+  -b, --beta  Include prerelease versions
+  -h, --help  Show this help
+EOF
+            exit 0
+            ;;
         *) ARGS+=("$arg") ;;
     esac
 done

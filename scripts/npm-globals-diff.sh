@@ -5,6 +5,22 @@
 #   Versions can be a major (22), full version (v22.22.0), or omitted for current.
 #   e.g. npm-globals-diff.sh 22, npm-globals-diff.sh 22 24
 
+case "${1:-}" in
+    -h|--help)
+        cat <<'EOF'
+Usage: npm_globals_diff <version_a> [version_b]
+
+Compares global npm packages between two installed Node versions. Versions
+can be a major (22), a full version (v22.22.0) or lts; version_b defaults to
+the current Node version.
+
+Options:
+  -h, --help  Show this help
+EOF
+        exit 0
+        ;;
+esac
+
 fnm_versions() {
     fnm list 2>/dev/null | awk '{print $2}' | grep '^v[0-9]'
 }

@@ -81,16 +81,25 @@ _parse_args() {
   fi
 }
 
-# Default help — wrappers override with package-manager-specific text
+# Help for pmu, shared by the package-manager wrappers
 _show_help() {
-  echo "Usage: $(basename "$0") [--dry-run] [--yes] [--force] [--major] [--cooldown <days>] [--actions] [<package>]"
-  echo "  <package>         Only update this package"
-  echo "  --dry-run         Show planned updates without making changes"
-  echo "  --yes             Skip confirmation prompt"
-  echo "  --force           Check all exact pins directly via npm"
-  echo "  --major           Allow major version bumps"
-  echo "  --cooldown <days> Override cooldown in days (0 = disable)"
-  echo "  --actions         Update GitHub Actions instead of packages (pnpm 12+)"
+  cat <<'EOF'
+Usage: pmu [--dry-run] [--yes] [--force] [--major] [--cooldown <days>] [--actions] [<package>]
+
+Updates packages for the detected package manager, within the major version by default.
+
+Arguments:
+  <package>          Only update this package
+
+Options:
+  -n, --dry-run      Show planned updates without making changes
+  -y, --yes          Skip confirmation prompt
+  -f, --force        Check all exact pins directly via npm
+  -m, --major        Allow major version bumps
+  --cooldown <days>  Override cooldown in days (0 = disable)
+  --actions          Update GitHub Actions instead of packages (pnpm 12+)
+  -h, --help         Show this help
+EOF
 }
 
 # ── Root finder ───────────────────────────────────────────────────────────────

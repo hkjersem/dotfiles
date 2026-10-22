@@ -42,7 +42,7 @@ Options:
   --stale-days N   Report never-pushed or untracked branches older than N days (default: 90)
   --jobs N         Repositories to fetch in parallel (default: 6)
   --timeout N      Seconds allowed per remote fetch (default: 60)
-  --help           Show usage
+  -h, --help       Show this help
 EOF
 }
 
