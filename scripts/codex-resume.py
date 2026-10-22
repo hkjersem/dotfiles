@@ -780,17 +780,23 @@ def all_stuck_chats(now=None, resumed=None):
 
 def stuck_overview(now, resumed):
     """Each chat stuck at a usage limit, newest first, with what the next recurring check does with it:
-    resume, wait for the cap of three resumes in five hours, or skip, as an earlier limit stopped it."""
-    free = max(0, RECURRING_CHATS - sum(at >= now - RECURRING_PERIOD for at in resumed.values()))
+    resume, wait for the cap of three resumes in five hours, or skip, as an earlier limit stopped it. A waiting
+    chat comes with when the cap next has room for it, or None when that depends on resumes not made yet."""
+    recent = sorted(at for at in resumed.values() if at >= now - RECURRING_PERIOD)
+    free = max(0, RECURRING_CHATS - len(recent))
+    waiting = 0
     overview = []
     for chat in all_stuck_chats(now, resumed):
         if chat["earlier"]:
-            overview.append((chat, "skip"))
+            overview.append((chat, "skip", None))
         elif free:
             free -= 1
-            overview.append((chat, "resume"))
+            overview.append((chat, "resume", None))
         else:
-            overview.append((chat, "wait"))
+            # Each waiting chat takes the place of the oldest resume still counted.
+            room = recent[waiting] + RECURRING_PERIOD if waiting < len(recent) else None
+            waiting += 1
+            overview.append((chat, "wait", room))
     return overview
 
 
@@ -799,16 +805,25 @@ def print_stuck_overview(state):
     resumed = {chat: at for chat, at in state["resumed"].items() if at >= now - RECURRING_SCAN}
     overview = stuck_overview(now, resumed)
     if not overview:
-        print("No chats are stopped at a usage limit.")
+        print("No chats are stopped by a usage limit.")
         return
-    outcomes = {
-        "resume": "resumed by the next check once the limits allow it",
-        "wait": f"waits, as at most {RECURRING_CHATS} chats are resumed in any five hours",
-        "skip": "skipped, as an earlier usage limit stopped it",
-    }
-    print("Chats stopped at a usage limit, newest first:")
-    for chat, outcome in overview:
-        print(f"  {format_time(chat['stopped'].astimezone())}  {chat_label(chat)}: {outcomes[outcome]}")
+    rows = []
+    for chat, outcome, room in overview:
+        if outcome == "resume":
+            plan = "next check"
+        elif outcome == "skip":
+            plan = "left alone"
+        else:
+            plan = format_time(room.astimezone()) if room is not None else "later"
+        rows.append((format_time(chat["stopped"].astimezone()), plan, chat_label(chat)))
+    stopped_width = max(len("Stopped"), *(len(row[0]) for row in rows))
+    plan_width = max(len("Continues"), *(len(row[1]) for row in rows))
+    print("Chats stopped by a usage limit:")
+    for row in [("Stopped", "Continues", "Chat"), *rows]:
+        print(f"  {row[0]:<{stopped_width}}  {row[1]:<{plan_width}}  {row[2]}")
+    print(f"Up to {RECURRING_CHATS} chats continue per 5 hours, once the usage limit allows.")
+    if any(outcome == "skip" for _, outcome, _ in overview):
+        print("Chats left alone were stopped by an older usage limit.")
 
 
 def usage_allowed():
@@ -1009,7 +1024,11 @@ def schedule(scheduled, message=None, chat=None, project=None, start_window=Fals
 
 
 def chat_label(chat):
-    return f"{chat['name']!r}"
+    # Until the app titles a chat, its catalogue may hold the chat's folder instead.
+    name = chat["name"]
+    if not name or name.startswith("/"):
+        return f"untitled ({Path(chat.get('cwd') or name).name or 'no folder'})"
+    return f"{name!r}"
 
 
 def scheduled_summary(scheduled, message, chat=None, project=None, start_window=False, every=None):

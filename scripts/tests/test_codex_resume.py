@@ -763,26 +763,37 @@ class CodexResumeTests(unittest.TestCase):
     def test_status_lists_stuck_chats_with_what_the_next_check_does(self):
         now = datetime.fromisoformat("2026-10-22T20:00:00+02:00")
         limit = now - timedelta(hours=10)
-        stops = {"a": limit + timedelta(hours=3), "b": limit + timedelta(hours=2), "c": limit + timedelta(hours=1),
-                 "old": limit - timedelta(days=2)}
-        catalogue = [{"id": name, "name": name, "updated": now} for name in stops]
+        stops = {"a": limit + timedelta(hours=4), "b": limit + timedelta(hours=3), "c": limit + timedelta(hours=2),
+                 "d": limit + timedelta(hours=1), "old": limit - timedelta(days=2)}
+        catalogue = [{"id": name, "name": name, "cwd": "/work/app", "updated": now} for name in stops]
+        # Until the app titles a chat, the catalogue holds its folder.
+        catalogue[2]["name"] = "/work/local-relay"
+        catalogue[2]["cwd"] = "/work/local-relay"
 
         def stuck(chat, since):
             return {"closed": stops[chat["id"]], "stopped": stops[chat["id"]]}
 
-        # One resume in the last five hours leaves room for two; one older than that does not count.
+        # One resume in the last five hours, at 19.00, leaves room for two until it is five hours old at
+        # midnight; one older than five hours does not count.
         state = {"resumed": {"x": now - timedelta(hours=1), "y": now - timedelta(hours=6)}}
         with (patch.object(codex_resume, "load_chats", return_value=catalogue),
               patch.object(codex_resume, "stuck_at_limit", side_effect=stuck),
               patch.object(codex_resume, "local_now", return_value=now),
               redirect_stdout(io.StringIO()) as output):
             codex_resume.print_stuck_overview(state)
+        t = {name: shown(stop.isoformat()) for name, stop in stops.items()}
+        room = shown("2026-10-23T00:00:00+02:00")
+        width = len(room)
         self.assertEqual(output.getvalue().splitlines(), [
-            "Chats stopped at a usage limit, newest first:",
-            f"  {shown(stops['a'].isoformat())}  'a': resumed by the next check once the limits allow it",
-            f"  {shown(stops['b'].isoformat())}  'b': resumed by the next check once the limits allow it",
-            f"  {shown(stops['c'].isoformat())}  'c': waits, as at most 3 chats are resumed in any five hours",
-            f"  {shown(stops['old'].isoformat())}  'old': skipped, as an earlier usage limit stopped it",
+            "Chats stopped by a usage limit:",
+            f"  {'Stopped':<{width}}  {'Continues':<{width}}  Chat",
+            f"  {t['a']}  {'next check':<{width}}  'a'",
+            f"  {t['b']}  {'next check':<{width}}  'b'",
+            f"  {t['c']}  {room}  untitled (local-relay)",
+            f"  {t['d']}  {'later':<{width}}  'd'",
+            f"  {t['old']}  {'left alone':<{width}}  'old'",
+            "Up to 3 chats continue per 5 hours, once the usage limit allows.",
+            "Chats left alone were stopped by an older usage limit.",
         ])
 
     def recurring(self, chats, allowed=True, state=None, queued=True, now="2026-10-21T10:00:00+02:00",
@@ -1020,7 +1031,7 @@ class CodexResumeTests(unittest.TestCase):
             self.assertEqual(lines[1:], ["Recurring check stopped.", "No recurring check is set up."])
             self.assertEqual(recurring_status.getvalue().splitlines(), [
                 f"{lines[0]} Last checked {shown('2026-10-21T10:00:00+02:00')}.",
-                "No chats are stopped at a usage limit.",
+                "No chats are stopped by a usage limit.",
                 "No Codex resume is scheduled.",
                 f"{lines[0]} Checks stop until this is fixed: cannot read {state_path} "
                 "(Expecting property name enclosed in double quotes: line 1 column 2 (char 1)); fix or delete it.",

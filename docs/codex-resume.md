@@ -42,9 +42,11 @@ Only chats updated in the last eight days are checked. A chat stopped more than
 24 hours before the most recently stopped chat is skipped: an earlier limit
 stopped it, and it was likely left on purpose. The check runs alongside a
 scheduled resume, opens the app if it isn't running, and logs only what it sends, when it waits for a reset, and any
-errors. `--status` shows when it last checked and lists the chats stopped at a
-usage limit, each marked as resumed by the next check, waiting for the cap of
-three in five hours, or skipped; `--recurring off` stops it. If
+errors. `--status` shows when it last checked and lists the chats stopped by a
+usage limit: whether each continues once the limit allows, waits for room
+among the three per five hours (with the earliest time), or is left alone as an
+older limit stopped it. A chat the app hasn't titled yet shows as
+`untitled (folder)`. `--recurring off` stops it. If
 its record of resumed chats can't be read, it stops sending rather than risk
 sending twice, and `--status` and the log say which file to fix or delete.
 
