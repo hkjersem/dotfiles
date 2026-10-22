@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Audit and fix vulnerabilities for the detected package manager.
+# Audit dependencies for known vulnerabilities and fix them with npm or pnpm.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -10,8 +10,8 @@ show_help() {
   cat <<'EOF'
 Usage: pma [--dry-run | --deep]
 
-Audits dependencies for known vulnerabilities and fixes them with the detected
-package manager.
+Audits dependencies for known vulnerabilities with the detected package manager,
+and fixes them with npm or pnpm. Bun only reports them.
 
 Options:
   --dry-run   Report findings, and for npm the fixes it would make, without changing files

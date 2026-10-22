@@ -89,7 +89,7 @@ Usage: pmu [--dry-run] [--yes] [--force] [--major] [--cooldown <days>] [--action
 Updates packages for the detected package manager, within the major version by default.
 
 Arguments:
-  <package>          Only update this package
+  <package>          Only update this package, or this action with --actions
 
 Options:
   -n, --dry-run      Show planned updates without making changes
@@ -97,7 +97,7 @@ Options:
   -f, --force        Check all exact pins directly via npm
   -m, --major        Allow major version bumps
   --cooldown <days>  Override cooldown in days (0 = disable)
-  --actions          Update GitHub Actions instead of packages (pnpm 12+)
+  --actions          Update GitHub Actions instead of packages (pnpm 12.7+)
   -h, --help         Show this help
 EOF
 }
