@@ -5,10 +5,14 @@ set time, or when a usage limit resets.
 The message goes through the Codex queue: the app server's experimental
 thread/queue/add, reached through the Codex CLI bundled with the app. The app
 checks the queue about every ten seconds and sends the message once the chat
-is not busy, also for a chat it has not loaded, without Accessibility, focus or
-an unlocked screen. A draft in the composer is left alone. When the app is not
-running, it is opened in the background. If the app has not taken the message
-within two minutes, it stays queued and the app sends it later. The chat is
+is not busy and loaded, without Accessibility, focus or an unlocked screen. A
+draft in the composer is left alone. When the app is not running, it is opened
+in the background. If the app has not taken the message within 30 seconds, the
+chat is probably not loaded, so it is opened in the background through a
+codex://threads link, which switches the app to it; that is skipped while you
+may be using the app: it is frontmost, the screen is unlocked, and you used the
+Mac within five minutes. If the app has not taken the message within two
+minutes, it stays queued and the app sends it once the chat is open. The chat is
 chosen with --chat or --project; without them it is the chat on this Mac with
 the latest activity, chosen when the message is sent.
 
@@ -85,6 +89,7 @@ import threading
 import time
 import unicodedata
 import uuid
+from xml.parsers.expat import ExpatError
 
 
 LABEL = "com.hkjersem.codex-resume"
@@ -119,8 +124,12 @@ FIVE_HOUR_MINUTES = 300
 # An unused window may report 0% with a reset a full window ahead; allow for clock and rounding drift.
 IDLE_WINDOW_TOLERANCE_SECONDS = 120
 DEFAULT_MESSAGE = "continue"
-# The app checks the queue every ten seconds and sends to a chat once it is not busy.
+# The app checks the queue every ten seconds and sends to a chat once it is not busy and loaded.
 QUEUE_PICKUP_SECONDS = 120
+# A message still queued this long is in a chat the app has not loaded, so the chat is opened.
+QUEUE_OPEN_CHAT_SECONDS = 30
+# Opening a chat switches the app to it, so it waits until you have left the app or the Mac this long.
+OPEN_CHAT_IDLE_SECONDS = 5 * 60
 QUEUE_POLL_SECONDS = 5
 TURN_EVENTS = ("task_started", "task_complete", "turn_aborted")
 # An unfinished reply this old in the session log is treated as abandoned, as after a crash.
@@ -487,6 +496,48 @@ def open_app(stamp):
     print(f"{stamp()}Could not open the Codex app ({detail}); it sends the message once it runs.", flush=True)
 
 
+def probe(*command):
+    return subprocess.run(command, capture_output=True, check=True, timeout=10).stdout
+
+
+def codex_in_use():
+    """Whether you may be using the Codex app: it is frontmost, the screen is unlocked, and you used the Mac
+    within OPEN_CHAT_IDLE_SECONDS. When this cannot be read, it counts as in use."""
+    try:
+        users = plistlib.loads(probe("/usr/sbin/ioreg", "-n", "Root", "-d1", "-a")).get("IOConsoleUsers", [])
+        if any(user.get("CGSSessionScreenIsLocked") for user in users):
+            return False
+        hid = plistlib.loads(probe("/usr/sbin/ioreg", "-r", "-c", "IOHIDSystem", "-d1", "-a"))
+        if min(entry["HIDIdleTime"] for entry in hid) / 1e9 >= OPEN_CHAT_IDLE_SECONDS:
+            return False
+        front = probe("/usr/bin/lsappinfo", "front").decode().strip()
+        info = probe("/usr/bin/lsappinfo", "info", "-only", "bundleid", front).decode() if front else ""
+    except (OSError, subprocess.SubprocessError, ValueError, ExpatError, KeyError, TypeError, AttributeError):
+        return True
+    return f'"{APP_BUNDLE_ID}"' in info
+
+
+def open_chat(chat, stamp):
+    """Open the chat in the background, so the app loads it and sends its queued message, unless you may be
+    using the app, since opening switches it to the chat."""
+    if codex_in_use():
+        print(f"{stamp()}The app has not taken the message yet and you are using it, so the chat was not "
+              "opened; the app sends the message once you open the chat.", flush=True)
+        return
+    try:
+        result = subprocess.run(["/usr/bin/open", "-g", f"codex://threads/{chat['id']}"],
+                                text=True, capture_output=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        detail = str(error)
+    else:
+        if result.returncode == 0:
+            print(f"{stamp()}The app has not taken the message yet; opened the chat in the background so it "
+                  "loads it.", flush=True)
+            return
+        detail = (result.stderr or result.stdout).strip()
+    print(f"{stamp()}Could not open the chat ({detail}); the app sends the message once you open it.", flush=True)
+
+
 def resume_through_queue(chat, message, stamp=lambda: ""):
     """Queue the message for the app to send in the chat; NotQueuedError means nothing was queued."""
     busy = replying(chat)
@@ -516,13 +567,18 @@ def resume_through_queue(chat, message, stamp=lambda: ""):
         return
     print(f"{stamp()}Queued the message in chat {chat_label(chat)}; waiting for the app to take it.", flush=True)
     open_app(stamp)
-    deadline = time.monotonic() + QUEUE_PICKUP_SECONDS
+    started = time.monotonic()
+    opened = False
     try:
         while still_queued(chat, item):
-            if time.monotonic() >= deadline:
+            waited = time.monotonic() - started
+            if waited >= QUEUE_PICKUP_SECONDS:
                 print(f"{stamp()}The app has not taken the message within {QUEUE_PICKUP_SECONDS // 60} minutes; "
-                      "it stays queued, and the app sends it once it gets to the chat.", flush=True)
+                      "it stays queued, and the app sends it once the chat is open.", flush=True)
                 return
+            if not opened and waited >= QUEUE_OPEN_CHAT_SECONDS:
+                opened = True
+                open_chat(chat, stamp)
             time.sleep(QUEUE_POLL_SECONDS)
     except RuntimeError as error:
         raise RuntimeError(f"The message was queued, but whether the app took it is unknown: {error} "

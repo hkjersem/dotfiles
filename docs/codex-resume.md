@@ -66,10 +66,14 @@ scheduling is used.
 Every message goes through the Codex queue, through the CLI bundled with the
 app. It works while the screen is locked, needs no Accessibility permission,
 and leaves any draft alone. The app sends the message within about ten seconds
-once the chat is not busy, also for a chat it hasn't loaded. If the app isn't
-running, it is opened in the background. If it hasn't taken the message within
-two minutes, the message stays queued and the app sends it later; the command
-doesn't wait for that.
+once the chat is not busy and loaded. If the app isn't running, it is opened in
+the background. The app doesn't send to a chat it hasn't loaded, so when it
+hasn't taken the message within 30 seconds, the chat is opened in the
+background, also on a locked screen. That switches the app to the chat, so it
+is skipped while you may be using the app: Codex is the frontmost app, the
+screen is unlocked, and you've used the Mac within the last five minutes. If
+the app hasn't taken the message within two minutes, the message stays queued
+and the app sends it once you open the chat; the command doesn't wait for that.
 
 If Codex is still replying in that chat, `continue` is dropped, while a
 `--message` is queued to follow the reply. When it's unclear whether a message

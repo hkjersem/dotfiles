@@ -92,6 +92,7 @@ for line in sys.stdin:
 """
 REAL_APP_SERVER_REQUEST = codex_resume.app_server_request
 REAL_OPEN_APP = codex_resume.open_app
+REAL_OPEN_CHAT = codex_resume.open_chat
 
 
 class CodexResumeTests(unittest.TestCase):
@@ -104,6 +105,9 @@ class CodexResumeTests(unittest.TestCase):
         app = patch.object(codex_resume, "open_app")
         self.open_app = app.start()
         self.addCleanup(app.stop)
+        chat = patch.object(codex_resume, "open_chat")
+        self.open_chat = chat.start()
+        self.addCleanup(chat.stop)
     def test_requires_valid_24_hour_time(self):
         for value in (
             "4:15", "24:00", "12:60", "+5h", "12:30pm",
@@ -1028,6 +1032,60 @@ class CodexResumeTests(unittest.TestCase):
         ])
         # Only the app sends queued messages, so it is opened if it is not running.
         self.open_app.assert_called_once()
+        # Taken at once, so the chat was loaded and is not opened.
+        self.open_chat.assert_not_called()
+
+    def test_queue_opens_the_chat_once_when_the_app_does_not_take_the_message(self):
+        self.fake_queue([self.queued("q1"), self.queued("q1"), self.queued("q1"), self.queued()])
+        with (patch.object(codex_resume, "QUEUE_OPEN_CHAT_SECONDS", 0), redirect_stdout(io.StringIO()) as output):
+            self.assertIsNone(codex_resume.resume_through_queue(self.LOCAL_CHAT, None))
+        self.open_chat.assert_called_once()
+        self.assertEqual(self.open_chat.call_args.args[0], self.LOCAL_CHAT)
+        self.assertEqual(output.getvalue().splitlines()[-1], "The app took the message from the queue.")
+
+    def test_chat_is_opened_in_the_background_unless_codex_is_in_use(self):
+        def done(code=0, stderr=""):
+            return subprocess.CompletedProcess([], code, "", stderr)
+
+        for in_use, results, expected in (
+            (True, [], "[t] The app has not taken the message yet and you are using it, so the chat was not "
+                       "opened; the app sends the message once you open the chat.\n"),
+            (False, [done()], "[t] The app has not taken the message yet; opened the chat in the background so "
+                              "it loads it.\n"),
+            (False, [done(code=1, stderr="LSOpenURLs failed\n")],
+             "[t] Could not open the chat (LSOpenURLs failed); the app sends the message once you open it.\n"),
+        ):
+            with self.subTest(expected=expected):
+                with (
+                    patch.object(codex_resume, "codex_in_use", return_value=in_use),
+                    patch.object(codex_resume.subprocess, "run", side_effect=results) as run,
+                    redirect_stdout(io.StringIO()) as output,
+                ):
+                    REAL_OPEN_CHAT(self.LOCAL_CHAT, lambda: "[t] ")
+                self.assertEqual(output.getvalue(), expected)
+                self.assertEqual([call.args[0] for call in run.call_args_list],
+                                 [["/usr/bin/open", "-g", "codex://threads/01a1-mine"]] * len(results))
+
+    def test_codex_counts_as_in_use_only_when_frontmost_unlocked_and_recently_used(self):
+        def probes(locked=False, idle=10, front="com.openai.codex"):
+            users = [{"kCGSSessionOnConsoleKey": True, **({"CGSSessionScreenIsLocked": True} if locked else {})}]
+            outputs = {
+                "Root": plistlib.dumps({"IOConsoleUsers": users}),
+                "IOHIDSystem": plistlib.dumps([{"HIDIdleTime": int(idle * 1e9)}]),
+                "front": b"ASN:0x0-0x2c02c:\n",
+                "info": f'"CFBundleIdentifier"="{front}"\n'.encode(),
+            }
+            return lambda *command: next(value for key, value in outputs.items() if key in command)
+
+        for case, fake, expected in (
+            ("frontmost, unlocked and used", probes(), True),
+            ("screen locked", probes(locked=True), False),
+            ("idle five minutes", probes(idle=300), False),
+            ("another app frontmost", probes(front="com.microsoft.VSCode"), False),
+            ("state unreadable", MagicMock(side_effect=subprocess.CalledProcessError(1, "ioreg")), True),
+        ):
+            with self.subTest(case), patch.object(codex_resume, "probe", side_effect=fake):
+                self.assertEqual(codex_resume.codex_in_use(), expected)
 
     def test_queue_reports_how_the_reply_it_started_ended(self):
         limit = {"type": "task_complete", "error": {"message": "You've hit your usage limit."}}
@@ -1115,7 +1173,7 @@ class CodexResumeTests(unittest.TestCase):
         self.assertEqual([call[0] for call in calls], ["thread/queue/add", "thread/queue/list"])
         self.assertEqual(output.getvalue().splitlines()[-1],
                          "[t] The app has not taken the message within 0 minutes; it stays queued, "
-                         "and the app sends it once it gets to the chat.")
+                         "and the app sends it once the chat is open.")
 
     def test_app_is_opened_in_the_background_only_when_it_is_not_running(self):
         def done(stdout="", code=0, stderr=""):
