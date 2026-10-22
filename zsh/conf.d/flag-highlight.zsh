@@ -46,6 +46,8 @@ _zsh_highlight_highlighter_dotfiles_flags_paint() {
         continue ;;
     esac
     start=${BUFFER[(ib:pos:)${(b)word}]}
+    # (z) drops backslash-newlines, so a continued word may not be found in the buffer.
+    (( start > $#BUFFER )) && return
     pos=$(( start + $#word ))
     if (( command_position )); then
       [[ $word == nocorrect || $word == noglob || $word =~ '^[[:alpha:]_][[:alnum:]_]*=' ]] && continue

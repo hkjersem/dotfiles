@@ -262,7 +262,8 @@ done
         })
 
     def test_pass_through_commands_other_commands_and_operands_are_not_marked(self):
-        buffers = ["pmi -D --anything", "pmr --anything", "ls --nope", "pmu -- --zz"]
+        buffers = ["pmi -D --anything", "pmr --anything", "ls --nope", "pmu -- --zz",
+                   'codex-resume --message "a\\\nb" --nope']
         self.assertEqual(self.marked(*buffers), {buffer: [] for buffer in buffers})
 
 
