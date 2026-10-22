@@ -39,7 +39,8 @@ sends a minute after the reset, as --reset does. When each chat was last resumed
 after that count, so each chat is resumed once per stop. An unreadable record
 stops the checks rather than risk sending twice, and a lock skips a check while
 another runs. It logs only what it sends, when it waits for a reset, and
-errors, and does not inhibit sleep. --recurring off removes it; --cancel leaves it alone.
+errors, and does not inhibit sleep. --status lists the stuck chats and what the next check does with each.
+--recurring off removes it; --cancel leaves it alone.
 
 A scheduled resume is a user LaunchAgent that starts immediately under
 caffeinate -i, so the Mac does not idle-sleep before the run, and waits until
@@ -757,6 +758,11 @@ def stuck_chats(now=None, resumed=None):
     """Chats on this Mac stuck at a usage limit, newest first, that the limit stopped no more than a day before
     it stopped the latest one, so chats left stuck after an earlier limit are not resumed. For a chat in resumed,
     only stops after it was last resumed count."""
+    return [chat for chat in all_stuck_chats(now, resumed) if not chat["earlier"]]
+
+
+def all_stuck_chats(now=None, resumed=None):
+    """As stuck_chats, but also the chats an earlier limit left stuck, marked earlier."""
     now = now or datetime.now().astimezone()
     resumed = resumed or {}
     found = []
@@ -768,8 +774,41 @@ def stuck_chats(now=None, resumed=None):
     if not found:
         return []
     closed = max(chat["closed"] for chat in found)
-    return sorted((chat for chat in found if chat["closed"] >= closed - RECURRING_LOOKBACK),
+    return sorted(({**chat, "earlier": chat["closed"] < closed - RECURRING_LOOKBACK} for chat in found),
                   key=lambda chat: chat["stopped"], reverse=True)
+
+
+def stuck_overview(now, resumed):
+    """Each chat stuck at a usage limit, newest first, with what the next recurring check does with it:
+    resume, wait for the cap of three resumes in five hours, or skip, as an earlier limit stopped it."""
+    free = max(0, RECURRING_CHATS - sum(at >= now - RECURRING_PERIOD for at in resumed.values()))
+    overview = []
+    for chat in all_stuck_chats(now, resumed):
+        if chat["earlier"]:
+            overview.append((chat, "skip"))
+        elif free:
+            free -= 1
+            overview.append((chat, "resume"))
+        else:
+            overview.append((chat, "wait"))
+    return overview
+
+
+def print_stuck_overview(state):
+    now = local_now()
+    resumed = {chat: at for chat, at in state["resumed"].items() if at >= now - RECURRING_SCAN}
+    overview = stuck_overview(now, resumed)
+    if not overview:
+        print("No chats are stopped at a usage limit.")
+        return
+    outcomes = {
+        "resume": "resumed by the next check once the limits allow it",
+        "wait": f"waits, as at most {RECURRING_CHATS} chats are resumed in any five hours",
+        "skip": "skipped, as an earlier usage limit stopped it",
+    }
+    print("Chats stopped at a usage limit, newest first:")
+    for chat, outcome in overview:
+        print(f"  {format_time(chat['stopped'].astimezone())}  {chat_label(chat)}: {outcomes[outcome]}")
 
 
 def usage_allowed():
@@ -992,11 +1031,17 @@ def status():
     minutes = recurring_minutes()
     if minutes is not None:
         try:
-            checked = load_recurring_state().get("checked")
-            last = f" Last checked {format_time(datetime.fromisoformat(checked).astimezone())}." if checked else ""
+            state = load_recurring_state()
         except RuntimeError as error:
-            last = f" Checks stop until this is fixed: {error}."
-        print(recurring_summary(minutes) + last)
+            print(recurring_summary(minutes) + f" Checks stop until this is fixed: {error}.")
+        else:
+            checked = state.get("checked")
+            last = f" Last checked {format_time(datetime.fromisoformat(checked).astimezone())}." if checked else ""
+            print(recurring_summary(minutes) + last)
+            try:
+                print_stuck_overview(state)
+            except RuntimeError as error:
+                print(f"Could not read the chats stopped at a usage limit: {error}")
     if not PLIST_PATH.exists():
         print("No Codex resume is scheduled.")
         return
@@ -1067,7 +1112,8 @@ def argument_parser():
              "'off' stops the checks",
     )
     actions.add_argument("--recurring-check", action="store_true", help=argparse.SUPPRESS)
-    actions.add_argument("--status", action="store_true", help="show the scheduled resume and recurring check")
+    actions.add_argument("--status", action="store_true",
+                         help="show the scheduled resume, the recurring check and chats stopped at a usage limit")
     actions.add_argument("--cancel", action="store_true", help="cancel the scheduled resume")
     actions.add_argument("--now", action="store_true", help="send now")
     actions.add_argument("--scheduled", metavar="TIMESTAMP", help=argparse.SUPPRESS)
