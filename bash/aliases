@@ -85,8 +85,8 @@ alias clearlogs=" sudo rm -rfv /private/var/log/asl/*.asl; sqlite3 ~/Library/Pre
 # URL-encode strings
 alias urlencode='python3 -c "import sys, urllib.parse; print(urllib.parse.quote_plus(sys.argv[1]));"'
 
-# Lock the screen
-alias afk="/System/Library/CoreServices/Menu\ Extras/User.menu/Contents/Resources/CGSession -suspend"
+# Lock the screen (sleeps the display; locks when a password is required right after sleep)
+alias afk="pmset displaysleepnow"
 
 # Reload the shell
 alias reload='exec "$SHELL" -l'
