@@ -89,7 +89,7 @@ alias urlencode='python3 -c "import sys, urllib.parse; print(urllib.parse.quote_
 alias afk="pmset displaysleepnow"
 
 # Reload the shell
-alias reload='exec "$SHELL" -l'
+reload() { exec "$SHELL" -l; }
 
 # Kill almost all of the running applications on the currently logged in user
 alias rebootapps="launchctl reboot apps"
