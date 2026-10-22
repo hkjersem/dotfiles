@@ -72,6 +72,7 @@ def find_folders(names):
 def main(argv=None):
     parser = argparse.ArgumentParser(
         prog="nosync",
+        allow_abbrev=False,
         description=(
             "Mark folders to keep out of iCloud sync. Defaults to node_modules and .git; "
             "--inspect alone defaults to the current folder. Recursive searches use exact "

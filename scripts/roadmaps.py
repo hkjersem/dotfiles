@@ -63,7 +63,7 @@ def find_roadmaps(folder: str, problems: List[str]) -> List[str]:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    parser = argparse.ArgumentParser(prog="roadmaps", description=__doc__,
+    parser = argparse.ArgumentParser(prog="roadmaps", description=__doc__, allow_abbrev=False,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("paths", nargs="*", metavar="PATH",
                         help="a repository, or a folder whose direct subfolders are repositories")

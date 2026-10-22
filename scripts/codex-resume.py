@@ -1077,6 +1077,7 @@ def log_stamp():
 def argument_parser():
     parser = argparse.ArgumentParser(
         prog="codex-resume",
+        allow_abbrev=False,
         description=(
             "Send continue, or a message, to a Codex desktop chat on this Mac now, at a set time, "
             "or when a usage limit resets. Times use local 24-hour HH:MM, HH.MM, or HHMM format."
