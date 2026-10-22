@@ -41,7 +41,8 @@ commit or another install. Shell settings may require a new shell.
 | `roadmaps` | Show due items, items awaiting acceptance, work in progress and errors across `roadmap` skill roadmaps in the repositories, or folders whose direct subfolders are repositories, listed one per line in the machine-local `~/.config/dotfiles/roadmap-paths`; or pass paths directly |
 
 The commands from this repository print their options with `--help`, and zsh
-completes them: type `pmu --` and press Tab.
+completes them: type `pmu --` and press Tab. Flags a command does not accept
+turn red as you type.
 
 `dotfiles-update` updates installed software, not this Git checkout. To get new
 dotfiles and reapply their symlinks:

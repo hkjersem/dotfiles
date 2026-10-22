@@ -1,4 +1,4 @@
-"""Tests that every dotfiles command has safe --help output, and that zsh completes its flags."""
+"""Tests that every dotfiles command has safe --help output, and that zsh completes and highlights its flags."""
 
 from pathlib import Path
 import os
@@ -13,6 +13,7 @@ import unittest
 REPO = Path(__file__).resolve().parents[2]
 ALIASES = REPO / "bash" / "aliases"
 COMPLETIONS = REPO / "zsh" / "conf.d" / "completions.zsh"
+FLAG_HIGHLIGHT = REPO / "zsh" / "conf.d" / "flag-highlight.zsh"
 SCRIPT_FUNCTION = re.compile(r'^([\w-]+)\(\) \{ (?:bash|python3) "\$HOME/\.dotfiles/scripts/[^"]+" "\$@"; \}$', re.M)
 # Tools a help request must never run.
 TOOLS = ("bun", "corepack", "fnm", "git", "node", "npm", "npx", "pnpm")
@@ -189,6 +190,80 @@ zpty -d z
             with self.subTest(command=command):
                 self.assertIn("--help", offered.get(command, set()))
 
+
+@unittest.skipUnless(shutil.which("zsh"), "zsh is not installed")
+class FlagHighlightTests(unittest.TestCase):
+    # Stands in for zsh-syntax-highlighting, which is not part of this repository, and prints
+    # the text of each highlighted region per buffer.
+    DRIVER = r"""
+source "$1"; compdef() { :; }; source "$2"; source "$3"
+# zsh-syntax-highlighting runs highlighters with this option.
+setopt warn_create_global
+_zsh_highlight_add_highlight() { print -r -- "MARK:$4:${BUFFER[$1+1,$2]}"; }
+shift 3
+for BUFFER in "$@"; do
+  print -r -- "BUFFER"
+  _zsh_highlight_highlighter_dotfiles_flags_paint
+done
+"""
+
+    def marked(self, *buffers):
+        """Return the highlighted text in each buffer."""
+        with tempfile.TemporaryDirectory() as root:
+            sandbox = Sandbox(root)
+            driver = sandbox.root / "driver.zsh"
+            driver.write_text(self.DRIVER)
+            result = subprocess.run(
+                ["zsh", "-f", str(driver), str(REPO / "zsh" / "conf.d" / "aliases.zsh"), str(COMPLETIONS),
+                 str(FLAG_HIGHLIGHT), *buffers],
+                cwd=sandbox.project, env=sandbox.env, capture_output=True, text=True, timeout=60,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stderr, "")
+            self.assertEqual(sandbox.tool_calls(), "")
+        marks = []
+        for line in result.stdout.splitlines():
+            if line == "BUFFER":
+                marks.append([])
+            elif line.startswith("MARK:"):
+                style, text = line[5:].split(":", 1)
+                self.assertEqual(style, "unknown-token")
+                marks[-1].append(text)
+        self.assertEqual(len(marks), len(buffers))
+        return dict(zip(buffers, marks))
+
+    def test_flags_listed_in_help_are_not_marked(self):
+        buffers = [f"{command} -h --help" for command in script_commands()]
+        self.assertEqual(self.marked(*buffers), {buffer: [] for buffer in buffers})
+
+    def test_flags_missing_from_help_are_marked(self):
+        self.assertEqual(self.marked(
+            "pmu --dry-run -x --cooldown=3 --nope",
+            "pmu -ny",
+            "wipe build --dirs",
+            "X=1 nocorrect pmu -n --zz",
+            "echo pmu --x; pmu --x",
+            "pmu -n\nwipe x --nah",
+        ), {
+            "pmu --dry-run -x --cooldown=3 --nope": ["-x", "--nope"],
+            "pmu -ny": ["-ny"],
+            "wipe build --dirs": ["--dirs"],
+            "X=1 nocorrect pmu -n --zz": ["--zz"],
+            "echo pmu --x; pmu --x": ["--x"],
+            "pmu -n\nwipe x --nah": ["--nah"],
+        })
+
+    def test_argparse_bundles_are_accepted_but_not_prefixes(self):
+        self.assertEqual(self.marked("nosync -rh", "nosync -rx", "nosync --insp", "codex-resume --rec 15"), {
+            "nosync -rh": [],
+            "nosync -rx": ["-rx"],
+            "nosync --insp": ["--insp"],
+            "codex-resume --rec 15": ["--rec"],
+        })
+
+    def test_pass_through_commands_other_commands_and_operands_are_not_marked(self):
+        buffers = ["pmi -D --anything", "pmr --anything", "ls --nope", "pmu -- --zz"]
+        self.assertEqual(self.marked(*buffers), {buffer: [] for buffer in buffers})
 
 
 if __name__ == "__main__":

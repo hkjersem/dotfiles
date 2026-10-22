@@ -11,7 +11,7 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 | `install` | Dotbot entry point — run this to apply the dotfiles |
 | `install.conf.yaml` | Dotbot symlink map |
 | `zsh/zshrc` | Main zsh config — sources conf.d modules, installer-managed tool blocks, and local overrides |
-| `zsh/conf.d/` | Zsh config modules (sourced in order by zshrc): `omz.zsh`, `plugins.zsh`, `history.zsh`, `env.zsh`, `aliases.zsh`, `completions.zsh`, `prompt.zsh`, `fnm.zsh`, `fzf.zsh`, `agent-sessions.zsh` |
+| `zsh/conf.d/` | Zsh config modules (sourced in order by zshrc): `omz.zsh`, `plugins.zsh`, `history.zsh`, `env.zsh`, `aliases.zsh`, `completions.zsh`, `flag-highlight.zsh`, `prompt.zsh`, `fnm.zsh`, `fzf.zsh`, `agent-sessions.zsh` |
 | `zsh/zlogin` | Login shell config (runs after zshrc) — compiles compdump, propagates PATH to launchd |
 | `Brewfile` | Homebrew formula/cask declarations — source of truth for brew packages; used by `applications.sh` and `update.sh` via `brew bundle --file` |
 | `scripts/machine-profile.sh` | Read, choose, or change the machine-local personal/work profile; also sourced by setup, updates, and audit |
@@ -89,7 +89,7 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 - **Never commit generated or cache files** — `.zcompdump`, `.zwc` and similar are machine-specific and gitignored
 - **All changes must be portable** — must work across Apple Silicon Macs running macOS 26.7 or newer, not just the current machine. Intel support is out of scope. Bash scripts must work with macOS's bundled Bash 3.2.
 - **When adding a new zsh config** — add it to a file in `zsh/conf.d/` and add a `source` line in `zsh/zshrc`
-- **Shell commands with logic or flags live in scripts** — `bash/aliases` keeps a one-line function that calls the script with `"$@"`; only functions that must change the current shell, such as `cd`, or pass straight through to another tool, such as `pm` and `pmx`, stay inline. Each script handles `-h`/`--help` before anything else, printing a `Usage:` line and each flag on an indented `  -x, --flag  description` line, then exits 0 without side effects. List the command in `dotfiles_commands` in `zsh/conf.d/completions.zsh`; zsh completes its flags from that help.
+- **Shell commands with logic or flags live in scripts** — `bash/aliases` keeps a one-line function that calls the script with `"$@"`; only functions that must change the current shell, such as `cd`, or pass straight through to another tool, such as `pm` and `pmx`, stay inline. Each script handles `-h`/`--help` before anything else, printing a `Usage:` line and each flag on an indented `  -x, --flag  description` line, then exits 0 without side effects. List the command in `dotfiles_commands` in `zsh/conf.d/completions.zsh`; zsh completes its flags from that help, and `flag-highlight.zsh` marks flags the help does not list in red.
 - **The `pm*` commands support every pnpm version from 10.29**, the oldest one a project still pins, not just the newest release of each major. Raise the floor only when the owner agrees. A feature that needs a newer pnpm must be opt-in, check `pnpm --version`, and fail with a clear message on older pnpm, as `pmu --actions` does. When behaviour differs between versions, test each one.
 - **When adding a new brew tool**: add it to `Brewfile` — this is the single source of truth for brew packages. `applications.sh` and `update.sh` both use `brew bundle` to install from it
 - **Machine-local settings for this repository's scripts** go in `~/.config/dotfiles/` (e.g. `profile`, `roadmap-paths`, `audit-ignore`), never in Git. The exceptions are files whose location a tool dictates (`~/.zshrc_local`, `~/.gitconfig_local*`).
@@ -117,7 +117,7 @@ These rules have been broken before. Each is checked by the test the table names
 | Bash files avoid Bash 4+ syntax (`bash -n` in CI does not catch it) | `test_bash_scripts_avoid_bash4_only_syntax` |
 | No hardcoded `/Users/<name>` paths | `test_no_hardcoded_home_paths` |
 | Repo-authored skills, other than `dotfiles`, do not reference this repository; paths to `~/.dotfiles/...` in `dotfiles` point to files that exist | `test_repo_authored_skills_do_not_reference_this_repository` |
-| Every script command in `bash/aliases` prints `--help` without running tools or changing files, and zsh completes its flags | `scripts/tests/test_command_help.py` |
+| Every script command in `bash/aliases` prints `--help` without running tools or changing files, and zsh completes and highlights its flags | `scripts/tests/test_command_help.py` |
 
 ## Roadmap
 
