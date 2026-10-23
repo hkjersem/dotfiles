@@ -1,7 +1,7 @@
 """Offline regression tests for codex-resume scheduling."""
 
 from datetime import datetime, timedelta, timezone
-from contextlib import contextmanager, redirect_stderr, redirect_stdout
+from contextlib import ExitStack, contextmanager, redirect_stderr, redirect_stdout
 import importlib.util
 import fcntl
 import io
@@ -683,11 +683,15 @@ class CodexResumeTests(unittest.TestCase):
             temporary = tempfile.TemporaryDirectory()
             self.addCleanup(temporary.cleanup)
             home = Path(temporary.name)
+        # Sleeping moves a fake clock on, so waits for the app end at once instead of spinning in real time.
+        clock = [0.0]
         for patcher in (
             patch.object(codex_resume, "app_server_request", side_effect=request),
             patch.object(codex_resume, "CODEX_HOME", home),
             patch.object(codex_resume, "REPLY_RESULT_SECONDS", 0),
-            patch.object(codex_resume.time, "sleep"),
+            patch.object(codex_resume.time, "sleep",
+                         side_effect=lambda seconds: clock.__setitem__(0, clock[0] + seconds)),
+            patch.object(codex_resume.time, "monotonic", side_effect=lambda: clock[0]),
         ):
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -789,6 +793,7 @@ class CodexResumeTests(unittest.TestCase):
         # One resume in the last five hours, at 19.00, leaves room for two until it is five hours old at
         # midnight; one older than five hours does not count.
         state = {"resumed": {"x": now - timedelta(hours=1), "y": now - timedelta(hours=6)}}
+        state["sends"] = list(state["resumed"].values())
         with (patch.object(codex_resume, "load_chats", return_value=catalogue),
               patch.object(codex_resume, "stuck_at_limit", side_effect=stuck),
               patch.object(codex_resume, "local_now", return_value=now),
@@ -994,9 +999,19 @@ class CodexResumeTests(unittest.TestCase):
         # The failed chat stays recorded, as its message may have been queued, and c is left to a later check.
         self.assertEqual(sorted(json.loads(self.state_path.read_text())["resumed"]), ["a", "b"])
 
+    def test_recurring_cap_counts_each_resume_even_of_the_same_chat(self):
+        # a was resumed twice in the last five hours, which its single time in resumed cannot show.
+        state = {"resumed": {"a": "2026-10-21T09:00:00+02:00"},
+                 "sends": ["2026-10-21T04:00:00+02:00", "2026-10-21T07:00:00+02:00", "2026-10-21T09:00:00+02:00"]}
+        resumed, _, state = self.recurring(["a", "b", "c"], state=state, stopped="2026-10-21T09:30:00+02:00")
+        self.assertEqual(resumed, ["a"])
+        # Sends older than five hours are dropped.
+        self.assertEqual(state["sends"], ["2026-10-21T07:00:00+02:00", "2026-10-21T09:00:00+02:00",
+                                          "2026-10-21T10:00:00+02:00"])
+
     def test_recurring_check_retries_a_chat_when_nothing_was_queued(self):
         resumed, _, state = self.recurring(["a"], queued=False)
-        self.assertEqual((resumed, state["resumed"]), (["a"], {}))
+        self.assertEqual((resumed, state["resumed"], state["sends"]), (["a"], {}, []))
         self.assertEqual(self.errors, "[stamp] Could not queue the message, so nothing was sent: rejected\n")
         self.assertEqual(self.recurring(["a"], state=state)[0], ["a"])
         earlier = {"resumed": {"a": "2026-10-20T10:00:00+02:00"}}
@@ -1119,6 +1134,7 @@ class CodexResumeTests(unittest.TestCase):
         self.assertEqual(output.getvalue().splitlines(), [
             "Queued the message in chat 'Find current project status'; waiting for the app to take it.",
             "The app took the message from the queue.",
+            "Codex is replying.",
         ])
         # Only the app sends queued messages, so it is opened if it is not running.
         self.open_app.assert_called_once()
@@ -1131,7 +1147,7 @@ class CodexResumeTests(unittest.TestCase):
             self.assertIsNone(codex_resume.resume_through_queue(self.LOCAL_CHAT, None))
         self.open_chat.assert_called_once()
         self.assertEqual(self.open_chat.call_args.args[0], self.LOCAL_CHAT)
-        self.assertEqual(output.getvalue().splitlines()[-1], "The app took the message from the queue.")
+        self.assertEqual(output.getvalue().splitlines()[-2], "The app took the message from the queue.")
 
     def test_queued_messages_are_followed_together_and_each_line_names_its_chat(self):
         listings = {"a": [True, False], "b": [True, True, False]}
@@ -1141,8 +1157,7 @@ class CodexResumeTests(unittest.TestCase):
             polled.append(chat["id"])
             return listings[chat["id"]].pop(0)
 
-        entries = [{"chat": {"id": name, "name": name}, "item": "q", "path": None, "offset": 0,
-                    "queued_at": datetime.now().astimezone(), "stamp": lambda: "[t] "} for name in ("a", "b")]
+        entries = self.entries("a", "b")
         replies = {"a": "The reply finished.", "b": None}
         with (patch.object(codex_resume, "still_queued", side_effect=still_queued),
               patch.object(codex_resume, "reply_result", side_effect=lambda entry: replies[entry["chat"]["id"]]),
@@ -1159,13 +1174,63 @@ class CodexResumeTests(unittest.TestCase):
             "[t] 'b': Codex is replying.",
         ])
 
+    def watch(self, entries, still_queued, **patches):
+        """Run watch_queued on a fake clock that sleeping moves on; return what it printed."""
+        clock = [0.0]
+        with ExitStack() as stack:
+            for name, value in {"still_queued": MagicMock(side_effect=still_queued),
+                                "reply_result": MagicMock(return_value="The reply finished."), **patches}.items():
+                stack.enter_context(patch.object(codex_resume, name, value))
+            stack.enter_context(patch.object(codex_resume.time, "sleep",
+                                             side_effect=lambda seconds: clock.__setitem__(0, clock[0] + seconds)))
+            stack.enter_context(patch.object(codex_resume.time, "monotonic", side_effect=lambda: clock[0]))
+            output = stack.enter_context(redirect_stdout(io.StringIO()))
+            try:
+                codex_resume.watch_queued(entries)
+            finally:
+                self.watched = output.getvalue()
+
+    def entries(self, *names):
+        return [{"chat": {"id": name, "name": name}, "item": "q", "path": None, "offset": 0,
+                 "queued_at": datetime.now().astimezone(), "stamp": lambda: "[t] "} for name in names]
+
+    def test_watch_retries_unreadable_queues_and_reports_the_unknown_after_the_rest(self):
+        down = RuntimeError("The Codex app server did not answer in time.")
+        answers = {"a": [down, False]}
+
+        def still_queued(chat, item):
+            if chat["id"] == "b":
+                raise down
+            return answers["a"].pop(0)
+
+        with self.assertRaisesRegex(RuntimeError, "^A message was queued in chat 'b', but whether the app took it "
+                                                  "is unknown: The Codex app server did not answer in time. Check "
+                                                  "the chat before retrying.$"):
+            self.watch(self.entries("a", "b"), still_queued)
+        self.assertEqual(self.watched.splitlines(), ["[t] 'a': The app took the message from the queue.",
+                                                     "[t] 'a': The reply finished."])
+
+    def test_watch_tries_opening_again_until_you_stop_using_the_app(self):
+        opened = MagicMock(side_effect=[False, False, True])
+        listings = [True] * 4 + [False]
+        self.watch(self.entries("a"), lambda chat, item: listings.pop(0), open_chat=opened,
+                   QUEUE_OPEN_CHAT_SECONDS=0)
+        # Why it was not opened is logged once, and it is not opened again once it was.
+        self.assertEqual([call.kwargs["announce"] for call in opened.call_args_list], [True, False, False])
+        self.assertIn("The app took the message from the queue.", self.watched)
+
+    def test_reply_result_waits_while_the_session_log_is_missing(self):
+        with tempfile.TemporaryDirectory() as temporary, patch.object(codex_resume, "chat_log", return_value=None):
+            entry = {**self.entries("a")[0], "path": Path(temporary) / "compressed-meanwhile.jsonl"}
+            self.assertIsNone(codex_resume.reply_result(entry))
+
     def test_chat_is_opened_in_the_background_unless_codex_is_in_use(self):
         def done(code=0, stderr=""):
             return subprocess.CompletedProcess([], code, "", stderr)
 
         for in_use, results, expected in (
             (True, [], "[t] The app has not taken the message yet and you are using it, so the chat was not "
-                       "opened; the app sends the message once you open the chat.\n"),
+                       "opened yet; the app sends the message once you open the chat.\n"),
             (False, [done()], "[t] The app has not taken the message yet; opened the chat in the background so "
                               "it loads it.\n"),
             (False, [done(code=1, stderr="LSOpenURLs failed\n")],
@@ -1183,12 +1248,12 @@ class CodexResumeTests(unittest.TestCase):
                                  [["/usr/bin/open", "-g", "codex://threads/01a1-mine"]] * len(results))
 
     def test_codex_counts_as_in_use_only_when_frontmost_unlocked_and_recently_used(self):
-        def probes(locked=False, idle=10, front="com.openai.codex"):
+        def probes(locked=False, idle=10, front="com.openai.codex", asn=b"ASN:0x0-0x2c02c:\n"):
             users = [{"kCGSSessionOnConsoleKey": True, **({"CGSSessionScreenIsLocked": True} if locked else {})}]
             outputs = {
                 "Root": plistlib.dumps({"IOConsoleUsers": users}),
                 "IOHIDSystem": plistlib.dumps([{"HIDIdleTime": int(idle * 1e9)}]),
-                "front": b"ASN:0x0-0x2c02c:\n",
+                "front": asn,
                 "info": f'"CFBundleIdentifier"="{front}"\n'.encode(),
             }
             return lambda *command: next(value for key, value in outputs.items() if key in command)
@@ -1198,6 +1263,7 @@ class CodexResumeTests(unittest.TestCase):
             ("screen locked", probes(locked=True), False),
             ("idle five minutes", probes(idle=300), False),
             ("another app frontmost", probes(front="com.microsoft.VSCode"), False),
+            ("no frontmost app read", probes(asn=b""), True),
             ("state unreadable", MagicMock(side_effect=subprocess.CalledProcessError(1, "ioreg")), True),
         ):
             with self.subTest(case), patch.object(codex_resume, "probe", side_effect=fake):

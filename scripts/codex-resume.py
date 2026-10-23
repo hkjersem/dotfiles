@@ -457,16 +457,20 @@ def replying(chat, now=None):
 
 
 def reply_result(entry):
-    """How the reply a taken message started has ended so far: a line to log, None while it runs, or "" when
-    the chat has no session log to tell."""
+    """How the reply a taken message started has ended so far: a line to log, or None while it runs or its
+    session log cannot be read yet."""
     path, offset, since = entry["path"], entry["offset"], None
-    if path is None:
+    if path is None or not path.exists():
         # Codex compresses idle chats' logs and unpacks one again before writing to it, so a log found only
         # now holds earlier replies too; only events from after queueing belong to this one.
         path, offset, since = chat_log(entry["chat"]), 0, entry["queued_at"]
         if path is None:
-            return ""
-    ended = [event for event in turn_events(path, offset, since) if event["type"] != "task_started"]
+            return None
+    try:
+        events = turn_events(path, offset, since)
+    except OSError:
+        return None
+    ended = [event for event in events if event["type"] != "task_started"]
     if not ended:
         return None
     error = ended[0].get("error")
@@ -516,16 +520,19 @@ def codex_in_use():
         info = probe("/usr/bin/lsappinfo", "info", "-only", "bundleid", front).decode() if front else ""
     except (OSError, subprocess.SubprocessError, ValueError, ExpatError, KeyError, TypeError, AttributeError):
         return True
+    if "CFBundleIdentifier" not in info:
+        return True
     return f'"{APP_BUNDLE_ID}"' in info
 
 
-def open_chat(chat, stamp):
+def open_chat(chat, stamp, announce=True):
     """Open the chat in the background, so the app loads it and sends its queued message, unless you may be
-    using the app, since opening switches it to the chat."""
+    using the app, since opening switches it to the chat. Returns whether it opened; announce logs why not."""
     if codex_in_use():
-        print(f"{stamp()}The app has not taken the message yet and you are using it, so the chat was not "
-              "opened; the app sends the message once you open the chat.", flush=True)
-        return
+        if announce:
+            print(f"{stamp()}The app has not taken the message yet and you are using it, so the chat was not "
+                  "opened yet; the app sends the message once you open the chat.", flush=True)
+        return False
     try:
         result = subprocess.run(["/usr/bin/open", "-g", f"codex://threads/{chat['id']}"],
                                 text=True, capture_output=True, timeout=30)
@@ -535,9 +542,12 @@ def open_chat(chat, stamp):
         if result.returncode == 0:
             print(f"{stamp()}The app has not taken the message yet; opened the chat in the background so it "
                   "loads it.", flush=True)
-            return
+            return True
         detail = (result.stderr or result.stdout).strip()
-    print(f"{stamp()}Could not open the chat ({detail}); the app sends the message once you open it.", flush=True)
+    if announce:
+        print(f"{stamp()}Could not open the chat ({detail}); the app sends the message once you open it.",
+              flush=True)
+    return False
 
 
 def resume_through_queue(chat, message, stamp=lambda: ""):
@@ -583,41 +593,51 @@ def queue_message(chat, message, stamp):
 
 def watch_queued(entries):
     """Follow queued messages together: open a chat whose message the app leaves queued, log when the app takes
-    each, and then how its reply has ended so far. With several, each line names its chat."""
+    each, and then how its reply has ended so far. With several, each line names its chat. A chat whose queue
+    cannot be read until the deadline is raised as unknown after the others are followed."""
     def stamp(entry):
         prefix = f"{chat_label(entry['chat'])}: " if len(entries) > 1 else ""
         return lambda: entry["stamp"]() + prefix
 
     started = time.monotonic()
-    waiting, replies = list(entries), []
+    waiting, replies, unknown = list(entries), [], []
     while waiting or replies:
         for entry in list(waiting):
             try:
                 queued = still_queued(entry["chat"], entry["item"])
+                entry["error"] = None
             except RuntimeError as error:
-                raise RuntimeError(f"A message was queued in chat {chat_label(entry['chat'])}, but whether the "
-                                   f"app took it is unknown: {error} Check the chat before retrying.") from error
+                # Retried on the next round, as the app server may answer then.
+                queued, entry["error"] = True, error
             waited = time.monotonic() - started
             if not queued:
                 print(f"{stamp(entry)()}The app took the message from the queue.", flush=True)
                 waiting.remove(entry)
                 replies.append({**entry, "taken": time.monotonic()})
             elif waited >= QUEUE_PICKUP_SECONDS:
-                print(f"{stamp(entry)()}The app has not taken the message within {QUEUE_PICKUP_SECONDS // 60} "
-                      "minutes; it stays queued, and the app sends it once the chat is open.", flush=True)
                 waiting.remove(entry)
+                if entry["error"] is not None:
+                    unknown.append(f"A message was queued in chat {chat_label(entry['chat'])}, but whether the app "
+                                   f"took it is unknown: {entry['error']} Check the chat before retrying.")
+                else:
+                    print(f"{stamp(entry)()}The app has not taken the message within "
+                          f"{QUEUE_PICKUP_SECONDS // 60} minutes; it stays queued, and the app sends it once the "
+                          "chat is open.", flush=True)
             elif not entry.get("opened") and waited >= QUEUE_OPEN_CHAT_SECONDS:
-                entry["opened"] = True
-                open_chat(entry["chat"], stamp(entry))
+                # Tried again each round, as you may stop using the app before the deadline; why it was not
+                # opened is logged once.
+                entry["opened"] = open_chat(entry["chat"], stamp(entry), announce=not entry.get("tried"))
+                entry["tried"] = True
         for entry in list(replies):
             result = reply_result(entry)
             if result is None and time.monotonic() - entry["taken"] < REPLY_RESULT_SECONDS:
                 continue
             replies.remove(entry)
-            if result != "":
-                print(f"{stamp(entry)()}{result or 'Codex is replying.'}", flush=True)
+            print(f"{stamp(entry)()}{result or 'Codex is replying.'}", flush=True)
         if waiting or replies:
             time.sleep(QUEUE_POLL_SECONDS)
+    if unknown:
+        raise RuntimeError(" ".join(unknown))
 
 
 def usage_limits():
@@ -805,11 +825,11 @@ def all_stuck_chats(now=None, resumed=None):
                   key=lambda chat: chat["stopped"], reverse=True)
 
 
-def stuck_overview(now, resumed):
+def stuck_overview(now, resumed, sends):
     """Each chat stuck at a usage limit, newest first, with what the next recurring check does with it:
     resume, wait for the cap of three resumes in five hours, or skip, as an earlier limit stopped it. A waiting
     chat comes with when the cap next has room for it, or None when that depends on resumes not made yet."""
-    recent = sorted(at for at in resumed.values() if at >= now - RECURRING_PERIOD)
+    recent = sorted(at for at in sends if at >= now - RECURRING_PERIOD)
     free = max(0, RECURRING_CHATS - len(recent))
     waiting = 0
     overview = []
@@ -843,7 +863,7 @@ def print_field(label, value):
 def print_stuck_overview(state):
     now = local_now()
     resumed = {chat: at for chat, at in state["resumed"].items() if at >= now - RECURRING_SCAN}
-    overview = stuck_overview(now, resumed)
+    overview = stuck_overview(now, resumed, state["sends"])
     print_section(f"Chats stopped by a usage limit ({len(overview)})")
     if not overview:
         print("  None.")
@@ -894,27 +914,32 @@ def reset_before_next_check(now):
 
 
 def load_recurring_state():
-    """The last check and when each chat was last resumed; an unreadable file is an error, since resuming
-    without it could send twice."""
+    """The last check, when each chat was last resumed, and every resume within the cap's period; an unreadable
+    file is an error, since resuming without it could send twice."""
     try:
         state = json.loads(RECURRING_STATE_PATH.read_text())
     except FileNotFoundError:
-        return {"resumed": {}}
+        return {"resumed": {}, "sends": []}
     except (OSError, ValueError) as error:
         raise RuntimeError(f"cannot read {RECURRING_STATE_PATH} ({error}); fix or delete it") from None
     try:
         resumed = {chat: datetime.fromisoformat(at) for chat, at in state["resumed"].items()}
-        if any(at.tzinfo is None for at in resumed.values()):
+        # A chat resumed again overwrites its time in resumed, so the cap counts each resume here; records
+        # written before this list existed have only resumed to go by.
+        sends = ([datetime.fromisoformat(at) for at in state["sends"]] if "sends" in state
+                 else list(resumed.values()))
+        if any(at.tzinfo is None for at in [*resumed.values(), *sends]):
             raise ValueError("a time has no time zone")
     except (KeyError, AttributeError, TypeError, ValueError) as error:
         raise RuntimeError(f"unexpected contents in {RECURRING_STATE_PATH} ({error}); fix or delete it") from None
-    return {**state, "resumed": resumed}
+    return {**state, "resumed": resumed, "sends": sends}
 
 
 def save_recurring_state(state):
     temporary = RECURRING_STATE_PATH.with_suffix(".tmp")
     temporary.write_text(json.dumps(
-        {**state, "resumed": {chat: at.isoformat() for chat, at in state["resumed"].items()}}, indent=1))
+        {**state, "resumed": {chat: at.isoformat() for chat, at in state["resumed"].items()},
+         "sends": [at.isoformat() for at in state["sends"]]}, indent=1))
     temporary.replace(RECURRING_STATE_PATH)
 
 
@@ -937,7 +962,8 @@ def recurring_check(now=None):
 def check_stuck_chats(now):
     state = load_recurring_state()
     resumed = {chat: at for chat, at in state["resumed"].items() if at >= now - RECURRING_SCAN}
-    state.update(checked=now.isoformat(), resumed=resumed)
+    sends = [at for at in state["sends"] if at >= now - RECURRING_PERIOD]
+    state.update(checked=now.isoformat(), resumed=resumed, sends=sends)
     try:
         chats = stuck_chats(now, resumed)
         if not chats:
@@ -954,7 +980,7 @@ def check_stuck_chats(now):
             chats = stuck_chats(now, resumed)
             if not chats or not usage_allowed():
                 return
-        recent = sum(at >= now - RECURRING_PERIOD for at in resumed.values())
+        recent = sum(at >= now - RECURRING_PERIOD for at in sends)
         # All are queued first and then followed together, so the app takes them within seconds of each other.
         queued = []
         try:
@@ -964,6 +990,7 @@ def check_stuck_chats(now):
                 # Recorded first, so a message that may have been queued is never sent twice.
                 previous = resumed.get(chat["id"])
                 resumed[chat["id"]] = now
+                sends.append(now)
                 save_recurring_state(state)
                 try:
                     entry = queue_message(chat, None, log_stamp)
@@ -971,6 +998,7 @@ def check_stuck_chats(now):
                         queued.append(entry)
                 except NotQueuedError as error:
                     print(f"{log_stamp()}{error}", file=sys.stderr, flush=True)
+                    sends.pop()
                     if previous is None:
                         del resumed[chat["id"]]
                     else:
