@@ -126,6 +126,7 @@ FIVE_HOUR_MINUTES = 300
 # An unused window may report 0% with a reset a full window ahead; allow for clock and rounding drift.
 IDLE_WINDOW_TOLERANCE_SECONDS = 120
 DEFAULT_MESSAGE = "continue"
+STATUS_LABEL_WIDTH = 12
 # The app checks the queue every ten seconds and sends to a chat once it is not busy and loaded.
 QUEUE_PICKUP_SECONDS = 120
 # A message still queued this long is in a chat the app has not loaded, so the chat is opened.
@@ -826,12 +827,26 @@ def stuck_overview(now, resumed):
     return overview
 
 
+def print_section(title, first=False):
+    if not first:
+        print()
+    heading = f"── {title} ──"
+    if sys.stdout.isatty() and not os.environ.get("NO_COLOR"):
+        heading = f"\033[1m{heading}\033[0m"
+    print(heading)
+
+
+def print_field(label, value):
+    print(f"  {label:<{STATUS_LABEL_WIDTH}}{value}")
+
+
 def print_stuck_overview(state):
     now = local_now()
     resumed = {chat: at for chat, at in state["resumed"].items() if at >= now - RECURRING_SCAN}
     overview = stuck_overview(now, resumed)
+    print_section(f"Chats stopped by a usage limit ({len(overview)})")
     if not overview:
-        print("No chats are stopped by a usage limit.")
+        print("  None.")
         return
     rows = []
     for chat, outcome, room in overview:
@@ -844,12 +859,10 @@ def print_stuck_overview(state):
         rows.append((format_time(chat["stopped"].astimezone()), plan, chat_label(chat)))
     stopped_width = max(len("Stopped"), *(len(row[0]) for row in rows))
     plan_width = max(len("Continues"), *(len(row[1]) for row in rows))
-    print("Chats stopped by a usage limit:")
     for row in [("Stopped", "Continues", "Chat"), *rows]:
         print(f"  {row[0]:<{stopped_width}}  {row[1]:<{plan_width}}  {row[2]}")
-    print(f"Up to {RECURRING_CHATS} chats continue per 5 hours, once the usage limit allows.")
     if any(outcome == "skip" for _, outcome, _ in overview):
-        print("Chats left alone were stopped by an older usage limit.")
+        print("  Chats left alone were stopped by an older usage limit.")
 
 
 def usage_allowed():
@@ -944,23 +957,28 @@ def check_stuck_chats(now):
         recent = sum(at >= now - RECURRING_PERIOD for at in resumed.values())
         # All are queued first and then followed together, so the app takes them within seconds of each other.
         queued = []
-        for chat in chats[:max(0, RECURRING_CHATS - recent)]:
-            print(f"{log_stamp()}Chat {chat_label(chat)} stopped at a usage limit "
-                  f"{format_time(chat['stopped'].astimezone())}; resuming it.", flush=True)
-            # Recorded first, so a message that may have been queued is never sent twice.
-            previous = resumed.get(chat["id"])
-            resumed[chat["id"]] = now
-            save_recurring_state(state)
-            try:
-                entry = queue_message(chat, None, log_stamp)
-                if entry is not None:
-                    queued.append(entry)
-            except NotQueuedError as error:
-                print(f"{log_stamp()}{error}", file=sys.stderr, flush=True)
-                if previous is None:
-                    del resumed[chat["id"]]
-                else:
-                    resumed[chat["id"]] = previous
+        try:
+            for chat in chats[:max(0, RECURRING_CHATS - recent)]:
+                print(f"{log_stamp()}Chat {chat_label(chat)} stopped at a usage limit "
+                      f"{format_time(chat['stopped'].astimezone())}; resuming it.", flush=True)
+                # Recorded first, so a message that may have been queued is never sent twice.
+                previous = resumed.get(chat["id"])
+                resumed[chat["id"]] = now
+                save_recurring_state(state)
+                try:
+                    entry = queue_message(chat, None, log_stamp)
+                    if entry is not None:
+                        queued.append(entry)
+                except NotQueuedError as error:
+                    print(f"{log_stamp()}{error}", file=sys.stderr, flush=True)
+                    if previous is None:
+                        del resumed[chat["id"]]
+                    else:
+                        resumed[chat["id"]] = previous
+        except RuntimeError:
+            # The chats queued before the failure still need opening if the app leaves them queued.
+            watch_queued(queued)
+            raise
         watch_queued(queued)
     finally:
         save_recurring_state(state)
@@ -1079,21 +1097,29 @@ def scheduled_summary(scheduled, message, chat=None, project=None, start_window=
 
 def status():
     minutes = recurring_minutes()
-    if minutes is not None:
+    print_section("Recurring check", first=True)
+    if minutes is None:
+        print("  Not set up. Start it with --recurring <minutes>.")
+    else:
+        print_field("Every", f"{minutes} minutes")
+        print_field("Sends", f"{DEFAULT_MESSAGE} to up to {RECURRING_CHATS} stopped chats per 5 hours, newest "
+                    "first, once the usage limits allow")
         try:
             state = load_recurring_state()
         except RuntimeError as error:
-            print(recurring_summary(minutes) + f" Checks stop until this is fixed: {error}.")
+            print_field("Stopped", f"checks stop until this is fixed: {error}")
         else:
             checked = state.get("checked")
-            last = f" Last checked {format_time(datetime.fromisoformat(checked).astimezone())}." if checked else ""
-            print(recurring_summary(minutes) + last)
+            print_field("Last check",
+                        format_time(datetime.fromisoformat(checked).astimezone()) if checked else "not yet")
             try:
                 print_stuck_overview(state)
             except RuntimeError as error:
-                print(f"Could not read the chats stopped at a usage limit: {error}")
+                print_section("Chats stopped by a usage limit")
+                print(f"  Could not read them: {error}")
+    print_section("Scheduled resume")
     if not PLIST_PATH.exists():
-        print("No Codex resume is scheduled.")
+        print("  None.")
         return
     with PLIST_PATH.open("rb") as agent_file:
         plist = plistlib.load(agent_file)
@@ -1117,7 +1143,20 @@ def status():
         except RuntimeError:
             chat = unknown
     every = int(arguments[arguments.index("--every") + 1]) if "--every" in arguments else None
-    print(scheduled_summary(scheduled, message, chat, project, "--start-window" in arguments, every))
+    when = format_time(scheduled)
+    if every:
+        when += f", or earlier if the limit resets first (checked every {every} minutes)"
+    print_field("At", when)
+    if project is not None:
+        print_field("Chat", f"latest chat in project {project_label(project)}")
+    elif chat is not None:
+        print_field("Chat", chat_label(chat))
+    else:
+        print_field("Chat", "latest chat on this Mac")
+    print_field("Message", message if message is not None
+                else f"{DEFAULT_MESSAGE} (not sent if Codex is already replying)")
+    if "--start-window" in arguments:
+        print_field("Only if", "no 5-hour window is running")
 
 
 def log_stamp():

@@ -6,8 +6,10 @@
 
 `codex-resume --time 15.03` sends `continue` to a Codex chat on this Mac three
 seconds after the next occurrence of that local time. Accepts `15:03`, `15.03`,
-or `1503`. `--now` sends right away; use `--status`, `--cancel`, or `--help`
-for the rest.
+or `1503`. `--now` sends right away; use `--cancel` or `--help` for the rest.
+`--status` shows three sections: the recurring check, the chats stopped by a
+usage limit, and the scheduled resume. Headings are bold in a terminal unless
+`NO_COLOR` is set.
 
 `codex-resume --reset` waits for the used-up 5-hour or weekly limit instead,
 or the later one if both are, and sends a minute after it resets.

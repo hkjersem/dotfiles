@@ -108,6 +108,10 @@ class CodexResumeTests(unittest.TestCase):
         chat = patch.object(codex_resume, "open_chat")
         self.open_chat = chat.start()
         self.addCleanup(chat.stop)
+        # --status reads the recurring job, so keep this Mac's job out of the output.
+        recurring = patch.object(codex_resume, "RECURRING_PLIST_PATH", Path("/nonexistent/recurring.plist"))
+        recurring.start()
+        self.addCleanup(recurring.stop)
     def test_requires_valid_24_hour_time(self):
         for value in (
             "4:15", "24:00", "12:60", "+5h", "12:30pm",
@@ -380,7 +384,14 @@ class CodexResumeTests(unittest.TestCase):
             self.assertEqual(output.getvalue().splitlines(), [
                 "Codex resume scheduled for 16.10.2026 kl. 16.30 in the latest chat on this Mac "
                 "with message: Resume now",
-            ] * 2)
+                "── Recurring check ──",
+                "  Not set up. Start it with --recurring <minutes>.",
+                "",
+                "── Scheduled resume ──",
+                "  At          16.10.2026 kl. 16.30",
+                "  Chat        latest chat on this Mac",
+                "  Message     Resume now",
+            ])
 
             with (
                 patch.object(codex_resume, "PLIST_PATH", plist_path),
@@ -494,7 +505,8 @@ class CodexResumeTests(unittest.TestCase):
             with plist_path.open("rb") as agent_file:
                 arguments = plistlib.load(agent_file)["ProgramArguments"]
             self.assertEqual(arguments[-4:-2], ["--chat", "01a6-status"])
-            self.assertEqual(output.getvalue().count("in chat 'Status board'."), 2)
+            self.assertEqual(output.getvalue().count("in chat 'Status board'."), 1)
+            self.assertIn("\n  Chat        'Status board'\n", output.getvalue())
             with (
                 patch.object(codex_resume, "PLIST_PATH", plist_path),
                 patch.object(codex_resume, "wait_until_scheduled_time"),
@@ -539,7 +551,8 @@ class CodexResumeTests(unittest.TestCase):
             with plist_path.open("rb") as agent_file:
                 arguments = plistlib.load(agent_file)["ProgramArguments"]
             self.assertEqual(arguments[-4:-2], ["--project", "/work/myntr"])
-            self.assertEqual(output.getvalue().count("in the latest chat in project 'myntr'."), 2)
+            self.assertEqual(output.getvalue().count("in the latest chat in project 'myntr'."), 1)
+            self.assertIn("\n  Chat        latest chat in project 'myntr'\n", output.getvalue())
             self.assertNotIn("in chat", output.getvalue())
             (home / codex_resume.CHAT_CATALOG).unlink()
             write_catalog(home / codex_resume.CHAT_CATALOG, self.chat_rows() + [
@@ -785,16 +798,29 @@ class CodexResumeTests(unittest.TestCase):
         room = shown("2026-10-23T00:00:00+02:00")
         width = len(room)
         self.assertEqual(output.getvalue().splitlines(), [
-            "Chats stopped by a usage limit:",
+            "",
+            "── Chats stopped by a usage limit (5) ──",
             f"  {'Stopped':<{width}}  {'Continues':<{width}}  Chat",
             f"  {t['a']}  {'next check':<{width}}  'a'",
             f"  {t['b']}  {'next check':<{width}}  'b'",
             f"  {t['c']}  {room}  untitled (local-relay, c)",
             f"  {t['d']}  {'later':<{width}}  'd'",
             f"  {t['old']}  {'left alone':<{width}}  'old'",
-            "Up to 3 chats continue per 5 hours, once the usage limit allows.",
-            "Chats left alone were stopped by an older usage limit.",
+            "  Chats left alone were stopped by an older usage limit.",
         ])
+
+    def test_status_headings_are_bold_only_in_a_terminal_without_no_color(self):
+        for terminal, no_color, expected in (
+            (True, "", "\033[1m── Scheduled resume ──\033[0m\n"),
+            (True, "1", "── Scheduled resume ──\n"),
+            (False, "", "── Scheduled resume ──\n"),
+        ):
+            with self.subTest(terminal=terminal, no_color=no_color):
+                with (redirect_stdout(io.StringIO()) as output,
+                      patch.object(output, "isatty", return_value=terminal),
+                      patch.dict(os.environ, {"NO_COLOR": no_color})):
+                    codex_resume.print_section("Scheduled resume", first=True)
+                self.assertEqual(output.getvalue(), expected)
 
     def recurring(self, chats, allowed=True, state=None, queued=True, now="2026-10-21T10:00:00+02:00",
                   stopped="2026-10-21T01:00:00+02:00", minutes=15, resets=None, sent=None, after_wait=None):
@@ -822,9 +848,10 @@ class CodexResumeTests(unittest.TestCase):
             self.assertEqual(datetime.fromisoformat(json.loads(state_path.read_text())["resumed"][chat["id"]]),
                              datetime.fromisoformat(sent or now))
             resumed.append(chat["id"])
-            if isinstance(queued, Exception):
-                raise queued
-            if not queued:
+            outcome = queued.pop(0) if isinstance(queued, list) else queued
+            if isinstance(outcome, Exception):
+                raise outcome
+            if not outcome:
                 raise codex_resume.NotQueuedError("Could not queue the message, so nothing was sent: rejected")
             return {"chat": chat}
 
@@ -959,6 +986,14 @@ class CodexResumeTests(unittest.TestCase):
                 self.assertEqual((resumed, state["resumed"]), ([], {}))
                 self.assertEqual(self.wait.called, allowed == [False, False])
 
+    def test_recurring_check_follows_the_chats_it_queued_before_the_app_server_failed(self):
+        with self.assertRaisesRegex(RuntimeError, "app-server crashed"):
+            self.recurring(["a", "b", "c"], queued=[True, RuntimeError("app-server crashed"), True])
+        self.watch.assert_called_once()
+        self.assertEqual([entry["chat"]["id"] for entry in self.watch.call_args.args[0]], ["a"])
+        # The failed chat stays recorded, as its message may have been queued, and c is left to a later check.
+        self.assertEqual(sorted(json.loads(self.state_path.read_text())["resumed"]), ["a", "b"])
+
     def test_recurring_check_retries_a_chat_when_nothing_was_queued(self):
         resumed, _, state = self.recurring(["a"], queued=False)
         self.assertEqual((resumed, state["resumed"]), (["a"], {}))
@@ -1034,13 +1069,24 @@ class CodexResumeTests(unittest.TestCase):
             lines = output.getvalue().splitlines()
             self.assertIn("Every 15 minutes", lines[0])
             self.assertEqual(lines[1:], ["Recurring check stopped.", "No recurring check is set up."])
+            recurring = [
+                "── Recurring check ──",
+                "  Every       15 minutes",
+                "  Sends       continue to up to 3 stopped chats per 5 hours, newest first, once the usage "
+                "limits allow",
+            ]
+            not_scheduled = ["", "── Scheduled resume ──", "  None."]
             self.assertEqual(recurring_status.getvalue().splitlines(), [
-                f"{lines[0]} Last checked {shown('2026-10-21T10:00:00+02:00')}.",
-                "No chats are stopped by a usage limit.",
-                "No Codex resume is scheduled.",
-                f"{lines[0]} Checks stop until this is fixed: cannot read {state_path} "
-                "(Expecting property name enclosed in double quotes: line 1 column 2 (char 1)); fix or delete it.",
-                "No Codex resume is scheduled.",
+                *recurring,
+                f"  Last check  {shown('2026-10-21T10:00:00+02:00')}",
+                "",
+                "── Chats stopped by a usage limit (0) ──",
+                "  None.",
+                *not_scheduled,
+                *recurring,
+                f"  Stopped     checks stop until this is fixed: cannot read {state_path} "
+                "(Expecting property name enclosed in double quotes: line 1 column 2 (char 1)); fix or delete it",
+                *not_scheduled,
             ])
 
     def test_recurring_takes_off_or_at_least_five_minutes(self):
@@ -1377,9 +1423,14 @@ class CodexResumeTests(unittest.TestCase):
                 arguments = plistlib.load(agent_file)["ProgramArguments"]
         self.assertEqual(arguments[4:-2], ["--chat", "01a1-mine", "--every", "30", "--used-up", "300"])
         lines = output.getvalue().splitlines()
-        self.assertRegex(lines[-1], r"^Codex resume scheduled for \S+ kl\. \S+, or earlier if the limit resets "
-                                    r"first \(checked every 30 minutes\) in chat 'Find current project status'\.$")
-        self.assertEqual(lines[-2], lines[-1])
+        self.assertRegex(lines[lines.index("── Recurring check ──") - 1], r"^Codex resume scheduled for \S+ kl\. \S+, or earlier if the limit resets "
+                                   r"first \(checked every 30 minutes\) in chat 'Find current project status'\.$")
+        self.assertRegex(lines[-3], r"^  At          \S+ kl\. \S+, or earlier if the limit resets first "
+                                    r"\(checked every 30 minutes\)$")
+        self.assertEqual(lines[-2:], [
+            "  Chat        'Find current project status'",
+            "  Message     continue (not sent if Codex is already replying)",
+        ])
         for minutes in ("4", "0x"):
             with self.subTest(minutes=minutes), redirect_stderr(io.StringIO()):
                 with self.assertRaises(SystemExit) as error:
@@ -1581,7 +1632,15 @@ class CodexResumeTests(unittest.TestCase):
         self.assertEqual(output.getvalue().splitlines(), [
             "Codex resume scheduled for 20.10.2026 kl. 00.00 in the latest chat on this Mac, "
             "only if no 5-hour window is running.",
-        ] * 2)
+            "── Recurring check ──",
+            "  Not set up. Start it with --recurring <minutes>.",
+            "",
+            "── Scheduled resume ──",
+            "  At          20.10.2026 kl. 00.00",
+            "  Chat        latest chat on this Mac",
+            "  Message     continue (not sent if Codex is already replying)",
+            "  Only if     no 5-hour window is running",
+        ])
         for action in (["--reset"], ["--status"], ["--list"]):
             with self.subTest(action=action), redirect_stderr(io.StringIO()):
                 with self.assertRaises(SystemExit) as error:
