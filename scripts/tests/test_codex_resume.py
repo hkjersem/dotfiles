@@ -789,7 +789,7 @@ class CodexResumeTests(unittest.TestCase):
             f"  {'Stopped':<{width}}  {'Continues':<{width}}  Chat",
             f"  {t['a']}  {'next check':<{width}}  'a'",
             f"  {t['b']}  {'next check':<{width}}  'b'",
-            f"  {t['c']}  {room}  untitled (local-relay)",
+            f"  {t['c']}  {room}  untitled (local-relay, c)",
             f"  {t['d']}  {'later':<{width}}  'd'",
             f"  {t['old']}  {'left alone':<{width}}  'old'",
             "Up to 3 chats continue per 5 hours, once the usage limit allows.",
@@ -826,6 +826,7 @@ class CodexResumeTests(unittest.TestCase):
                 raise queued
             if not queued:
                 raise codex_resume.NotQueuedError("Could not queue the message, so nothing was sent: rejected")
+            return {"chat": chat}
 
         def stuck(moment, since):
             # As the real one does, stops before a chat's last resume do not count.
@@ -842,10 +843,11 @@ class CodexResumeTests(unittest.TestCase):
               patch.object(codex_resume, "usage_limits", return_value=windows),
               patch.object(codex_resume, "wait_until_scheduled_time") as wait,
               patch.object(codex_resume, "local_now", return_value=datetime.fromisoformat(sent or now)),
-              patch.object(codex_resume, "resume_through_queue", side_effect=resume),
+              patch.object(codex_resume, "queue_message", side_effect=resume),
+              patch.object(codex_resume, "watch_queued") as watch,
               patch.object(codex_resume, "log_stamp", return_value="[stamp] "),
               redirect_stdout(io.StringIO()) as output, redirect_stderr(io.StringIO()) as errors):
-            self.usage, self.wait = usage, wait
+            self.usage, self.wait, self.watch = usage, wait, watch
             try:
                 codex_resume.recurring_check(datetime.fromisoformat(now))
             finally:
@@ -859,6 +861,9 @@ class CodexResumeTests(unittest.TestCase):
                                                  f"{shown('2026-10-21T01:00:00+02:00')}; resuming it.")
         self.assertEqual(state["checked"], "2026-10-21T10:00:00+02:00")
         self.assertEqual(sorted(state["resumed"]), ["a", "b", "c"])
+        # All three are queued before any is followed, so none waits for another's reply.
+        self.watch.assert_called_once()
+        self.assertEqual([entry["chat"]["id"] for entry in self.watch.call_args.args[0]], ["a", "b", "c"])
         # Within five hours the cap is spent; later, the next chat gets its turn, but never a resumed one again.
         self.assertEqual(self.recurring(["a", "d"], state=state, now="2026-10-21T14:59:00+02:00")[0], [])
         resumed, _, state = self.recurring(["a", "d"], state=state, now="2026-10-21T15:01:00+02:00")
@@ -878,7 +883,7 @@ class CodexResumeTests(unittest.TestCase):
         with (patch.object(codex_resume, "RECURRING_STATE_PATH", state_path),
               patch.object(codex_resume, "load_chats", return_value=[chat]),
               patch.object(codex_resume, "usage_allowed", return_value=True),
-              patch.object(codex_resume, "resume_through_queue",
+              patch.object(codex_resume, "queue_message",
                            side_effect=lambda chat, *_, **__: sent.append(chat["id"])),
               redirect_stdout(io.StringIO())):
             codex_resume.recurring_check(datetime.fromisoformat("2026-10-21T10:00:00+02:00"))
@@ -1081,6 +1086,32 @@ class CodexResumeTests(unittest.TestCase):
         self.open_chat.assert_called_once()
         self.assertEqual(self.open_chat.call_args.args[0], self.LOCAL_CHAT)
         self.assertEqual(output.getvalue().splitlines()[-1], "The app took the message from the queue.")
+
+    def test_queued_messages_are_followed_together_and_each_line_names_its_chat(self):
+        listings = {"a": [True, False], "b": [True, True, False]}
+        polled = []
+
+        def still_queued(chat, item):
+            polled.append(chat["id"])
+            return listings[chat["id"]].pop(0)
+
+        entries = [{"chat": {"id": name, "name": name}, "item": "q", "path": None, "offset": 0,
+                    "queued_at": datetime.now().astimezone(), "stamp": lambda: "[t] "} for name in ("a", "b")]
+        replies = {"a": "The reply finished.", "b": None}
+        with (patch.object(codex_resume, "still_queued", side_effect=still_queued),
+              patch.object(codex_resume, "reply_result", side_effect=lambda entry: replies[entry["chat"]["id"]]),
+              patch.object(codex_resume, "REPLY_RESULT_SECONDS", 0),
+              patch.object(codex_resume.time, "sleep"),
+              redirect_stdout(io.StringIO()) as output):
+            codex_resume.watch_queued(entries)
+        # Both are checked on every round until taken, rather than one after the other.
+        self.assertEqual(polled, ["a", "b", "a", "b", "b"])
+        self.assertEqual(output.getvalue().splitlines(), [
+            "[t] 'a': The app took the message from the queue.",
+            "[t] 'a': The reply finished.",
+            "[t] 'b': The app took the message from the queue.",
+            "[t] 'b': Codex is replying.",
+        ])
 
     def test_chat_is_opened_in_the_background_unless_codex_is_in_use(self):
         def done(code=0, stderr=""):

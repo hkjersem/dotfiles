@@ -33,8 +33,9 @@ session logs uncompressed for over a week. Chats the limit stopped more than
 24 hours before it stopped the latest one were left stuck by an earlier limit
 and are skipped. Once the limits read through the CLI allow use, it queues
 continue to up to three chats, newest first, and at most three in any five
-hours. When a used-up limit resets before the next check, the check waits and
-sends a minute after the reset, as --reset does. When each chat was last resumed is recorded before queueing in
+hours, queueing them together and following them in one loop. When a used-up
+limit resets before the next check, the check waits and sends a minute after
+the reset, as --reset does. When each chat was last resumed is recorded before queueing in
 ~/Library/Application Support/codex-resume/recurring.json, and only limit stops
 after that count, so each chat is resumed once per stop. An unreadable record
 stops the checks rather than risk sending twice, and a lock skips a check while
@@ -454,27 +455,26 @@ def replying(chat, now=None):
     return bool(events) and events[-1]["type"] == "task_started"
 
 
-def report_reply(path, offset, stamp, since=None):
-    """Log how the reply the queued message started has ended so far, such as at a usage limit."""
+def reply_result(entry):
+    """How the reply a taken message started has ended so far: a line to log, None while it runs, or "" when
+    the chat has no session log to tell."""
+    path, offset, since = entry["path"], entry["offset"], None
     if path is None:
-        return
-    deadline = time.monotonic() + REPLY_RESULT_SECONDS
-    while True:
-        ended = [event for event in turn_events(path, offset, since) if event["type"] != "task_started"]
-        if ended:
-            error = ended[0].get("error")
-            if ended[0]["type"] == "turn_aborted":
-                print(f"{stamp()}The reply was stopped.", flush=True)
-            elif error:
-                detail = error.get("message", error) if isinstance(error, dict) else error
-                print(f"{stamp()}The reply ended with an error: {detail}", flush=True)
-            else:
-                print(f"{stamp()}The reply finished.", flush=True)
-            return
-        if time.monotonic() >= deadline:
-            print(f"{stamp()}Codex is replying.", flush=True)
-            return
-        time.sleep(QUEUE_POLL_SECONDS)
+        # Codex compresses idle chats' logs and unpacks one again before writing to it, so a log found only
+        # now holds earlier replies too; only events from after queueing belong to this one.
+        path, offset, since = chat_log(entry["chat"]), 0, entry["queued_at"]
+        if path is None:
+            return ""
+    ended = [event for event in turn_events(path, offset, since) if event["type"] != "task_started"]
+    if not ended:
+        return None
+    error = ended[0].get("error")
+    if ended[0]["type"] == "turn_aborted":
+        return "The reply was stopped."
+    if error:
+        detail = error.get("message", error) if isinstance(error, dict) else error
+        return f"The reply ended with an error: {detail}"
+    return "The reply finished."
 
 
 def open_app(stamp):
@@ -540,12 +540,21 @@ def open_chat(chat, stamp):
 
 
 def resume_through_queue(chat, message, stamp=lambda: ""):
-    """Queue the message for the app to send in the chat; NotQueuedError means nothing was queued."""
+    """Queue the message for the app to send in the chat and follow it; NotQueuedError means nothing was
+    queued."""
+    entry = queue_message(chat, message, stamp)
+    if entry is not None:
+        watch_queued([entry])
+
+
+def queue_message(chat, message, stamp):
+    """Queue the message for the app to send in the chat; return what watch_queued follows, or None when there
+    is nothing to follow. NotQueuedError means nothing was queued."""
     busy = replying(chat)
     if busy and message is None:
         print(f"{stamp()}Codex is already replying in chat {chat_label(chat)}; not sending '{DEFAULT_MESSAGE}'.",
               flush=True)
-        return
+        return None
     path = chat_log(chat)
     offset = path.stat().st_size if path is not None else 0
     # Session logs stamp to the millisecond, so a whole second keeps the comparison from cutting a reply off.
@@ -565,32 +574,49 @@ def resume_through_queue(chat, message, stamp=lambda: ""):
               "sends it when the reply ends.", flush=True)
         # A crashed app can leave a reply looking unfinished, so the app may still need opening.
         open_app(stamp)
-        return
+        return None
     print(f"{stamp()}Queued the message in chat {chat_label(chat)}; waiting for the app to take it.", flush=True)
     open_app(stamp)
+    return {"chat": chat, "item": item, "path": path, "offset": offset, "queued_at": queued_at, "stamp": stamp}
+
+
+def watch_queued(entries):
+    """Follow queued messages together: open a chat whose message the app leaves queued, log when the app takes
+    each, and then how its reply has ended so far. With several, each line names its chat."""
+    def stamp(entry):
+        prefix = f"{chat_label(entry['chat'])}: " if len(entries) > 1 else ""
+        return lambda: entry["stamp"]() + prefix
+
     started = time.monotonic()
-    opened = False
-    try:
-        while still_queued(chat, item):
+    waiting, replies = list(entries), []
+    while waiting or replies:
+        for entry in list(waiting):
+            try:
+                queued = still_queued(entry["chat"], entry["item"])
+            except RuntimeError as error:
+                raise RuntimeError(f"A message was queued in chat {chat_label(entry['chat'])}, but whether the "
+                                   f"app took it is unknown: {error} Check the chat before retrying.") from error
             waited = time.monotonic() - started
-            if waited >= QUEUE_PICKUP_SECONDS:
-                print(f"{stamp()}The app has not taken the message within {QUEUE_PICKUP_SECONDS // 60} minutes; "
-                      "it stays queued, and the app sends it once the chat is open.", flush=True)
-                return
-            if not opened and waited >= QUEUE_OPEN_CHAT_SECONDS:
-                opened = True
-                open_chat(chat, stamp)
+            if not queued:
+                print(f"{stamp(entry)()}The app took the message from the queue.", flush=True)
+                waiting.remove(entry)
+                replies.append({**entry, "taken": time.monotonic()})
+            elif waited >= QUEUE_PICKUP_SECONDS:
+                print(f"{stamp(entry)()}The app has not taken the message within {QUEUE_PICKUP_SECONDS // 60} "
+                      "minutes; it stays queued, and the app sends it once the chat is open.", flush=True)
+                waiting.remove(entry)
+            elif not entry.get("opened") and waited >= QUEUE_OPEN_CHAT_SECONDS:
+                entry["opened"] = True
+                open_chat(entry["chat"], stamp(entry))
+        for entry in list(replies):
+            result = reply_result(entry)
+            if result is None and time.monotonic() - entry["taken"] < REPLY_RESULT_SECONDS:
+                continue
+            replies.remove(entry)
+            if result != "":
+                print(f"{stamp(entry)()}{result or 'Codex is replying.'}", flush=True)
+        if waiting or replies:
             time.sleep(QUEUE_POLL_SECONDS)
-    except RuntimeError as error:
-        raise RuntimeError(f"The message was queued, but whether the app took it is unknown: {error} "
-                           "Check the chat before retrying.") from error
-    print(f"{stamp()}The app took the message from the queue.", flush=True)
-    if path is not None:
-        report_reply(path, offset, stamp)
-    else:
-        # Codex compresses idle chats' logs and unpacks one again before writing to it, so a log found only
-        # now holds earlier replies too; only events from after queueing belong to this one.
-        report_reply(chat_log(chat), 0, stamp, since=queued_at)
 
 
 def usage_limits():
@@ -916,6 +942,8 @@ def check_stuck_chats(now):
             if not chats or not usage_allowed():
                 return
         recent = sum(at >= now - RECURRING_PERIOD for at in resumed.values())
+        # All are queued first and then followed together, so the app takes them within seconds of each other.
+        queued = []
         for chat in chats[:max(0, RECURRING_CHATS - recent)]:
             print(f"{log_stamp()}Chat {chat_label(chat)} stopped at a usage limit "
                   f"{format_time(chat['stopped'].astimezone())}; resuming it.", flush=True)
@@ -924,13 +952,16 @@ def check_stuck_chats(now):
             resumed[chat["id"]] = now
             save_recurring_state(state)
             try:
-                resume_through_queue(chat, None, log_stamp)
+                entry = queue_message(chat, None, log_stamp)
+                if entry is not None:
+                    queued.append(entry)
             except NotQueuedError as error:
                 print(f"{log_stamp()}{error}", file=sys.stderr, flush=True)
                 if previous is None:
                     del resumed[chat["id"]]
                 else:
                     resumed[chat["id"]] = previous
+        watch_queued(queued)
     finally:
         save_recurring_state(state)
 
@@ -1027,7 +1058,7 @@ def chat_label(chat):
     # Until the app titles a chat, its catalogue may hold the chat's folder instead.
     name = chat["name"]
     if not name or name.startswith("/"):
-        return f"untitled ({Path(chat.get('cwd') or name).name or 'no folder'})"
+        return f"untitled ({Path(chat.get('cwd') or name).name or 'no folder'}, {chat['id'][:8]})"
     return f"{name!r}"
 
 
