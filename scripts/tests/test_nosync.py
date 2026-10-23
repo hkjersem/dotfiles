@@ -68,14 +68,14 @@ class NosyncTests(unittest.TestCase):
         self.assertTrue((self.root / "node_modules").is_dir())
         self.assertTrue((self.root / ".git").is_dir())
         self.assertEqual(output.splitlines(), [
-            "node_modules: set com.apple.fileprovider.ignore#P=1",
-            ".git: set com.apple.fileprovider.ignore#P=1",
+            "  SET       node_modules",
+            "  SET       .git",
         ])
 
     def test_inspect_defaults_to_current_folder_without_writing(self):
         status, output, errors = self.run_nosync("--inspect")
         self.assertEqual(status, 0, errors)
-        self.assertEqual(output, ".: com.apple.fileprovider.ignore#P is not set\n")
+        self.assertEqual(output, "  NOT SET   .\n")
         self.assertEqual(self.writes, [])
 
     def test_inspect_missing_folder_reports_failure_without_creating_it(self):
@@ -83,8 +83,8 @@ class NosyncTests(unittest.TestCase):
         self.values["present"] = b"1"
         status, output, errors = self.run_nosync("--inspect", "missing", "present")
         self.assertEqual(status, 1)
-        self.assertIn("missing:", errors)
-        self.assertEqual(output, "present: com.apple.fileprovider.ignore#P=1\n")
+        self.assertIn("  ERROR     missing  (", errors)
+        self.assertEqual(output, "  MARKED    present\n")
         self.assertFalse((self.root / "missing").exists())
         self.assertEqual(self.writes, [])
 
@@ -100,21 +100,25 @@ class NosyncTests(unittest.TestCase):
                 self.assertEqual(status, 0, errors)
                 if value == b"1":
                     self.assertEqual(self.writes, [])
-                    self.assertIn("already marked", output)
+                    self.assertEqual(output, "  ALREADY   build\n")
                 else:
                     self.assertEqual(self.writes, [("build", b"1")])
-                    self.assertIn("set com.apple.fileprovider.ignore#P=1", output)
+                    self.assertEqual(output, "  SET       build\n")
 
     def test_inspect_distinguishes_absent_empty_and_newline_values(self):
         self.folder("build")
-        for value, expected in ((None, " is not set"), (b"", "="), (b"1\n", r"=1\n")):
+        for value, expected in (
+            (None, "  NOT SET   build\n"),
+            (b"", "  VALUE     build  (attribute=b'')\n"),
+            (b"1\n", "  VALUE     build  (attribute=b'1\\n')\n"),
+        ):
             with self.subTest(value=value):
                 self.values.clear()
                 if value is not None:
                     self.values["build"] = value
                 status, output, errors = self.run_nosync("--inspect", "build")
                 self.assertEqual(status, 0, errors)
-                self.assertEqual(output, f"build: com.apple.fileprovider.ignore#P{expected}\n")
+                self.assertEqual(output, expected)
                 self.assertEqual(self.writes, [])
 
     def test_recursive_flags_prune_exact_matches_and_skip_symlinks(self):
@@ -138,7 +142,7 @@ class NosyncTests(unittest.TestCase):
                 self.assertCountEqual(self.writes, [(folder, b"1") for folder in expected])
                 self.assertCountEqual(
                     output.splitlines(),
-                    [f"{folder}: set com.apple.fileprovider.ignore#P=1" for folder in expected],
+                    [f"  SET       {folder}" for folder in expected],
                 )
                 self.assertFalse((self.root / "node_modules").exists())
                 self.assertFalse((self.root / ".git").exists())
@@ -156,11 +160,11 @@ class NosyncTests(unittest.TestCase):
                     status, output, errors = self.run_nosync("-r", "--inspect")
                     self.assertEqual(status, 0, errors)
                     if value == b"1":
-                        self.assertEqual(output, f"{parent}: com.apple.fileprovider.ignore#P=1\n")
+                        self.assertEqual(output, f"  MARKED    {parent}\n")
                         self.assertNotIn("./archive/node_modules", self.reads)
                     else:
                         self.assertEqual(
-                            output, "./archive/node_modules: com.apple.fileprovider.ignore#P is not set\n",
+                            output, "  NOT SET   ./archive/node_modules\n",
                         )
                     self.assertEqual(self.writes, [])
 
@@ -169,7 +173,7 @@ class NosyncTests(unittest.TestCase):
         self.values["./archive"] = b"1"
         status, output, errors = self.run_nosync("-r")
         self.assertEqual(status, 0, errors)
-        self.assertEqual(output, "./archive: already marked (com.apple.fileprovider.ignore#P=1)\n")
+        self.assertEqual(output, "  ALREADY   ./archive\n")
         self.assertNotIn("./archive/node_modules", self.reads)
         self.assertEqual(self.writes, [])
 
@@ -181,8 +185,47 @@ class NosyncTests(unittest.TestCase):
             with self.subTest(flags=flags):
                 status, output, errors = self.run_nosync(*flags, "build[1]*?")
                 self.assertEqual(status, 0, errors)
-                self.assertEqual(output, "./project/build[1]*?: com.apple.fileprovider.ignore#P=0\n")
+                self.assertEqual(output, "  VALUE     ./project/build[1]*?  (attribute=b'0')\n")
                 self.assertEqual(self.writes, [])
+
+    def test_recursive_output_sorts_by_path_or_puts_syncing_folders_first(self):
+        for path in ("a/node_modules", "b/node_modules", "c/.git", "d/node_modules"):
+            self.folder(path)
+        self.values["./a/node_modules"] = b"1"
+        self.values["./c/.git"] = b"0"
+        self.values["./d/node_modules"] = b"1"
+        find_folders = nosync.find_folders
+        # Discovery order follows the file system, so reverse it to prove the output order comes from sorting.
+        with patch.object(nosync, "find_folders", side_effect=lambda names: find_folders(names)[::-1]):
+            for flags, expected in (
+                ((), [
+                    "  MARKED    ./a/node_modules",
+                    "  NOT SET   ./b/node_modules",
+                    "  VALUE     ./c/.git  (attribute=b'0')",
+                    "  MARKED    ./d/node_modules",
+                ]),
+                (("--sort", "status"), [
+                    "  NOT SET   ./b/node_modules",
+                    "  VALUE     ./c/.git  (attribute=b'0')",
+                    "  MARKED    ./a/node_modules",
+                    "  MARKED    ./d/node_modules",
+                ]),
+            ):
+                with self.subTest(flags=flags):
+                    status, output, errors = self.run_nosync("-r", "--inspect", *flags)
+                    self.assertEqual(status, 0, errors)
+                    self.assertEqual(output.splitlines(), expected)
+                    self.assertEqual(self.writes, [])
+
+    def test_sort_status_requires_recursive_inspect(self):
+        for flags in (("--inspect",), ("-r",), ()):
+            with self.subTest(flags=flags):
+                with contextlib.redirect_stderr(io.StringIO()) as errors, self.assertRaises(SystemExit) as raised:
+                    nosync.main([*flags, "--sort", "status"])
+                self.assertEqual(raised.exception.code, 2)
+                self.assertIn("--sort status requires --recursive and --inspect", errors.getvalue())
+                self.assertEqual(self.writes, [])
+                self.assertEqual(list(self.root.iterdir()), [])
 
     def test_recursive_no_matches_does_not_create_folders(self):
         status, output, errors = self.run_nosync("-r", "build")
@@ -220,8 +263,8 @@ class NosyncTests(unittest.TestCase):
         with patch.object(nosync, "set_attribute", side_effect=write):
             status, output, errors = self.run_nosync("first", "second")
         self.assertEqual(status, 1)
-        self.assertIn("first:", errors)
-        self.assertEqual(output, "second: set com.apple.fileprovider.ignore#P=1\n")
+        self.assertIn("  ERROR     first  (", errors)
+        self.assertEqual(output, "  SET       second\n")
         self.assertEqual(self.writes, [("second", b"1")])
 
     def test_recursive_search_uses_no_child_processes(self):
@@ -233,6 +276,47 @@ class NosyncTests(unittest.TestCase):
         expected = [(f"./source/{index}/build", b"1") for index in range(300)]
         self.assertCountEqual(self.writes, expected)
         self.assertEqual(len(output.splitlines()), 300)
+
+    def test_status_colors_require_a_terminal_and_respect_no_color(self):
+        self.folder("marked")
+        self.folder("unmarked")
+        self.values["marked"] = b"1"
+        for terminal, no_color, colored in (
+            (False, "", False), (True, "", True), (True, "1", False),
+        ):
+            with self.subTest(terminal=terminal, no_color=no_color):
+                output = io.StringIO()
+                with (
+                    patch.object(output, "isatty", return_value=terminal),
+                    patch.dict(os.environ, {"NO_COLOR": no_color}),
+                    contextlib.redirect_stdout(output),
+                ):
+                    status = nosync.main(["--inspect", "marked", "unmarked"])
+                self.assertEqual(status, 0)
+                if colored:
+                    self.assertEqual(
+                        output.getvalue(),
+                        "  \033[0;32mMARKED   \033[0m marked\n"
+                        "  \033[0;33mNOT SET  \033[0m unmarked\n",
+                    )
+                else:
+                    self.assertEqual(output.getvalue(), "  MARKED    marked\n  NOT SET   unmarked\n")
+                self.assertEqual(self.writes, [])
+
+    def test_error_color_uses_stderr_terminal_not_stdout(self):
+        output, errors = io.StringIO(), io.StringIO()
+        with (
+            patch.object(output, "isatty", return_value=False),
+            patch.object(errors, "isatty", return_value=True),
+            patch.dict(os.environ, {"NO_COLOR": ""}),
+            contextlib.redirect_stdout(output),
+            contextlib.redirect_stderr(errors),
+        ):
+            status = nosync.main(["--inspect", "missing"])
+        self.assertEqual(status, 1)
+        self.assertEqual(output.getvalue(), "")
+        self.assertIn("  \033[0;31mERROR    \033[0m missing  (", errors.getvalue())
+        self.assertFalse((self.root / "missing").exists())
 
 
 @unittest.skipUnless(sys.platform == "darwin", "requires macOS extended attributes")
@@ -262,9 +346,9 @@ class NosyncIntegrationTests(unittest.TestCase):
                     )
                     self.assertEqual(result.returncode, 0, result.stderr)
                     expected = (
-                        "./archive: com.apple.fileprovider.ignore#P=1\n"
+                        "  MARKED    ./archive\n"
                         if value == b"1" else
-                        "./archive/node_modules: com.apple.fileprovider.ignore#P is not set\n"
+                        "  NOT SET   ./archive/node_modules\n"
                     )
                     self.assertEqual(result.stdout, expected)
             result = subprocess.run(
