@@ -23,6 +23,8 @@ source "$SCRIPT_DIR/lib/pm-utils.sh" || exit 1
 source "$SCRIPT_DIR/lib/clean-targets.sh" || exit 1
 # shellcheck source=lib/stale-branches.sh
 source "$SCRIPT_DIR/lib/stale-branches.sh" || exit 1
+# shellcheck source=lib/output.sh
+source "$SCRIPT_DIR/lib/output.sh" || exit 1
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
 
@@ -61,20 +63,11 @@ done
 
 [[ -n "$TARGET_DIR" && -n "$SINCE" ]] || { echo "--dir and --since must not be empty" >&2; exit 1; }
 if ! cd "$TARGET_DIR"; then
-  echo "✘ Could not cd into ${TARGET_DIR}" >&2
+  echo "$ERR_FAIL Could not cd into ${TARGET_DIR}" >&2
   exit 1
 fi
 
-# ── Colours + formatting ──────────────────────────────────────────────────────
-
-BOLD=$'\033[1m'
-DIM=$'\033[2m'
-RED=$'\033[0;31m'
-YELLOW=$'\033[1;33m'
-ORANGE=$'\033[0;33m'
-GREEN=$'\033[0;32m'
-CYAN=$'\033[0;36m'
-RESET=$'\033[0m'
+# ── Counters + formatting ─────────────────────────────────────────────────────
 
 ISSUES=0
 WARNINGS=0
@@ -98,23 +91,22 @@ section_start() {
 }
 
 section_end() {
-  echo ""
-  echo "${BOLD}── ${CURRENT_SECTION} ──────────────────────────────────${RESET}"
+  out_section "$CURRENT_SECTION"
   [[ ${#SECTION_OUTPUT[@]} -gt 0 ]] && printf '%s\n' "${SECTION_OUTPUT[@]}"
   [[ $SECTION_CHECKS -gt 0 && $SECTION_ISSUES -eq 0 && $SECTION_WARNINGS -eq 0 ]] \
-    && echo "  ${GREEN}✅${RESET} All checks passed"
+    && echo "  $OUT_OK All checks passed"
 }
 
-ok()   { SECTION_OUTPUT+=("  ${GREEN}✅${RESET} $1"); ((SECTION_CHECKS++)); }
-warn() { SECTION_OUTPUT+=("  ${YELLOW}🟡${RESET} $1"); ((WARNINGS++)); ((SECTION_WARNINGS++)); ((SECTION_CHECKS++)); }
-fail() { SECTION_OUTPUT+=("  ${RED}🔴${RESET} $1"); ((ISSUES++)); ((SECTION_ISSUES++)); ((SECTION_CHECKS++)); }
-info() { SECTION_OUTPUT+=("  ${CYAN}ℹ${RESET}  $1"); }
-row()  { SECTION_OUTPUT+=("     ${DIM}$1${RESET}"); }
+ok()   { SECTION_OUTPUT+=("  $OUT_OK $1"); ((SECTION_CHECKS++)); }
+warn() { SECTION_OUTPUT+=("  $OUT_WARN $1"); ((WARNINGS++)); ((SECTION_WARNINGS++)); ((SECTION_CHECKS++)); }
+fail() { SECTION_OUTPUT+=("  $OUT_FAIL $1"); ((ISSUES++)); ((SECTION_ISSUES++)); ((SECTION_CHECKS++)); }
+info() { SECTION_OUTPUT+=("  $OUT_INFO $1"); }
+row()  { SECTION_OUTPUT+=("    ${DIM}$1${RESET}"); }
 
 # ── Preflight ─────────────────────────────────────────────────────────────────
 
 if ! git rev-parse --is-inside-work-tree &>/dev/null; then
-  echo "${RED}✘ Not inside a git repository.${RESET}" >&2
+  echo "$ERR_FAIL Not inside a git repository." >&2
   exit 1
 fi
 
@@ -257,9 +249,7 @@ fi
 # ── Header ────────────────────────────────────────────────────────────────────
 
 echo ""
-echo "${BOLD}╔══════════════════════════════════════════╗${RESET}"
-printf "${BOLD}║  audit-repo: %-29s║${RESET}\n" "$REPO_NAME"
-echo "${BOLD}╚══════════════════════════════════════════╝${RESET}"
+echo "${BOLD}audit-repo · ${REPO_NAME}${RESET}"
 if $HAS_PACKAGE_JSON; then
   HEADER_META="Package manager: ${PM}"
   [[ -n "$WORKSPACE_INFO" ]] && HEADER_META+=" │ ${WORKSPACE_INFO}"
@@ -759,7 +749,7 @@ info "Top 10 largest source files"
 while IFS=$'\t' read -r lines file; do
   if [[ "$lines" -gt 500 ]]; then
     BIG_FILES=$(( BIG_FILES + 1 ))
-    SECTION_OUTPUT+=("     ${ORANGE}${lines} lines  ${file}${RESET}")
+    SECTION_OUTPUT+=("    ${YELLOW}${lines} lines  ${file}${RESET}")
   else
     row "${lines} lines  ${file}"
   fi
@@ -1147,13 +1137,11 @@ else
   VERDICT="${SIGNAL_STR}"
 fi
 
-echo ""
-echo "${BOLD}── Summary ──────────────────────────────${RESET}"
-[[ "$ISSUES"   -gt 0 ]] && echo "  ${RED}🔴  ${ISSUES} issue(s)${RESET}"
-[[ "$WARNINGS" -gt 0 ]] && echo "  ${YELLOW}🟡  ${WARNINGS} warning(s)${RESET}"
-[[ "$ISSUES" -eq 0 && "$WARNINGS" -eq 0 ]] && echo "  ✅  No issues or warnings"
-echo "  ${DIM}💡  ${VERDICT}${RESET}"
-echo "${BOLD}────────────────────────────────────────${RESET}"
+out_section "Summary"
+[[ "$ISSUES"   -gt 0 ]] && echo "  $OUT_FAIL ${ISSUES} issue(s)"
+[[ "$WARNINGS" -gt 0 ]] && echo "  $OUT_WARN ${WARNINGS} warning(s)"
+[[ "$ISSUES" -eq 0 && "$WARNINGS" -eq 0 ]] && echo "  $OUT_OK No issues or warnings"
+echo "    ${BOLD}${VERDICT}${RESET}"
 echo ""
 
 [[ "$ISSUES" -gt 0 ]] && exit 1

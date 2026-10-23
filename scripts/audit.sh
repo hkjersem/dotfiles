@@ -6,6 +6,7 @@
 DOTFILES="$HOME/.dotfiles"
 source "$DOTFILES/scripts/machine-profile.sh" || exit 1
 source "$DOTFILES/scripts/lib/command-line-tools.sh" || exit 1
+source "$DOTFILES/scripts/lib/output.sh" || exit 1
 
 # Load the machine-local ignore list (~/.config/dotfiles/audit-ignore)
 # Format: one entry per line, prefixed by category:
@@ -30,13 +31,6 @@ is_ignored() {
     printf '%s\n' "${LOCAL_IGNORE[@]}" | grep -qFx "$key"
 }
 
-BOLD=$'\033[1m'
-RED=$'\033[0;31m'
-YELLOW=$'\033[1;33m'
-ORANGE=$'\033[0;33m'
-GREEN=$'\033[0;32m'
-RESET=$'\033[0m'
-
 ISSUES=0
 WARNINGS=0
 
@@ -56,20 +50,18 @@ section_start() {
 }
 
 section_end() {
-    echo ""
-    echo "${BOLD}── ${CURRENT_SECTION} ──────────────────────────────────${RESET}"
+    out_section "$CURRENT_SECTION"
     if [[ $SECTION_ISSUES -eq 0 && $SECTION_WARNINGS -eq 0 && $SECTION_INFOS -eq 0 && ${#SECTION_OUTPUT[@]} -gt 0 ]]; then
-        echo "  ${GREEN}✅${RESET} All checks passed"
+        echo "  $OUT_OK All checks passed"
     else
         printf '%s\n' "${SECTION_OUTPUT[@]}"
     fi
 }
 
-ok()   { SECTION_OUTPUT+=("  ${GREEN}✅${RESET} $1"); }
-info() { SECTION_OUTPUT+=("  $1"); SECTION_INFOS=$((SECTION_INFOS + 1)); }
-warn() { SECTION_OUTPUT+=("  ${YELLOW}🟡${RESET} $1"); ((WARNINGS++)); ((SECTION_WARNINGS++)); }
-attn() { SECTION_OUTPUT+=("  ${ORANGE}🟠${RESET} $1"); ((WARNINGS++)); ((SECTION_WARNINGS++)); }
-fail() { SECTION_OUTPUT+=("  ${RED}🔴${RESET} $1"); ((ISSUES++)); ((SECTION_ISSUES++)); }
+ok()   { SECTION_OUTPUT+=("  $OUT_OK $1"); }
+info() { SECTION_OUTPUT+=("  $OUT_INFO $1"); SECTION_INFOS=$((SECTION_INFOS + 1)); }
+warn() { SECTION_OUTPUT+=("  $OUT_WARN $1"); ((WARNINGS++)); ((SECTION_WARNINGS++)); }
+fail() { SECTION_OUTPUT+=("  $OUT_FAIL $1"); ((ISSUES++)); ((SECTION_ISSUES++)); }
 
 section_start "Machine profile"
 if load_machine_profile; then
@@ -509,15 +501,13 @@ source "$DOTFILES/scripts/audit-skills.sh"
 # ──────────────────────────────────────────────────────
 # SUMMARY
 # ──────────────────────────────────────────────────────
-echo ""
-echo "${BOLD}────────────────────────────────────────${RESET}"
+out_section "Summary"
 if [ "$ISSUES" -eq 0 ] && [ "$WARNINGS" -eq 0 ]; then
-    echo "  ✅  All good — no issues found"
+    echo "  $OUT_OK All good — no issues found"
 else
-    [ "$ISSUES" -gt 0 ]   && echo "  ${RED}🔴  $ISSUES issue(s) found${RESET}"
-    [ "$WARNINGS" -gt 0 ] && echo "  ${YELLOW}🟡  $WARNINGS warning(s) found${RESET}"
+    [ "$ISSUES" -gt 0 ]   && echo "  $OUT_FAIL $ISSUES issue(s) found"
+    [ "$WARNINGS" -gt 0 ] && echo "  $OUT_WARN $WARNINGS warning(s) found"
 fi
-echo "${BOLD}────────────────────────────────────────${RESET}"
 echo ""
 
 [ "$ISSUES" -gt 0 ] && exit 1

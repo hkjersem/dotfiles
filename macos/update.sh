@@ -6,20 +6,15 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/scripts/machine-profile
 ensure_machine_profile || exit 1
 source "$HOME/.dotfiles/scripts/lib/tool-updates.sh" || exit 1
 source "$HOME/.dotfiles/scripts/lib/command-line-tools.sh" || exit 1
+source "$HOME/.dotfiles/scripts/lib/output.sh" || exit 1
 
 SKIP_DEFAULTS=false
 for arg in "$@"; do
   [[ "$arg" == "--no-defaults" ]] && SKIP_DEFAULTS=true
 done
 
-_first_header=true
-header() {
-  [[ "$_first_header" == true ]] && _first_header=false || printf "\n"
-  printf "\033[34m────────────────────────────────────────\033[0m\n\033[1;34m  %s\033[0m\n\033[34m────────────────────────────────────────\033[0m\n" "$1"
-}
-subheader() {
-    printf "\n\033[1;36m  ▸ %s\033[0m\n\033[2m  ────────────────────────\033[0m\n" "$1"
-}
+header() { out_section "$1"; }
+subheader() { out_subsection "$1"; }
 
 header "System & App Store"
 # Update macOS

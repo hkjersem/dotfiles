@@ -80,12 +80,8 @@ globals_for() {
         | grep -E '├──|└──' | sed 's/.*── //' | sort
 }
 
-BOLD=$'\033[1m'
-DIM=$'\033[2m'
-YELLOW=$'\033[33m'
-RED=$'\033[31m'
-GREEN=$'\033[32m'
-RESET=$'\033[0m'
+# shellcheck source=scripts/lib/output.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/output.sh" || exit 1
 
 ga=$(globals_for "$A") || { echo "Error: could not list globals for $A" >&2; exit 1; }
 gb=$(globals_for "$B") || { echo "Error: could not list globals for $B" >&2; exit 1; }
@@ -115,14 +111,14 @@ label_a="$A"; label_b="$B"
 [[ "$A" == "$CURRENT" ]] && label_a="${A} (current)"
 [[ "$B" == "$CURRENT" ]] && label_b="${B} (current)"
 
-printf "\n${BOLD}Comparing ${label_a} → ${label_b}${RESET}\n\n"
+printf "%s\n" "${BOLD}npm globals · ${label_a} → ${label_b}${RESET}"
 
 has_diff=0
 
 if [[ ${#mismatches[@]} -gt 0 ]]; then
     has_diff=1
-    printf "${BOLD}%-24s  %-22s  %-22s${RESET}\n" "Package" "$label_a" "$label_b"
-    printf "${DIM}%-24s  %-22s  %-22s${RESET}\n" "────────────────────────" "──────────────────────" "──────────────────────"
+    out_section "Version differences"
+    printf "  ${BOLD}%-24s  %-22s  %-22s${RESET}\n" "Package" "$label_a" "$label_b"
     for entry in "${mismatches[@]}"; do
         IFS='|' read -r pkg ver_a ver_b <<< "$entry"
         newer=$(printf '%s\n%s\n' "$ver_a" "$ver_b" | sort -V | tail -1)
@@ -140,27 +136,25 @@ if [[ ${#mismatches[@]} -gt 0 ]]; then
             pkg_color="$GREEN"
         fi
         if [[ "$newer" == "$ver_b" ]]; then
-            printf "${pkg_color}%-24s${RESET}  ${DIM}%-22s${RESET}  ${GREEN}${BOLD}%-22s${RESET}\n" "$pkg" "$ver_a" "$ver_b"
+            printf "  ${pkg_color}%-24s${RESET}  ${DIM}%-22s${RESET}  ${GREEN}${BOLD}%-22s${RESET}\n" "$pkg" "$ver_a" "$ver_b"
         else
-            printf "${pkg_color}%-24s${RESET}  ${GREEN}${BOLD}%-22s${RESET}  ${DIM}%-22s${RESET}\n" "$pkg" "$ver_a" "$ver_b"
+            printf "  ${pkg_color}%-24s${RESET}  ${GREEN}${BOLD}%-22s${RESET}  ${DIM}%-22s${RESET}\n" "$pkg" "$ver_a" "$ver_b"
         fi
     done
-    echo ""
 fi
 
 if [[ -n "$only_a" ]]; then
     has_diff=1
-    printf "${BOLD}Only in ${label_a}:${RESET}\n"
-    echo "$only_a" | while IFS= read -r line; do printf "  %s\n" "$line"; done
-    echo ""
+    out_section "Only in ${label_a}"
+    echo "$only_a" | while IFS= read -r line; do printf "  %s %s\n" "${RED}−${RESET}" "$line"; done
 fi
 
 if [[ -n "$only_b" ]]; then
     has_diff=1
-    printf "${BOLD}Only in ${label_b}:${RESET}\n"
-    echo "$only_b" | while IFS= read -r line; do printf "  %s\n" "$line"; done
-    echo ""
+    out_section "Only in ${label_b}"
+    echo "$only_b" | while IFS= read -r line; do printf "  %s %s\n" "${GREEN}+${RESET}" "$line"; done
 fi
 
-[[ $has_diff -eq 0 ]] && printf "${GREEN}✓${RESET} No differences — same globals in both versions.\n"
+[[ $has_diff -eq 0 ]] && printf "\n  %s No differences — same globals in both versions.\n" "$OUT_OK"
+echo ""
 exit 0

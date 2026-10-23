@@ -93,6 +93,9 @@ import unicodedata
 import uuid
 from xml.parsers.expat import ExpatError
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import output  # noqa: E402
+
 
 LABEL = "com.hkjersem.codex-resume"
 PLIST_PATH = Path.home() / "Library/LaunchAgents" / f"{LABEL}.plist"
@@ -847,15 +850,6 @@ def stuck_overview(now, resumed, sends):
     return overview
 
 
-def print_section(title, first=False):
-    if not first:
-        print()
-    heading = f"── {title} ──"
-    if sys.stdout.isatty() and not os.environ.get("NO_COLOR"):
-        heading = f"\033[1m{heading}\033[0m"
-    print(heading)
-
-
 def print_field(label, value):
     print(f"  {label:<{STATUS_LABEL_WIDTH}}{value}")
 
@@ -864,7 +858,7 @@ def print_stuck_overview(state):
     now = local_now()
     resumed = {chat: at for chat, at in state["resumed"].items() if at >= now - RECURRING_SCAN}
     overview = stuck_overview(now, resumed, state["sends"])
-    print_section(f"Chats stopped by a usage limit ({len(overview)})")
+    output.section(f"Chats stopped by a usage limit ({len(overview)})")
     if not overview:
         print("  None.")
         return
@@ -1125,7 +1119,7 @@ def scheduled_summary(scheduled, message, chat=None, project=None, start_window=
 
 def status():
     minutes = recurring_minutes()
-    print_section("Recurring check", first=True)
+    output.section("Recurring check")
     if minutes is None:
         print("  Not set up. Start it with --recurring <minutes>.")
     else:
@@ -1143,9 +1137,9 @@ def status():
             try:
                 print_stuck_overview(state)
             except RuntimeError as error:
-                print_section("Chats stopped by a usage limit")
+                output.section("Chats stopped by a usage limit")
                 print(f"  Could not read them: {error}")
-    print_section("Scheduled resume")
+    output.section("Scheduled resume")
     if not PLIST_PATH.exists():
         print("  None.")
         return

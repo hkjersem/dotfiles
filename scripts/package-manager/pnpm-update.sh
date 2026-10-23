@@ -91,7 +91,7 @@ _apply_extra_update_location() {
 }
 
 _pm_install() {
-  echo -e "${BOLD}Running pnpm install...${RESET}"
+  out_section "pnpm install"
   pnpm install
 }
 
@@ -122,7 +122,10 @@ _update_actions() {
 
   local -a names=() held=()
   local name current target latest
-  [[ -z "$rows" ]] || printf "\n  ${BOLD}%-38s  %-14s  %s${RESET}\n" "Action" "Current" "Target"
+  if [[ -n "$rows" ]]; then
+    out_section "Actions"
+    printf "  ${BOLD}%-38s  %-14s  %s${RESET}\n" "Action" "Current" "Target"
+  fi
   while IFS=$'\t' read -r name current target latest; do
     [[ -z "$name" ]] && continue
     if [[ -n "$target" && "$target" != "$current" ]]; then
@@ -134,21 +137,21 @@ _update_actions() {
     fi
   done <<< "$rows"
   if [[ ${#held[@]} -gt 0 ]]; then
-    echo -e "\n  ${BOLD}New majors${RESET} ${DIM}(use --major):${RESET}"
+    out_section "New majors (use --major)"
     printf "  ${DIM}%s${RESET}\n" "${held[@]}"
   fi
   echo ""
 
   if [[ ${#names[@]} -eq 0 ]]; then
-    echo -e "${GREEN}✓ Nothing to update.${RESET}"; exit 0
+    echo "  $OUT_OK Nothing to update."; exit 0
   fi
-  $DRY_RUN && { echo -e "${CYAN}Dry run — no changes made.${RESET}"; exit 0; }
+  $DRY_RUN && { echo "    Dry run — no changes made."; exit 0; }
   confirm_apply "Apply ${#names[@]} update(s)?" "$AUTO_YES" || exit 0
 
   local -a latest_flag=()
   [[ "$ALLOW_MAJOR" == true ]] && latest_flag=(--latest)
   pnpm update --include-github-actions ${latest_flag[@]+"${latest_flag[@]}"} "${names[@]}"
-  echo -e "${GREEN}✓ Done! ${#names[@]} action(s) pinned to commit hashes.${RESET}"
+  echo "  $OUT_OK Done! ${#names[@]} action(s) pinned to commit hashes."
   exit 0
 }
 [[ "$ACTIONS" == true ]] && _update_actions

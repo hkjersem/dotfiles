@@ -108,11 +108,8 @@ if ! (return 0 2>/dev/null); then
     done
     unset _arg
 
-    BOLD=$'\033[1m'
-    RED=$'\033[0;31m'
-    YELLOW=$'\033[1;33m'
-    GREEN=$'\033[0;32m'
-    RESET=$'\033[0m'
+    # shellcheck source=scripts/lib/output.sh
+    source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/output.sh" || exit 1
 
     ISSUES=0
     WARNINGS=0
@@ -132,21 +129,17 @@ if ! (return 0 2>/dev/null); then
 
     section_end() {
         [ "$QUIET_MODE" -eq 1 ] && return
-        echo ""
-        echo "${BOLD}── ${CURRENT_SECTION} ──────────────────────────────────${RESET}"
+        out_section "$CURRENT_SECTION"
         if [[ $SECTION_ISSUES -eq 0 && $SECTION_WARNINGS -eq 0 && ${#SECTION_OUTPUT[@]} -gt 0 ]]; then
-            echo "  ${GREEN}✅${RESET} All checks passed"
+            echo "  $OUT_OK All checks passed"
         else
             printf '%s\n' "${SECTION_OUTPUT[@]}"
         fi
     }
 
-    ORANGE=$'\033[0;33m'
-
-    ok()   { SECTION_OUTPUT+=("  ${GREEN}✅${RESET} $1"); }
-    warn() { SECTION_OUTPUT+=("  ${YELLOW}🟡${RESET} $1"); ((WARNINGS++)); ((SECTION_WARNINGS++)); }
-    attn() { SECTION_OUTPUT+=("  ${ORANGE}🟠${RESET} $1"); ((WARNINGS++)); ((SECTION_WARNINGS++)); }
-    fail() { SECTION_OUTPUT+=("  ${RED}🔴${RESET} $1"); ((ISSUES++)); ((SECTION_ISSUES++)); }
+    ok()   { SECTION_OUTPUT+=("  $OUT_OK $1"); }
+    warn() { SECTION_OUTPUT+=("  $OUT_WARN $1"); ((WARNINGS++)); ((SECTION_WARNINGS++)); }
+    fail() { SECTION_OUTPUT+=("  $OUT_FAIL $1"); ((ISSUES++)); ((SECTION_ISSUES++)); }
     fixed() { ok "$1"; CHANGES=$((CHANGES + 1)); }
 
     _SKILLS_STANDALONE=1
@@ -580,7 +573,7 @@ if [ "${#AUTO_DELETE_CANDIDATES[@]}" -gt 0 ]; then
         else
             dir_name=$(basename "$candidate")
             if ! is_skills_ignored "$dir_name"; then
-                attn "$candidate — real content or unmanaged links preserved"
+                warn "$candidate — real content or unmanaged links preserved; check it manually"
             fi
         fi
     done
@@ -594,24 +587,22 @@ fi
 if [ "$_SKILLS_STANDALONE" -eq 1 ]; then
     if [ "$QUIET_MODE" -eq 1 ]; then
         if [ "$ISSUES" -gt 0 ]; then
-            echo "  ${RED}🔴${RESET} Skills: $ISSUES issue(s) — run without --quiet to see details"
+            echo "  $OUT_FAIL Skills: $ISSUES issue(s) — run without --quiet to see details"
         elif [ "$WARNINGS" -gt 0 ]; then
-            echo "  ${YELLOW}🟡${RESET} Skills: $WARNINGS warning(s), $CHANGES change(s) — run without --quiet to see details"
+            echo "  $OUT_WARN Skills: $WARNINGS warning(s), $CHANGES change(s) — run without --quiet to see details"
         elif [ "$CHANGES" -gt 0 ]; then
-            echo "  ${GREEN}✅${RESET} Skills: $CHANGES change(s)"
+            echo "  $OUT_OK Skills: $CHANGES change(s)"
         else
-            echo "  ${GREEN}✅${RESET} Skills ok"
+            echo "  $OUT_OK Skills ok"
         fi
     else
-        echo ""
-        echo "${BOLD}────────────────────────────────────────${RESET}"
+        out_section "Summary"
         if [ "$ISSUES" -eq 0 ] && [ "$WARNINGS" -eq 0 ]; then
-            echo "  ✅  All skills linked — no issues found"
+            echo "  $OUT_OK All skills linked — no issues found"
         else
-            [ "$ISSUES" -gt 0 ]   && echo "  ${RED}🔴  $ISSUES issue(s) found${RESET}"
-            [ "$WARNINGS" -gt 0 ] && echo "  ${YELLOW}🟡  $WARNINGS warning(s) found${RESET}"
+            [ "$ISSUES" -gt 0 ]   && echo "  $OUT_FAIL $ISSUES issue(s) found"
+            [ "$WARNINGS" -gt 0 ] && echo "  $OUT_WARN $WARNINGS warning(s) found"
         fi
-        echo "${BOLD}────────────────────────────────────────${RESET}"
         echo ""
     fi
 

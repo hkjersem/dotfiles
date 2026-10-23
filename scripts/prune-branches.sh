@@ -94,11 +94,8 @@ TARGET=${TARGET:-$PWD}
 [[ -d "$TARGET" ]] || { echo "Not a directory: $TARGET" >&2; exit 1; }
 TARGET=$(cd "$TARGET" && pwd -P) || exit 1
 
-if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
-  BOLD=$'\033[1m'; DIM=$'\033[2m'; RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; CYAN=$'\033[0;36m'; RESET=$'\033[0m'
-else
-  BOLD=""; DIM=""; RED=""; GREEN=""; CYAN=""; RESET=""
-fi
+# shellcheck source=lib/output.sh
+source "$SCRIPT_DIR/lib/output.sh" || exit 1
 
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/prune-branches.XXXXXX") || exit 1
 trap 'rm -rf -- "$TMP"' EXIT
@@ -196,11 +193,11 @@ print_kind() {
   while IFS="$SB_SEP" read -r k name sha detail wt; do
     [[ "$k" == "$kind" ]] || continue
     if [[ "$kind" == hint && "$name" == /* ]]; then
-      printf '  %s %s\n     %s%s%s\n' "$icon" "$(sb_short_path "$name")" "$DIM" "$detail" "$RESET"
+      printf '  %s %s\n    %s%s%s\n' "$icon" "$(sb_short_path "$name")" "$DIM" "$detail" "$RESET"
       continue
     fi
     printf '  %s %-32s %s%s%s  %s\n' "$icon" "$name" "$DIM" "${sha:0:7}" "$RESET" "$detail"
-    [[ -n "$wt" ]] && printf '     %s└ worktree %s%s\n' "$DIM" "$(sb_short_path "$wt")" "$RESET"
+    [[ -n "$wt" ]] && printf '    %s└ worktree %s%s\n' "$DIM" "$(sb_short_path "$wt")" "$RESET"
   done < "$file"
 }
 
@@ -228,18 +225,17 @@ for i in "${!REPOS[@]}"; do
     N_CLEAN=$((N_CLEAN + 1))
     continue
   fi
-  echo ""
-  echo "${BOLD}── ${name} ──────────────────────────────────${RESET}"
+  out_section "$name"
   if [[ -n "$failed" ]]; then
     N_FETCH_FAILED=$((N_FETCH_FAILED + 1))
-    echo "  ${RED}✘${RESET} Fetch failed for: ${failed% } — branches tracking it were left alone"
-    [[ -s "$TMP/$i.errors" ]] && sed -n '1,2s/^/     /p' "$TMP/$i.errors"
+    echo "  $OUT_FAIL Fetch failed for: ${failed% } — branches tracking it were left alone"
+    [[ -s "$TMP/$i.errors" ]] && sed -n '1,2s/^/    /p' "$TMP/$i.errors"
   fi
-  print_kind "$plan" delete "${RED}✂${RESET} "
-  print_kind "$plan" blocked "🟠"
-  print_kind "$plan" review "🟡"
-  print_kind "$plan" unverified "⚪"
-  print_kind "$plan" hint "${CYAN}ℹ${RESET} "
+  print_kind "$plan" delete "${RED}✂${RESET}"
+  print_kind "$plan" blocked "$OUT_WARN"
+  print_kind "$plan" review "$OUT_WARN"
+  print_kind "$plan" unverified "$OUT_WARN"
+  print_kind "$plan" hint "$OUT_INFO"
   N_DELETE=$((N_DELETE + $(count_kind "$plan" delete)))
   N_DELETE_WT=$((N_DELETE_WT + $(awk -F "$SB_SEP" '$1 == "delete" && $5 != "" { n++ } END { print n + 0 }' "$plan")))
   N_BLOCKED=$((N_BLOCKED + $(count_kind "$plan" blocked)))
@@ -250,27 +246,26 @@ done
 
 summary_row() { printf '  %s %-22s %s\n' "$1" "$2" "$3"; }
 
-echo ""
-echo "${BOLD}── Summary ──────────────────────────────────${RESET}"
+out_section "Summary"
 N_WITH_REMOTE=$(( ${#REPOS[@]} - ${#NO_REMOTE[@]} ))
-summary_row "🔍" "Checked" "$N_CHECKED local branch(es) in $N_WITH_REMOTE repositor$( [[ "$N_WITH_REMOTE" -eq 1 ]] && echo y || echo ies) with a remote"
+summary_row "$OUT_INFO" "Checked" "$N_CHECKED local branch(es) in $N_WITH_REMOTE repositor$( [[ "$N_WITH_REMOTE" -eq 1 ]] && echo y || echo ies) with a remote"
 if [[ "$N_DELETE" -gt 0 ]]; then
   detail="$N_DELETE branch(es)"
   [[ "$N_DELETE_WT" -gt 0 ]] && detail+=", $N_DELETE_WT with a worktree"
-  summary_row "${RED}✂${RESET} " "To delete" "$detail"
+  summary_row "${RED}✂${RESET}" "To delete" "$detail"
 fi
-[[ "$N_BLOCKED" -gt 0 ]] && summary_row "🟠" "Blocked by worktree" "$N_BLOCKED (uncommitted changes, ignored local files, locked, or checked out)"
-[[ "$N_REVIEW" -gt 0 ]] && summary_row "🟡" "Needs review" "$N_REVIEW (upstream gone, but commits not confirmed on a remote)"
-[[ "$N_UNVERIFIED" -gt 0 ]] && summary_row "⚪" "Unverified" "$N_UNVERIFIED (remote could not be fetched)"
-[[ "$N_HINT" -gt 0 ]] && summary_row "${CYAN}ℹ${RESET} " "Kept, looks stale" "$N_HINT (merged or old, but not prunable; see above)"
-[[ "$N_CLEAN" -gt 0 ]] && summary_row "✅" "Nothing to report" "$N_CLEAN repositor$( [[ "$N_CLEAN" -eq 1 ]] && echo y || echo ies)"
+[[ "$N_BLOCKED" -gt 0 ]] && summary_row "$OUT_WARN" "Blocked by worktree" "$N_BLOCKED (uncommitted changes, ignored local files, locked, or checked out)"
+[[ "$N_REVIEW" -gt 0 ]] && summary_row "$OUT_WARN" "Needs review" "$N_REVIEW (upstream gone, but commits not confirmed on a remote)"
+[[ "$N_UNVERIFIED" -gt 0 ]] && summary_row "$OUT_WARN" "Unverified" "$N_UNVERIFIED (remote could not be fetched)"
+[[ "$N_HINT" -gt 0 ]] && summary_row "$OUT_INFO" "Kept, looks stale" "$N_HINT (merged or old, but not prunable; see above)"
+[[ "$N_CLEAN" -gt 0 ]] && summary_row "$OUT_OK" "Nothing to report" "$N_CLEAN repositor$( [[ "$N_CLEAN" -eq 1 ]] && echo y || echo ies)"
 if [[ ${#NO_REMOTE[@]} -gt 0 ]]; then
   list="${NO_REMOTE[0]}"
   for ((j = 1; j < ${#NO_REMOTE[@]} && j < 5; j++)); do list+=", ${NO_REMOTE[$j]}"; done
   [[ ${#NO_REMOTE[@]} -gt 5 ]] && list+=" (+$((${#NO_REMOTE[@]} - 5)) more)"
-  summary_row "– " "No remote (skipped)" "${#NO_REMOTE[@]}: $list"
+  summary_row "${DIM}–${RESET}" "No remote (skipped)" "${#NO_REMOTE[@]}: $list"
 fi
-[[ "$N_FETCH_FAILED" -gt 0 ]] && summary_row "${RED}✘${RESET} " "Fetch failed" "$N_FETCH_FAILED repositor$( [[ "$N_FETCH_FAILED" -eq 1 ]] && echo y || echo ies)"
+[[ "$N_FETCH_FAILED" -gt 0 ]] && summary_row "$OUT_FAIL" "Fetch failed" "$N_FETCH_FAILED repositor$( [[ "$N_FETCH_FAILED" -eq 1 ]] && echo y || echo ies)"
 $FETCH || echo "  ${DIM}Based on remote-tracking refs from the last fetch.${RESET}"
 
 STATUS_CODE=0
@@ -310,10 +305,10 @@ for i in "${!REPOS[@]}"; do
     if error=$(sb_apply_delete "$branch" "$sha" "$wt" "$detail" </dev/null); then
       DELETED=$((DELETED + 1))
       [[ -n "$wt" ]] && REMOVED_WT=$((REMOVED_WT + 1))
-      printf '  %s✔%s %s: %s %s(%s)%s\n' "$GREEN" "$RESET" "$name" "$branch" "$DIM" "${sha:0:12}" "$RESET"
+      printf '  %s %s: %s %s(%s)%s\n' "$OUT_OK" "$name" "$branch" "$DIM" "${sha:0:12}" "$RESET"
     else
       FAILED=$((FAILED + 1))
-      printf '  %s✘%s %s: %s — %s\n' "$RED" "$RESET" "$name" "$branch" "$(printf '%s' "$error" | head -1)"
+      printf '  %s %s: %s — %s\n' "$OUT_FAIL" "$name" "$branch" "$(printf '%s' "$error" | head -1)"
     fi
   done < "$TMP/$i.plan"
 done

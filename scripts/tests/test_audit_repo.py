@@ -260,7 +260,7 @@ class AuditRepoTests(unittest.TestCase):
                                 cwd=self.project, env=self.env, text=True, input="",
                                 capture_output=True, timeout=30)
         out = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout)
-        self.assertIn("🔴 Could not read 1 documentation file(s)", out)
+        self.assertIn("✗ Could not read 1 documentation file(s)", out)
         self.assertNotIn("Markdown link casing look right", out)
         self.assertEqual(result.stderr, "")
         self.assertEqual(result.returncode, 1, out)
@@ -272,7 +272,7 @@ class AuditRepoTests(unittest.TestCase):
                                 cwd=self.project, env=self.env, text=True, input="",
                                 capture_output=True, timeout=30)
         out = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout)
-        self.assertIn("🔴 Could not read 2 documentation file(s)", out)
+        self.assertIn("✗ Could not read 2 documentation file(s)", out)
         self.assertNotIn("has no design tokens", out)
         self.assertEqual(result.stderr, "")
 
@@ -286,8 +286,8 @@ class AuditRepoTests(unittest.TestCase):
         self.assertNotIn("single-author risk", result.stdout)
         self.add_remote()
         result = self.run_audit("--skip-security")
-        self.assertIn("🟡 No CI config found", result.stdout)
-        self.assertIn("🟡 Knowledge concentration: Solo wrote 100% of all commits", result.stdout)
+        self.assertIn("! No CI config found", result.stdout)
+        self.assertIn("! Knowledge concentration: Solo wrote 100% of all commits", result.stdout)
         self.write(".github/workflows/ci.yml", "on: push\n")
         result = self.run_audit("--skip-security")
         self.assertIn("GitHub Actions: 1 workflow(s)", result.stdout)
@@ -491,7 +491,7 @@ class AuditRepoTests(unittest.TestCase):
         self.write("package.json", json.dumps(manifest))
         result = self.run_audit("--skip-security")
         self.assertIn("Test framework(s): playwright", result.stdout)
-        self.assertIn("🔴 test script is a placeholder", result.stdout)
+        self.assertIn("✗ test script is a placeholder", result.stdout)
         self.assertEqual(result.returncode, 1, result.stdout)
         for script in ('echo "Error: no test specified" && exit 1 || true', 'echo "Error: no test specified"'):
             with self.subTest(script=script):
@@ -511,8 +511,8 @@ class AuditRepoTests(unittest.TestCase):
         for finding in ("Top churn: app.py changed in 100%", "Solo wrote 100% of all commits",
                         "10 fix-labelled commits (100% of total)", "Firefighting: 6 hotfix",
                         "No test files found"):
-            self.assertRegex(result.stdout, "🟡 [^\n]*" + re.escape(finding))
-        self.assertNotIn("🔴", result.stdout)
+            self.assertRegex(result.stdout, "! [^\n]*" + re.escape(finding))
+        self.assertNotIn("✗ ", result.stdout)
         self.assertEqual(result.returncode, 0, result.stdout)
 
     def test_git_read_failure_is_explicit(self):

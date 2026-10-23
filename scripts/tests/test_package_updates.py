@@ -285,7 +285,7 @@ class PackageUpdateTests(unittest.TestCase):
                 self.manifest(pm, {"pkg": "^1.0.0"})
                 result = self.invoke("--yes")
                 self.assert_success(result)
-                self.assertIn("Skipped:", result.stdout)
+                self.assertIn("── Skipped ", result.stdout)
                 self.assertEqual(self.dependencies(), {"pkg": "^1.0.0"})
                 result = self.invoke("--major", "--yes")
                 self.assert_success(result)

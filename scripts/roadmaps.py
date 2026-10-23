@@ -23,6 +23,9 @@ _spec = importlib.util.spec_from_file_location("roadmap_skill", SKILL_SCRIPT)
 rm = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(rm)
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import output  # noqa: E402
+
 INDEX = "ROADMAP.md"
 
 
@@ -99,7 +102,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 seen.add(os.path.realpath(root))
                 roots.append(root)
 
-    print(f"Roadmaps, {today.isoformat()}")
+    print(output.paint(f"Roadmaps, {today.isoformat()}", "bold"))
     quiet: List[str] = []
     failed = False
     for root in roots:
@@ -108,7 +111,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             report, briefs = rm.check_report(repo)
         except (OSError, UnicodeDecodeError) as exc:
             failed = True
-            print(f"\n{os.path.basename(root)}  {home_short(root)}\n  cannot read the roadmap: {exc}")
+            output.section(f"{os.path.basename(root)}  {home_short(root)}")
+            print(f"  {output.mark('fail')} cannot read the roadmap: {exc}")
             continue
         view = rm.Overview(briefs, today)
         verifying = [b for b in view.now if b.status == "verifying"]
@@ -117,31 +121,35 @@ def main(argv: Optional[List[str]] = None) -> int:
         if not (view.due or verifying or active or report.errors):
             quiet.append(name + (f" ({len(view.can_start)} ready to start)" if view.can_start else ""))
             continue
-        print(f"\n{name}  {home_short(root)}")
+        output.section(f"{name}  {home_short(root)}")
         if view.due:
-            print(f"  Due (overdue or within {rm.DUE_SOON_DAYS} days):")
+            output.subsection(f"Due (overdue or within {rm.DUE_SOON_DAYS} days)")
             print("\n".join("  " + line for line in view.due))
         if verifying:
-            print("  Awaiting your acceptance:")
+            output.subsection("Awaiting your acceptance")
             print("\n".join(f"    {b.slug}: {b.title}" for b in verifying))
         if active:
-            print("  In progress:")
+            output.subsection("In progress")
             print("\n".join(f"    {b.slug}: {b.title}"
                             + (f", blocked: {b.get('blocked')}" if b.get("blocked") else "")
                             for b in active))
+        if view.can_start or report.errors:
+            print()
         if view.can_start:
-            print(f"  Ready to start: {len(view.can_start)}")
+            print(f"  {output.mark('info')} Ready to start: {len(view.can_start)}")
         if report.errors:
             failed = True
-            print(f"  {len(report.errors)} error(s); run the roadmap skill's `check` in the repository")
+            print(f"  {output.mark('fail')} {len(report.errors)} error(s); run the roadmap skill's `check` in the repository")
     if quiet:
-        print("\nNothing needs attention: " + ", ".join(quiet))
+        print(f"\n  {output.mark('ok')} Nothing needs attention: " + ", ".join(quiet))
     if not roots:
-        print("\nNo roadmaps found.")
+        print("\n    No roadmaps found.")
+    if notes or problems:
+        print()
     for note in notes:
-        print("note: " + note)
+        print(f"  {output.mark('info')} note: {note}")
     for problem in problems:
-        print("error: " + problem)
+        print(f"  {output.mark('fail')} error: {problem}")
     return 1 if failed or problems else 0
 
 

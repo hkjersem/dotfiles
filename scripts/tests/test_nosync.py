@@ -68,14 +68,14 @@ class NosyncTests(unittest.TestCase):
         self.assertTrue((self.root / "node_modules").is_dir())
         self.assertTrue((self.root / ".git").is_dir())
         self.assertEqual(output.splitlines(), [
-            "  SET       node_modules",
-            "  SET       .git",
+            "  ✓ SET       node_modules",
+            "  ✓ SET       .git",
         ])
 
     def test_inspect_defaults_to_current_folder_without_writing(self):
         status, output, errors = self.run_nosync("--inspect")
         self.assertEqual(status, 0, errors)
-        self.assertEqual(output, "  NOT SET   .\n")
+        self.assertEqual(output, "  ! NOT SET   .\n")
         self.assertEqual(self.writes, [])
 
     def test_inspect_missing_folder_reports_failure_without_creating_it(self):
@@ -83,8 +83,8 @@ class NosyncTests(unittest.TestCase):
         self.values["present"] = b"1"
         status, output, errors = self.run_nosync("--inspect", "missing", "present")
         self.assertEqual(status, 1)
-        self.assertIn("  ERROR     missing  (", errors)
-        self.assertEqual(output, "  MARKED    present\n")
+        self.assertIn("  ✗ ERROR     missing  (", errors)
+        self.assertEqual(output, "  ✓ MARKED    present\n")
         self.assertFalse((self.root / "missing").exists())
         self.assertEqual(self.writes, [])
 
@@ -100,17 +100,17 @@ class NosyncTests(unittest.TestCase):
                 self.assertEqual(status, 0, errors)
                 if value == b"1":
                     self.assertEqual(self.writes, [])
-                    self.assertEqual(output, "  ALREADY   build\n")
+                    self.assertEqual(output, "  ✓ ALREADY   build\n")
                 else:
                     self.assertEqual(self.writes, [("build", b"1")])
-                    self.assertEqual(output, "  SET       build\n")
+                    self.assertEqual(output, "  ✓ SET       build\n")
 
     def test_inspect_distinguishes_absent_empty_and_newline_values(self):
         self.folder("build")
         for value, expected in (
-            (None, "  NOT SET   build\n"),
-            (b"", "  VALUE     build  (attribute=b'')\n"),
-            (b"1\n", "  VALUE     build  (attribute=b'1\\n')\n"),
+            (None, "  ! NOT SET   build\n"),
+            (b"", "  ! VALUE     build  (attribute=b'')\n"),
+            (b"1\n", "  ! VALUE     build  (attribute=b'1\\n')\n"),
         ):
             with self.subTest(value=value):
                 self.values.clear()
@@ -142,7 +142,7 @@ class NosyncTests(unittest.TestCase):
                 self.assertCountEqual(self.writes, [(folder, b"1") for folder in expected])
                 self.assertCountEqual(
                     output.splitlines(),
-                    [f"  SET       {folder}" for folder in expected],
+                    [f"  ✓ SET       {folder}" for folder in expected],
                 )
                 self.assertFalse((self.root / "node_modules").exists())
                 self.assertFalse((self.root / ".git").exists())
@@ -160,11 +160,11 @@ class NosyncTests(unittest.TestCase):
                     status, output, errors = self.run_nosync("-r", "--inspect")
                     self.assertEqual(status, 0, errors)
                     if value == b"1":
-                        self.assertEqual(output, f"  MARKED    {parent}\n")
+                        self.assertEqual(output, f"  ✓ MARKED    {parent}\n")
                         self.assertNotIn("./archive/node_modules", self.reads)
                     else:
                         self.assertEqual(
-                            output, "  NOT SET   ./archive/node_modules\n",
+                            output, "  ! NOT SET   ./archive/node_modules\n",
                         )
                     self.assertEqual(self.writes, [])
 
@@ -173,7 +173,7 @@ class NosyncTests(unittest.TestCase):
         self.values["./archive"] = b"1"
         status, output, errors = self.run_nosync("-r")
         self.assertEqual(status, 0, errors)
-        self.assertEqual(output, "  ALREADY   ./archive\n")
+        self.assertEqual(output, "  ✓ ALREADY   ./archive\n")
         self.assertNotIn("./archive/node_modules", self.reads)
         self.assertEqual(self.writes, [])
 
@@ -185,7 +185,7 @@ class NosyncTests(unittest.TestCase):
             with self.subTest(flags=flags):
                 status, output, errors = self.run_nosync(*flags, "build[1]*?")
                 self.assertEqual(status, 0, errors)
-                self.assertEqual(output, "  VALUE     ./project/build[1]*?  (attribute=b'0')\n")
+                self.assertEqual(output, "  ! VALUE     ./project/build[1]*?  (attribute=b'0')\n")
                 self.assertEqual(self.writes, [])
 
     def test_recursive_output_sorts_by_path_or_puts_syncing_folders_first(self):
@@ -199,16 +199,16 @@ class NosyncTests(unittest.TestCase):
         with patch.object(nosync, "find_folders", side_effect=lambda names: find_folders(names)[::-1]):
             for flags, expected in (
                 ((), [
-                    "  MARKED    ./a/node_modules",
-                    "  NOT SET   ./b/node_modules",
-                    "  VALUE     ./c/.git  (attribute=b'0')",
-                    "  MARKED    ./d/node_modules",
+                    "  ✓ MARKED    ./a/node_modules",
+                    "  ! NOT SET   ./b/node_modules",
+                    "  ! VALUE     ./c/.git  (attribute=b'0')",
+                    "  ✓ MARKED    ./d/node_modules",
                 ]),
                 (("--sort", "status"), [
-                    "  NOT SET   ./b/node_modules",
-                    "  VALUE     ./c/.git  (attribute=b'0')",
-                    "  MARKED    ./a/node_modules",
-                    "  MARKED    ./d/node_modules",
+                    "  ! NOT SET   ./b/node_modules",
+                    "  ! VALUE     ./c/.git  (attribute=b'0')",
+                    "  ✓ MARKED    ./a/node_modules",
+                    "  ✓ MARKED    ./d/node_modules",
                 ]),
             ):
                 with self.subTest(flags=flags):
@@ -263,8 +263,8 @@ class NosyncTests(unittest.TestCase):
         with patch.object(nosync, "set_attribute", side_effect=write):
             status, output, errors = self.run_nosync("first", "second")
         self.assertEqual(status, 1)
-        self.assertIn("  ERROR     first  (", errors)
-        self.assertEqual(output, "  SET       second\n")
+        self.assertIn("  ✗ ERROR     first  (", errors)
+        self.assertEqual(output, "  ✓ SET       second\n")
         self.assertEqual(self.writes, [("second", b"1")])
 
     def test_recursive_search_uses_no_child_processes(self):
@@ -296,11 +296,11 @@ class NosyncTests(unittest.TestCase):
                 if colored:
                     self.assertEqual(
                         output.getvalue(),
-                        "  \033[0;32mMARKED   \033[0m marked\n"
-                        "  \033[0;33mNOT SET  \033[0m unmarked\n",
+                        "  \033[0;32m✓ MARKED   \033[0m marked\n"
+                        "  \033[1;33m! NOT SET  \033[0m unmarked\n",
                     )
                 else:
-                    self.assertEqual(output.getvalue(), "  MARKED    marked\n  NOT SET   unmarked\n")
+                    self.assertEqual(output.getvalue(), "  ✓ MARKED    marked\n  ! NOT SET   unmarked\n")
                 self.assertEqual(self.writes, [])
 
     def test_error_color_uses_stderr_terminal_not_stdout(self):
@@ -315,7 +315,7 @@ class NosyncTests(unittest.TestCase):
             status = nosync.main(["--inspect", "missing"])
         self.assertEqual(status, 1)
         self.assertEqual(output.getvalue(), "")
-        self.assertIn("  \033[0;31mERROR    \033[0m missing  (", errors.getvalue())
+        self.assertIn("  \033[0;31m✗ ERROR    \033[0m missing  (", errors.getvalue())
         self.assertFalse((self.root / "missing").exists())
 
 
@@ -346,9 +346,9 @@ class NosyncIntegrationTests(unittest.TestCase):
                     )
                     self.assertEqual(result.returncode, 0, result.stderr)
                     expected = (
-                        "  MARKED    ./archive\n"
+                        "  ✓ MARKED    ./archive\n"
                         if value == b"1" else
-                        "  NOT SET   ./archive/node_modules\n"
+                        "  ! NOT SET   ./archive/node_modules\n"
                     )
                     self.assertEqual(result.stdout, expected)
             result = subprocess.run(

@@ -213,16 +213,14 @@ done
 echo -e "${BOLD}Checking cleanup opportunities...${RESET}  ${DIM}(${pm})${RESET}"
 
 if [[ ${#UNUSED_CATALOG_PKGS[@]} -gt 0 ]]; then
-  echo ""
-  echo -e "  ${BOLD}Unused pnpm catalog entries:${RESET}"
+  out_section "Unused pnpm catalog entries"
   for pkg in "${UNUSED_CATALOG_PKGS[@]}"; do
     printf "  ${YELLOW}%-38s${RESET}  ${DIM}pnpm-workspace.yaml${RESET}\n" "$pkg"
   done
 fi
 
 if [[ ${#CLEAN_FILES[@]} -gt 0 ]]; then
-  echo ""
-  echo -e "  ${BOLD}Empty manifest sections:${RESET}"
+  out_section "Empty manifest sections"
   for i in "${!CLEAN_FILES[@]}"; do
     printf "  ${YELLOW}%-38s${RESET}  ${DIM}%s${RESET}\n" \
       "$(format_sections "${CLEAN_SECTIONS[$i]}")" "$(format_file_label "${CLEAN_FILES[$i]}")"
@@ -230,8 +228,7 @@ if [[ ${#CLEAN_FILES[@]} -gt 0 ]]; then
 fi
 
 if [[ ${#SUGGEST_PKG[@]} -gt 0 ]]; then
-  echo ""
-  echo -e "  ${BOLD}Catalog suggestions${RESET} ${DIM}(report only):${RESET}"
+  out_section "Catalog suggestions (report only)"
   for i in "${!SUGGEST_PKG[@]}"; do
     printf "  ${CYAN}%-38s${RESET}  ${DIM}%s — %s${RESET}\n" \
       "${SUGGEST_PKG[$i]}" "${SUGGEST_KIND[$i]}" "${SUGGEST_VERSIONS[$i]}"
@@ -241,21 +238,21 @@ fi
 
 if $named_catalogs_present; then
   echo ""
-  echo -e "  ${BOLD}Catalog cleanup skipped${RESET} ${DIM}(named pnpm catalogs detected).${RESET}"
+  echo "    Catalog cleanup skipped: named pnpm catalogs detected."
 fi
 
 echo ""
 
 if [[ $cleanup_count -eq 0 ]]; then
   if [[ ${#SUGGEST_PKG[@]} -gt 0 ]]; then
-    echo -e "${GREEN}✓ No automatic cleanup needed.${RESET}"
+    echo "  $OUT_OK No automatic cleanup needed."
   else
-    echo -e "${GREEN}✓ Nothing to clean.${RESET}"
+    echo "  $OUT_OK Nothing to clean."
   fi
   exit 0
 fi
 
-$DRY_RUN && { echo -e "${CYAN}Dry run — no changes made.${RESET}"; exit 0; }
+$DRY_RUN && { echo "    Dry run — no changes made."; exit 0; }
 
 confirm_apply "Apply ${cleanup_count} cleanup(s)?" "$AUTO_YES" || exit 0
 
@@ -313,4 +310,4 @@ EOF
 done
 
 echo ""
-echo -e "${GREEN}✓ Done! ${cleanup_count} cleanup(s) applied.${RESET}"
+echo "  $OUT_OK Done! ${cleanup_count} cleanup(s) applied."

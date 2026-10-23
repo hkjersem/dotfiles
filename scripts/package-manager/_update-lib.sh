@@ -20,13 +20,8 @@
 # shellcheck source=../lib/pm-utils.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/pm-utils.sh"
 
-# ── Colors ────────────────────────────────────────────────────────────────────
-if [[ -t 1 ]]; then
-  RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-  CYAN='\033[0;36m'; BOLD='\033[1m'; DIM='\033[2m'; RESET='\033[0m'
-else
-  RED=''; GREEN=''; YELLOW=''; CYAN=''; BOLD=''; DIM=''; RESET=''
-fi
+# shellcheck source=../lib/output.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/output.sh"
 
 # ── Arg parsing ───────────────────────────────────────────────────────────────
 # Call: _parse_args "$@" — sets globals used throughout the pipeline.
@@ -653,9 +648,9 @@ find_all_update_locations() {
 # Default hooks — wrappers override as needed
 _find_location_extra() { echo ""; }
 _find_additional_update_locations() { return 0; }
-_apply_catalog()       { echo -e "  ${YELLOW}⚠ Catalog update not supported${RESET}"; }
+_apply_catalog()       { echo "  $OUT_WARN Catalog update not supported"; }
 _apply_extra_update_location() { return 1; }
-_pm_install()          { echo -e "${YELLOW}⚠ _pm_install not defined${RESET}" >&2; }
+_pm_install()          { echo "  $ERR_WARN _pm_install not defined" >&2; }
 
 # ── Augmentation ──────────────────────────────────────────────────────────────
 # Re-checks exact-pinned packages that the package manager may suppress via release-age
@@ -772,14 +767,14 @@ run_plan() {
 
   # ── Early exit if nothing outdated ─────────────────────────────────────────
   if [[ "$OUTDATED" == "{}" ]]; then
-    echo -e "${GREEN}✓ All packages are up to date!${RESET}"; exit 0
+    echo "  $OUT_OK All packages are up to date."; exit 0
   fi
 
   # ── Filter to single package ────────────────────────────────────────────────
   if [[ -n "$FILTER_PKG" ]]; then
     OUTDATED=$(echo "$OUTDATED" | jq --arg pkg "$FILTER_PKG" '{($pkg): .[$pkg]} | with_entries(select(.value != null))')
     if [[ "$OUTDATED" == "{}" ]]; then
-      echo -e "${GREEN}✓ ${FILTER_PKG} is up to date!${RESET}"; exit 0
+      echo "  $OUT_OK ${FILTER_PKG} is up to date."; exit 0
     fi
   fi
 
@@ -918,23 +913,26 @@ run_plan() {
   done
 
   local has_updates=$(( ${#C_IDX[@]} + ${#N_IDX[@]} + ${#R_PKG[@]} ))
-  if [[ $has_updates -gt 0 || ${#S_PKG[@]} -gt 0 ]]; then
-    printf "\r\033[K\n"
+  [[ $has_updates -gt 0 || ${#S_PKG[@]} -gt 0 ]] && printf "\r\033[K"
+  _table_header() {
     printf "  ${BOLD}%-38s  %-14s  %-14s  %s${RESET}\n" "Package" "Current" "Target" "Location"
-    printf "  %s\n" "$(printf '%.0s─' {1..80})"
+  }
+
+  if [[ ${#C_IDX[@]} -gt 0 ]]; then
+    out_section "Updates"
+    _table_header
+    local clean_index
+    for ((clean_index=0; clean_index<${#C_IDX[@]}; clean_index++)); do
+      i="${C_IDX[$clean_index]}"
+      local clr=$GREEN; ${P_MAJOR[$i]} && clr=$YELLOW
+      printf "  ${clr}%-38s${RESET}  %-14s  %-14s  ${DIM}%s${RESET}\n" \
+        "${P_PKG[$i]}" "${P_FROM[$i]}" "${P_TO[$i]}" "$(_fmt_loc "${P_LOC[$i]}")"
+    done
   fi
 
-  local clean_index
-  for ((clean_index=0; clean_index<${#C_IDX[@]}; clean_index++)); do
-    i="${C_IDX[$clean_index]}"
-    local clr=$GREEN; ${P_MAJOR[$i]} && clr=$YELLOW
-    printf "  ${clr}%-38s${RESET}  %-14s  %-14s  ${DIM}%s${RESET}\n" \
-      "${P_PKG[$i]}" "${P_FROM[$i]}" "${P_TO[$i]}" "$(_fmt_loc "${P_LOC[$i]}")"
-  done
-
   if [[ ${#N_IDX[@]} -gt 0 ]]; then
-    [[ ${#C_IDX[@]} -gt 0 ]] && echo ""
-    [[ ${#C_IDX[@]} -gt 0 ]] && echo -e "  ${BOLD}Notable:${RESET}"
+    out_section "Updates with notes"
+    _table_header
     for i in "${N_IDX[@]}"; do
       printf "  ${YELLOW}%-38s${RESET}  %-14s  %-14s  ${DIM}%s${RESET}\n" \
         "${P_PKG[$i]}" "${P_FROM[$i]}" "${P_TO[$i]}" "$(_fmt_loc "${P_LOC[$i]}")"
@@ -944,8 +942,7 @@ run_plan() {
   fi
 
   if [[ ${#R_PKG[@]} -gt 0 ]]; then
-    [[ $(( ${#C_IDX[@]} + ${#N_IDX[@]} )) -gt 0 ]] && echo ""
-    echo -e "  ${BOLD}Too recent${RESET} ${DIM}(cooldown: $(format_duration "$COOLDOWN_MINUTES")):${RESET}"
+    out_section "Too recent (cooldown: $(format_duration "$COOLDOWN_MINUTES"))"
     for i in "${!R_PKG[@]}"; do
       printf "  ${YELLOW}%-38s${RESET}  ${DIM}%s → %s  —  %s old${RESET}\n" \
         "${R_PKG[$i]}" "${R_FROM[$i]}" "${R_TO[$i]}" "$(format_duration "${R_AGE[$i]}")"
@@ -953,8 +950,8 @@ run_plan() {
   fi
 
   if [[ ${#S_PKG[@]} -gt 0 ]]; then
-    [[ $has_updates -gt 0 ]] && echo ""
-    echo -e "  ${BOLD}Skipped:${RESET}"
+    out_section "Skipped"
+    _table_header
     for i in "${!S_PKG[@]}"; do
       printf "  ${YELLOW}%-38s${RESET}  ${DIM}%-14s  %-14s  %s${RESET}\n" \
         "${S_PKG[$i]}" "${S_FROM[$i]}" "${S_TO[$i]}" "$(_fmt_loc "${S_LOC[$i]}")"
@@ -964,22 +961,22 @@ run_plan() {
   echo ""
 
   if [[ ${#P_PKG[@]} -eq 0 ]]; then
-    echo -e "${GREEN}✓ Nothing to update.${RESET}"; exit 0
+    echo "  $OUT_OK Nothing to update."; exit 0
   fi
 
-  $DRY_RUN && { echo -e "${CYAN}Dry run — no changes made.${RESET}"; exit 0; }
+  $DRY_RUN && { echo "    Dry run — no changes made."; exit 0; }
 
   # ── Confirm ─────────────────────────────────────────────────────────────────
   confirm_apply "Apply ${#P_PKG[@]} update(s)?" "$AUTO_YES" || exit 0
 
   # ── Apply ────────────────────────────────────────────────────────────────────
-  echo -e "${BOLD}Updating...${RESET}"
+  out_section "Updating"
 
   for i in "${!P_PKG[@]}"; do
     local pkg="${P_PKG[$i]}"; local ver="${P_TO[$i]}"; local loc="${P_LOC[$i]}"
 
     if [[ "$loc" == "unknown" ]]; then
-      echo -e "  ${YELLOW}⚠ Could not locate ${pkg} — skipped${RESET}"
+      echo "  $OUT_WARN Could not locate ${pkg} — skipped"
       continue
     fi
 
@@ -1000,8 +997,7 @@ run_plan() {
     done < <(find_all_update_locations "$pkg")
   done
 
-  echo ""
   _pm_install
   echo ""
-  echo -e "${GREEN}✓ Done! ${#P_PKG[@]} package(s) updated.${RESET}"
+  echo "  $OUT_OK Done! ${#P_PKG[@]} package(s) updated."
 }

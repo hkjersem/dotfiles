@@ -185,7 +185,7 @@ class AgentSkillsTests(unittest.TestCase):
                 result = self.run_script("sync-agent-skills.sh")
                 self.env.pop(flag)
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn("error:", result.stderr)
+                self.assertIn("✗ ", result.stderr)
 
     def test_invalid_lockfile_is_preserved(self):
         for content in ("bad json", '{"skills":{"../escape":{"source":"owner/repo"}}}'):

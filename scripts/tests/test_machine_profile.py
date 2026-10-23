@@ -74,7 +74,7 @@ class MachineProfileTests(unittest.TestCase):
         for relative in (
             "Brewfile", "install.conf.yaml", "scripts/audit.sh",
             "scripts/machine-profile.sh", "scripts/lib/tool-updates.sh",
-            "scripts/lib/command-line-tools.sh",
+            "scripts/lib/command-line-tools.sh", "scripts/lib/output.sh",
             "macos/install.sh", "macos/applications.sh", "macos/update.sh",
             "zsh/conf.d/omz.zsh",
         ):
@@ -505,8 +505,8 @@ class MachineProfileTests(unittest.TestCase):
         section = result.stdout.split("Machine profile", 1)[1].split("Symlinks", 1)[0]
         self.assertIn("Nav Pilot is installed on this personal machine", section)
         self.assertIn("gcloud is installed on this personal machine", section)
-        self.assertNotIn("🟡", section)
-        self.assertNotIn("🔴", section)
+        self.assertNotIn("  ! ", section)
+        self.assertNotIn("  ✗ ", section)
         self.assertNotIn("nav-pilot (installed but not", result.stdout)
         self.assertFalse(self.calls("nav-pilot"))
         self.assertFalse(self.calls("gcloud"))
@@ -530,7 +530,7 @@ class MachineProfileTests(unittest.TestCase):
                 result = self.run_script("scripts/audit.sh")
                 section = result.stdout.split("Machine profile", 1)[1].split("Symlinks", 1)[0]
                 lines = [line for line in section.splitlines() if line.startswith("  ")]
-                self.assertEqual(lines, ["  Profile: " + profile])
+                self.assertEqual(lines, ["  • Profile: " + profile])
                 self.assertFalse(self.calls("nav-pilot"))
                 self.assertFalse(self.calls("gcloud"))
 
@@ -540,8 +540,8 @@ class MachineProfileTests(unittest.TestCase):
         section = result.stdout.split("Machine profile", 1)[1].split("Symlinks", 1)[0]
         self.assertIn("Nav Pilot is missing", section)
         self.assertIn("gcloud is missing", section)
-        self.assertIn("🟡", section)
-        self.assertNotIn("🔴", section)
+        self.assertIn("  ! ", section)
+        self.assertNotIn("  ✗ ", section)
         self.assertFalse((self.bin / "nav-pilot").exists())
 
     def test_audit_reports_invalid_profile_without_replacing_it(self):

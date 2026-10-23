@@ -26,6 +26,8 @@ SOURCES="$DOTFILES/agents/skills/sources.txt"
 CANONICAL_DIR="$HOME/.agents/skills"
 LOCK_FILE="$HOME/.agents/.skill-lock.json"
 source "$DOTFILES/scripts/lib/skills-utils.sh" || exit 1
+# shellcheck source=scripts/lib/output.sh
+source "$DOTFILES/scripts/lib/output.sh" || exit 1
 
 DRY_RUN=0
 QUIET=0
@@ -55,12 +57,12 @@ changed() {
 
 conflict() {
     CONFLICTS=$((CONFLICTS + 1))
-    printf '  warning: %s\n' "$1" >&2
+    printf '  %s %s\n' "$ERR_WARN" "$1" >&2
 }
 
 error() {
     ERRORS=$((ERRORS + 1))
-    printf '  error: %s\n' "$1" >&2
+    printf '  %s %s\n' "$ERR_FAIL" "$1" >&2
 }
 
 sync_authored_skills() {

@@ -53,7 +53,7 @@ unset _npmrc_file
 
 # ── npm hooks ─────────────────────────────────────────────────────────────────
 _pm_install() {
-  echo -e "${BOLD}Running npm install...${RESET}"
+  out_section "npm install"
   npm install
 }
 

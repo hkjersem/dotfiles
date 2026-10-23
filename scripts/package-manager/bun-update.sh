@@ -62,9 +62,9 @@ unset _bunfig _bun_age_str _bun_age_mins
 
 # ── bun hooks ─────────────────────────────────────────────────────────────────
 _find_location_extra() { echo ""; }
-_apply_catalog()       { echo -e "  ${YELLOW}⚠ bun does not support catalogs${RESET}"; }
+_apply_catalog()       { echo "  $OUT_WARN bun does not support catalogs"; }
 _pm_install() {
-  echo -e "${BOLD}Running bun install...${RESET}"
+  out_section "bun install"
   bun install
 }
 

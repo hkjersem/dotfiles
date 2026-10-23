@@ -384,10 +384,11 @@ class CodexResumeTests(unittest.TestCase):
             self.assertEqual(output.getvalue().splitlines(), [
                 "Codex resume scheduled for 16.10.2026 kl. 16.30 in the latest chat on this Mac "
                 "with message: Resume now",
-                "── Recurring check ──",
+                "",
+                "── Recurring check ──────────────────────────────────",
                 "  Not set up. Start it with --recurring <minutes>.",
                 "",
-                "── Scheduled resume ──",
+                "── Scheduled resume ──────────────────────────────────",
                 "  At          16.10.2026 kl. 16.30",
                 "  Chat        latest chat on this Mac",
                 "  Message     Resume now",
@@ -804,7 +805,7 @@ class CodexResumeTests(unittest.TestCase):
         width = len(room)
         self.assertEqual(output.getvalue().splitlines(), [
             "",
-            "── Chats stopped by a usage limit (5) ──",
+            "── Chats stopped by a usage limit (5) ──────────────────────────────────",
             f"  {'Stopped':<{width}}  {'Continues':<{width}}  Chat",
             f"  {t['a']}  {'next check':<{width}}  'a'",
             f"  {t['b']}  {'next check':<{width}}  'b'",
@@ -813,19 +814,6 @@ class CodexResumeTests(unittest.TestCase):
             f"  {t['old']}  {'left alone':<{width}}  'old'",
             "  Chats left alone were stopped by an older usage limit.",
         ])
-
-    def test_status_headings_are_bold_only_in_a_terminal_without_no_color(self):
-        for terminal, no_color, expected in (
-            (True, "", "\033[1m── Scheduled resume ──\033[0m\n"),
-            (True, "1", "── Scheduled resume ──\n"),
-            (False, "", "── Scheduled resume ──\n"),
-        ):
-            with self.subTest(terminal=terminal, no_color=no_color):
-                with (redirect_stdout(io.StringIO()) as output,
-                      patch.object(output, "isatty", return_value=terminal),
-                      patch.dict(os.environ, {"NO_COLOR": no_color})):
-                    codex_resume.print_section("Scheduled resume", first=True)
-                self.assertEqual(output.getvalue(), expected)
 
     def recurring(self, chats, allowed=True, state=None, queued=True, now="2026-10-21T10:00:00+02:00",
                   stopped="2026-10-21T01:00:00+02:00", minutes=15, resets=None, sent=None, after_wait=None):
@@ -1085,17 +1073,18 @@ class CodexResumeTests(unittest.TestCase):
             self.assertIn("Every 15 minutes", lines[0])
             self.assertEqual(lines[1:], ["Recurring check stopped.", "No recurring check is set up."])
             recurring = [
-                "── Recurring check ──",
+                "",
+                "── Recurring check ──────────────────────────────────",
                 "  Every       15 minutes",
                 "  Sends       continue to up to 3 stopped chats per 5 hours, newest first, once the usage "
                 "limits allow",
             ]
-            not_scheduled = ["", "── Scheduled resume ──", "  None."]
+            not_scheduled = ["", "── Scheduled resume ──────────────────────────────────", "  None."]
             self.assertEqual(recurring_status.getvalue().splitlines(), [
                 *recurring,
                 f"  Last check  {shown('2026-10-21T10:00:00+02:00')}",
                 "",
-                "── Chats stopped by a usage limit (0) ──",
+                "── Chats stopped by a usage limit (0) ──────────────────────────────────",
                 "  None.",
                 *not_scheduled,
                 *recurring,
@@ -1489,7 +1478,7 @@ class CodexResumeTests(unittest.TestCase):
                 arguments = plistlib.load(agent_file)["ProgramArguments"]
         self.assertEqual(arguments[4:-2], ["--chat", "01a1-mine", "--every", "30", "--used-up", "300"])
         lines = output.getvalue().splitlines()
-        self.assertRegex(lines[lines.index("── Recurring check ──") - 1], r"^Codex resume scheduled for \S+ kl\. \S+, or earlier if the limit resets "
+        self.assertRegex(lines[lines.index("── Recurring check ──────────────────────────────────") - 2], r"^Codex resume scheduled for \S+ kl\. \S+, or earlier if the limit resets "
                                    r"first \(checked every 30 minutes\) in chat 'Find current project status'\.$")
         self.assertRegex(lines[-3], r"^  At          \S+ kl\. \S+, or earlier if the limit resets first "
                                     r"\(checked every 30 minutes\)$")
@@ -1698,10 +1687,11 @@ class CodexResumeTests(unittest.TestCase):
         self.assertEqual(output.getvalue().splitlines(), [
             "Codex resume scheduled for 20.10.2026 kl. 00.00 in the latest chat on this Mac, "
             "only if no 5-hour window is running.",
-            "── Recurring check ──",
+            "",
+            "── Recurring check ──────────────────────────────────",
             "  Not set up. Start it with --recurring <minutes>.",
             "",
-            "── Scheduled resume ──",
+            "── Scheduled resume ──────────────────────────────────",
             "  At          20.10.2026 kl. 00.00",
             "  Chat        latest chat on this Mac",
             "  Message     continue (not sent if Codex is already replying)",

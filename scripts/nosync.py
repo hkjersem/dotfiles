@@ -7,6 +7,9 @@ import errno
 import os
 import sys
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "lib"))
+import output  # noqa: E402
+
 
 ATTRIBUTE = "com.apple.fileprovider.ignore#P"
 _libc = ctypes.CDLL(None, use_errno=True)
@@ -71,13 +74,12 @@ def find_folders(names):
 
 def report(label, folder, detail="", *, error=False):
     stream = sys.stderr if error else sys.stdout
-    status = f"{label:<9}"
-    if stream.isatty() and not os.environ.get("NO_COLOR"):
-        color = {
-            "MARKED": "32", "SET": "32", "ALREADY": "32",
-            "NOT SET": "33", "VALUE": "33", "ERROR": "31",
-        }[label]
-        status = f"\033[0;{color}m{status}\033[0m"
+    kind = {
+        "MARKED": "ok", "SET": "ok", "ALREADY": "ok",
+        "NOT SET": "warn", "VALUE": "warn", "ERROR": "fail",
+    }[label]
+    color, symbol = output.MARKS[kind]
+    status = output.paint(f"{symbol} {label:<9}", color, stream)
     suffix = f"  ({detail})" if detail else ""
     print(f"  {status} {folder}{suffix}", file=stream)
 
