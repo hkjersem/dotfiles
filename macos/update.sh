@@ -1,17 +1,33 @@
 #!/usr/bin/env bash
-# Usage: update.sh [--no-defaults]
-#   --no-defaults  Skip running osxdefaults.sh
+# Update installed software, then audit. Run as dotfiles-update, which passes --no-defaults.
+
+SKIP_DEFAULTS=false
+for arg in "$@"; do
+  case "$arg" in
+    -h|--help)
+      cat <<'EOF'
+Usage: dotfiles-update
+
+Updates macOS and App Store apps, Command Line Tools, Homebrew packages, Node
+and npm globals, Zsh plugins and supported installed CLIs, then runs the audit.
+It does not pull this repository; run git pull in ~/.dotfiles for that.
+
+Options:
+  --no-defaults  Skip applying macOS defaults (osxdefaults.sh); dotfiles-update always passes it
+  -h, --help     Show this help
+EOF
+      exit 0
+      ;;
+    --no-defaults) SKIP_DEFAULTS=true ;;
+    *) echo "Error: unknown option: $arg (see --help)" >&2; exit 2 ;;
+  esac
+done
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/scripts/machine-profile.sh" || exit 1
 ensure_machine_profile || exit 1
 source "$HOME/.dotfiles/scripts/lib/tool-updates.sh" || exit 1
 source "$HOME/.dotfiles/scripts/lib/command-line-tools.sh" || exit 1
 source "$HOME/.dotfiles/scripts/lib/output.sh" || exit 1
-
-SKIP_DEFAULTS=false
-for arg in "$@"; do
-  [[ "$arg" == "--no-defaults" ]] && SKIP_DEFAULTS=true
-done
 
 header() { out_section "$1"; }
 subheader() { out_subsection "$1"; }
@@ -89,5 +105,6 @@ pnpm store prune
 # End script
 echo ""
 echo "Done. Enjoy your updated install."
-header "Audit"
+echo ""
+out_title "Audit"
 bash ~/.dotfiles/scripts/audit.sh

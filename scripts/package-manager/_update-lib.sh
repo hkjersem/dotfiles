@@ -718,14 +718,13 @@ _augment_outdated() {
 
   [[ ${#_aug_pkg[@]} -eq 0 ]] && return 0
 
-  echo -ne "  ${DIM}Checking ${#_aug_pkg[@]} exact-pinned packages...${RESET}\r" >&2
+  out_progress "Checking ${#_aug_pkg[@]} exact-pinned packages…"
   local _aug_tmp; _aug_tmp=$(mktemp -d)
   local i
   for i in "${!_aug_pkg[@]}"; do
     npm view "${_aug_pkg[$i]}" version 2>/dev/null > "$_aug_tmp/$i" &
   done
   wait
-  echo -ne "\033[2K" >&2
   for i in "${!_aug_pkg[@]}"; do
     local pkg="${_aug_pkg[$i]}" pin="${_aug_pin[$i]}" latest pm_target
     latest=$(tr -d '"' < "$_aug_tmp/$i" 2>/dev/null | xargs) || continue
@@ -750,23 +749,26 @@ _augment_outdated() {
 
 # ── Main pipeline ─────────────────────────────────────────────────────────────
 # Call after OUTDATED, ROOT, cooldown vars, and hooks are set.
-run_plan() {
-  # ── Header ─────────────────────────────────────────────────────────────────
-  echo -e "${BOLD}Checking for outdated packages...${RESET}  ${DIM}(${PM_NAME:-pnpm})${RESET}"
-
+# Prints the dry-run line and the context line. Wrappers call it as soon as the
+# cooldown config is known, before the slow outdated check.
+print_header() {
+  $DRY_RUN && out_dry_run
+  local -a header=("${PM_NAME:-pnpm}")
   if [[ -n "$COOLDOWN_MINUTES" ]]; then
     if [[ "$COOLDOWN_MINUTES" -gt 0 ]]; then
-      echo -e "  Cooldown:  $(format_duration "$COOLDOWN_MINUTES") (${COOLDOWN_SOURCE})"
-      if [[ ${#COOLDOWN_EXCLUDE[@]} -gt 0 ]]; then
-        echo -e "  Excluded:  ${DIM}${COOLDOWN_EXCLUDE[*]}${RESET}"
-      fi
+      header+=("Cooldown: $(format_duration "$COOLDOWN_MINUTES") (${COOLDOWN_SOURCE})")
+      [[ ${#COOLDOWN_EXCLUDE[@]} -gt 0 ]] && header+=("Excluded: ${COOLDOWN_EXCLUDE[*]}")
     else
-      echo -e "  Cooldown:  ${DIM}disabled (--cooldown 0)${RESET}"
+      header+=("Cooldown: disabled (--cooldown 0)")
     fi
   fi
+  out_context "${header[@]}"
+}
 
+run_plan() {
   # ── Early exit if nothing outdated ─────────────────────────────────────────
   if [[ "$OUTDATED" == "{}" ]]; then
+    out_progress_done
     echo "  $OUT_OK All packages are up to date."; exit 0
   fi
 
@@ -774,6 +776,7 @@ run_plan() {
   if [[ -n "$FILTER_PKG" ]]; then
     OUTDATED=$(echo "$OUTDATED" | jq --arg pkg "$FILTER_PKG" '{($pkg): .[$pkg]} | with_entries(select(.value != null))')
     if [[ "$OUTDATED" == "{}" ]]; then
+      out_progress_done
       echo "  $OUT_OK ${FILTER_PKG} is up to date."; exit 0
     fi
   fi
@@ -794,19 +797,20 @@ run_plan() {
       _time_pkgs+=("$pkg")
     done < <(echo "$OUTDATED" | jq -r 'keys[]')
     if [[ ${#_time_pkgs[@]} -gt 0 ]]; then
-      echo -ne "  ${DIM}Fetching version history for ${#_time_pkgs[@]} packages...${RESET}\r" >&2
+      out_progress "Fetching version history for ${#_time_pkgs[@]} packages…"
       local _times_tmp; _times_tmp=$(mktemp -d)
       for i in "${!_time_pkgs[@]}"; do
         npm view "${_time_pkgs[$i]}" time --json 2>/dev/null > "$_times_tmp/$i" &
       done
       wait
-      echo -ne "\033[2K" >&2
       for i in "${!_time_pkgs[@]}"; do
         _pkg_times[$i]=$(cat "$_times_tmp/$i" 2>/dev/null || echo "")
       done
       rm -rf "$_times_tmp"
     fi
   fi
+
+  out_progress "Planning updates for $(echo "$OUTDATED" | jq 'length') packages…"
 
   while IFS= read -r pkg; do
     local current; current=$(echo "$OUTDATED" | jq -r ".\"${pkg}\".current" | tr -d '"'"'")
@@ -912,10 +916,9 @@ run_plan() {
     [[ -z "${P_NOTE[$i]}" && -z "${P_NOTE2[$i]}" ]] && C_IDX+=("$i") || N_IDX+=("$i")
   done
 
-  local has_updates=$(( ${#C_IDX[@]} + ${#N_IDX[@]} + ${#R_PKG[@]} ))
-  [[ $has_updates -gt 0 || ${#S_PKG[@]} -gt 0 ]] && printf "\r\033[K"
+  out_progress_done
   _table_header() {
-    printf "  ${BOLD}%-38s  %-14s  %-14s  %s${RESET}\n" "Package" "Current" "Target" "Location"
+    out_table_header "%-38s  %-14s  %-14s  %s" "Package" "Current" "Target" "Location"
   }
 
   if [[ ${#C_IDX[@]} -gt 0 ]]; then
@@ -964,7 +967,7 @@ run_plan() {
     echo "  $OUT_OK Nothing to update."; exit 0
   fi
 
-  $DRY_RUN && { echo "    Dry run — no changes made."; exit 0; }
+  $DRY_RUN && exit 0
 
   # ── Confirm ─────────────────────────────────────────────────────────────────
   confirm_apply "Apply ${#P_PKG[@]} update(s)?" "$AUTO_YES" || exit 0

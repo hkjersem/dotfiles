@@ -230,7 +230,7 @@ class NosyncTests(unittest.TestCase):
     def test_recursive_no_matches_does_not_create_folders(self):
         status, output, errors = self.run_nosync("-r", "build")
         self.assertEqual(status, 0, errors)
-        self.assertEqual(output, "No matching folders found below the current directory\n")
+        self.assertEqual(output, "    No matching folders found below the current directory\n")
         self.assertEqual(list(self.root.iterdir()), [])
         self.assertEqual(self.writes, [])
 

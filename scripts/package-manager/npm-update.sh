@@ -66,6 +66,8 @@ WORKSPACES_FLAG=""
 if jq -e '.workspaces' "$ROOT/package.json" &>/dev/null; then
   WORKSPACES_FLAG="--workspaces"
 fi
+print_header
+out_progress "Checking for outdated packages…"
 OUTDATED=$(npm outdated $WORKSPACES_FLAG --json 2>/dev/null || true)
 [[ -z "$OUTDATED" ]] && OUTDATED="{}"
 

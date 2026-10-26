@@ -26,6 +26,8 @@ fixture = json.loads(Path(os.environ["UPDATE_TEST_FIXTURE"]).read_text())
 if tool == "date" and args == ["+%s"]:
     print(fixture["now"])
 elif args and args[0] == "outdated":
+    if fixture.get("outdated_stderr"):
+        print(fixture["outdated_stderr"], file=sys.stderr)
     if tool == "bun":
         print("| Package | Current | Update | Latest |")
         for package, value in fixture["outdated"].items():
@@ -161,6 +163,31 @@ class PackageUpdateTests(unittest.TestCase):
         self.assertIn("actions/cache 4.2.0 → 5.0.0", result.stdout)
         self.assertEqual((self.project / "package.json").read_bytes(), before)
 
+    def test_actions_diagnostics_print_after_the_progress_line_is_cleared(self):
+        import pty
+        self.actions_fixture()
+        self.fixture["outdated_stderr"] = "ERR_PNPM_FETCH_401 Unauthorized"
+        self.fixture_path.write_text(json.dumps(self.fixture))
+        main, follower = pty.openpty()
+        process = subprocess.Popen(
+            ["/bin/bash", str(REPO / "scripts/package-manager/run.sh"), "--actions", "--dry-run"],
+            cwd=self.project, env=self.env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=follower)
+        os.close(follower)
+        chunks = []
+        while True:
+            try:
+                chunk = os.read(main, 4096)
+            except OSError:
+                break
+            if not chunk:
+                break
+            chunks.append(chunk)
+        os.close(main)
+        self.assertEqual(process.wait(timeout=30), 0)
+        stderr = b"".join(chunks).decode()
+        progress = stderr.index("Checking GitHub Actions…")
+        self.assertIn("\r\033[K", stderr[progress:stderr.index("ERR_PNPM_FETCH_401")])
+
     def test_actions_major_updates_the_named_action_to_latest(self):
         self.actions_fixture()
         result = self.invoke("--actions", "--major", "--yes", "actions/cache")
@@ -213,7 +240,7 @@ class PackageUpdateTests(unittest.TestCase):
                 self.assert_success(result)
                 self.assertIn("@scope/pkg", result.stdout)
                 self.assertIn("1.2.0", result.stdout)
-                self.assertIn("Dry run", result.stdout)
+                self.assertTrue(result.stdout.startswith("Dry run — nothing will be changed."), result.stdout)
                 self.assertEqual((self.project / "package.json").read_bytes(), before)
                 self.assertFalse(any(args == ["install"] for _, args in self.calls()))
 
@@ -285,7 +312,7 @@ class PackageUpdateTests(unittest.TestCase):
                 self.manifest(pm, {"pkg": "^1.0.0"})
                 result = self.invoke("--yes")
                 self.assert_success(result)
-                self.assertIn("── Skipped ", result.stdout)
+                self.assertIn("─ Skipped ", result.stdout)
                 self.assertEqual(self.dependencies(), {"pkg": "^1.0.0"})
                 result = self.invoke("--major", "--yes")
                 self.assert_success(result)

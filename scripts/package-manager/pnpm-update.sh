@@ -106,10 +106,17 @@ _update_actions() {
     echo -e "${RED}Error: --actions requires pnpm 12.7 or newer, which applies the release-age cooldown to actions (found ${version:-none})${RESET}" >&2
     exit 1
   fi
-  echo -e "${BOLD}Checking for outdated GitHub Actions...${RESET}  ${DIM}(pnpm)${RESET}"
+  $DRY_RUN && out_dry_run
+  out_context "pnpm" "GitHub Actions"
 
-  local json rows
-  json=$(pnpm outdated --include-github-actions --json || true)
+  local json rows errors
+  errors=$(mktemp)
+  out_progress "Checking GitHub Actions…"
+  # Hold pnpm's diagnostics until the progress line is cleared, so they don't print onto it.
+  json=$(pnpm outdated --include-github-actions --json 2>"$errors" || true)
+  out_progress_done
+  cat "$errors" >&2
+  rm -f "$errors"
   [[ -z "$json" ]] && json="{}"
   rows=$(printf '%s' "$json" | jq -r --arg major "$ALLOW_MAJOR" --arg only "$FILTER_PKG" '
     if type == "object" then to_entries else [] end
@@ -124,7 +131,7 @@ _update_actions() {
   local name current target latest
   if [[ -n "$rows" ]]; then
     out_section "Actions"
-    printf "  ${BOLD}%-38s  %-14s  %s${RESET}\n" "Action" "Current" "Target"
+    out_table_header "%-38s  %-14s  %s" "Action" "Current" "Target"
   fi
   while IFS=$'\t' read -r name current target latest; do
     [[ -z "$name" ]] && continue
@@ -145,7 +152,7 @@ _update_actions() {
   if [[ ${#names[@]} -eq 0 ]]; then
     echo "  $OUT_OK Nothing to update."; exit 0
   fi
-  $DRY_RUN && { echo "    Dry run — no changes made."; exit 0; }
+  $DRY_RUN && exit 0
   confirm_apply "Apply ${#names[@]} update(s)?" "$AUTO_YES" || exit 0
 
   local -a latest_flag=()
@@ -160,6 +167,8 @@ _update_actions() {
 RECURSIVE_FLAG=""
 [[ -f "$ROOT/pnpm-workspace.yaml" ]] && RECURSIVE_FLAG="--recursive"
 
+print_header
+out_progress "Checking for outdated packages…"
 OUTDATED=$(pnpm outdated $RECURSIVE_FLAG --json 2>/dev/null || true)
 [[ -z "$OUTDATED" ]] && OUTDATED="{}"
 # pnpm 11.28+ keys a package found at several versions or dependency types as

@@ -1319,9 +1319,9 @@ def main(arguments):
         return 0
     if options.cancel:
         if remove_agent():
-            print("Scheduled Codex resume cancelled.")
+            print(f"  {output.mark('ok')} Scheduled Codex resume cancelled.")
         else:
-            print("No Codex resume is scheduled.")
+            output.note("No Codex resume is scheduled.")
         return 0
     if options.scheduled:
         try:

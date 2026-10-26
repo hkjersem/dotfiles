@@ -122,7 +122,7 @@ def main(argv=None):
             print(f"Could not complete recursive folder search: {exc}", file=sys.stderr)
             return 1
         if not folders:
-            print("No matching folders found below the current directory")
+            output.note("No matching folders found below the current directory")
             return 0
         folders.sort()
         if args.sort == "status":

@@ -596,13 +596,7 @@ if [ "$_SKILLS_STANDALONE" -eq 1 ]; then
             echo "  $OUT_OK Skills ok"
         fi
     else
-        out_section "Summary"
-        if [ "$ISSUES" -eq 0 ] && [ "$WARNINGS" -eq 0 ]; then
-            echo "  $OUT_OK All skills linked — no issues found"
-        else
-            [ "$ISSUES" -gt 0 ]   && echo "  $OUT_FAIL $ISSUES issue(s) found"
-            [ "$WARNINGS" -gt 0 ] && echo "  $OUT_WARN $WARNINGS warning(s) found"
-        fi
+        out_summary "$ISSUES" "$WARNINGS" "All skills linked — no issues found"
         echo ""
     fi
 

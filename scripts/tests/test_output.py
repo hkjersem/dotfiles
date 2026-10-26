@@ -17,10 +17,20 @@ MARKS = ("ok", "warn", "fail", "info")
 
 BASH = f"""
 source {str(LIB / "output.sh")!r}
+out_title "Name"
 out_section "Name"
+out_section "Åxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 out_subsection "Sub"
 for mark in "$OUT_OK" "$OUT_WARN" "$OUT_FAIL" "$OUT_INFO"; do printf '  %s text\\n' "$mark"; done
 for color in "$BOLD" "$DIM" "$RED" "$GREEN" "$YELLOW" "$CYAN"; do printf '%s\\n' "${{color}}x${{RESET}}"; done
+out_dry_run "Run x to apply."
+out_dry_run
+out_context "a" "b c"
+out_note "note"
+out_row "$OUT_WARN" "Label" "detail"
+out_table_header "%-6s  %s" "A" "B"
+out_summary 0 0 "All good"
+out_summary 2 1 "All good"
 """
 
 
@@ -45,7 +55,8 @@ class Terminal(io.StringIO):
 
 
 def bash_output(terminal, no_color):
-    env = {**os.environ, "NO_COLOR": no_color}
+    # A byte-counting locale must not change the width of headings with non-ASCII titles.
+    env = {**os.environ, "NO_COLOR": no_color, "LC_ALL": "C"}
     if not terminal:
         return subprocess.run(["/bin/bash", "-c", BASH], env=env, capture_output=True, text=True,
                               check=True).stdout
@@ -76,7 +87,10 @@ def bash_stderr(stderr_is_terminal):
                                    stdout=follower, stderr=subprocess.PIPE)
     os.close(follower)
     on_terminal = read_terminal(main)
-    piped = process.stderr.read().decode() if process.stderr else ""
+    piped = ""
+    if process.stderr:
+        piped = process.stderr.read().decode()
+        process.stderr.close()
     if process.wait() != 0:
         raise AssertionError(f"bash exited with {process.returncode}")
     return on_terminal if stderr_is_terminal else piped
@@ -85,12 +99,22 @@ def bash_stderr(stderr_is_terminal):
 def python_output(terminal, no_color):
     stream = Terminal() if terminal else io.StringIO()
     with patch.dict(os.environ, {"NO_COLOR": no_color}), redirect_stdout(stream):
+        output.title("Name")
         output.section("Name")
+        output.section("Åxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
         output.subsection("Sub")
         for kind in MARKS:
             print(f"  {output.mark(kind)} text")
         for color in COLORS:
             print(output.paint("x", color))
+        output.dry_run("Run x to apply.")
+        output.dry_run()
+        output.context("a", "b c")
+        output.note("note")
+        output.row("warn", "Label", "detail")
+        output.table_header("%-6s  %s", "A", "B")
+        output.summary(0, 0, "All good")
+        output.summary(2, 1, "All good")
     return stream.getvalue()
 
 
@@ -102,19 +126,38 @@ class OutputTests(unittest.TestCase):
 
     def test_plain_output_carries_meaning_without_escape_codes(self):
         self.assertEqual(bash_output(False, ""), "\n".join([
+            # Headings fill 60 characters, so they line up whatever the title length.
+            "━ Name " + "━" * 53,
             "",
-            "── Name ──────────────────────────────────",
+            "─ Name ─────────────────────────────────────────────────────",
+            "",
+            "─ Åxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx ───",
             "",
             "  ▸ Sub",
             "  ✓ text", "  ! text", "  ✗ text", "  • text",
             *["x"] * len(COLORS),
+            "Dry run — nothing will be changed. Run x to apply.",
+            "Dry run — nothing will be changed.",
+            "a │ b c",
+            "    note",
+            "  ! Label                  detail",
+            "  A       B",
+            "",
+            "─ Summary ──────────────────────────────────────────────────",
+            "  ✓ All good",
+            "",
+            "─ Summary ──────────────────────────────────────────────────",
+            "  ✗ 2 issue(s) found",
+            "  ! 1 warning(s) found",
         ]) + "\n")
 
     def test_terminal_output_is_colored(self):
         colored = bash_output(True, "")
-        self.assertIn("\033[1m── Name ", colored)
+        self.assertIn("\033[1m─ Name ", colored)
         self.assertIn("  \033[0;32m✓\033[0m text", colored)
         self.assertIn("  \033[0;31m✗\033[0m text", colored)
+        self.assertIn("\033[1m━ Name ━", colored)
+        self.assertIn("  \033[1mA       B\033[0m\n", colored)
 
     def test_stderr_marks_follow_whether_stderr_is_a_terminal(self):
         self.assertEqual(bash_stderr(False), "! ✗\n")

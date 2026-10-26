@@ -80,7 +80,7 @@ globals_for() {
         | grep -E '├──|└──' | sed 's/.*── //' | sort
 }
 
-# shellcheck source=scripts/lib/output.sh
+# shellcheck source=lib/output.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/output.sh" || exit 1
 
 ga=$(globals_for "$A") || { echo "Error: could not list globals for $A" >&2; exit 1; }
@@ -111,14 +111,14 @@ label_a="$A"; label_b="$B"
 [[ "$A" == "$CURRENT" ]] && label_a="${A} (current)"
 [[ "$B" == "$CURRENT" ]] && label_b="${B} (current)"
 
-printf "%s\n" "${BOLD}npm globals · ${label_a} → ${label_b}${RESET}"
+out_context "${label_a} → ${label_b}"
 
 has_diff=0
 
 if [[ ${#mismatches[@]} -gt 0 ]]; then
     has_diff=1
     out_section "Version differences"
-    printf "  ${BOLD}%-24s  %-22s  %-22s${RESET}\n" "Package" "$label_a" "$label_b"
+    out_table_header "%-24s  %-22s  %-22s" "Package" "$label_a" "$label_b"
     for entry in "${mismatches[@]}"; do
         IFS='|' read -r pkg ver_a ver_b <<< "$entry"
         newer=$(printf '%s\n%s\n' "$ver_a" "$ver_b" | sort -V | tail -1)

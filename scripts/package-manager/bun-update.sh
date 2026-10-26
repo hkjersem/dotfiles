@@ -71,6 +71,8 @@ _pm_install() {
 # ── Fetch outdated packages ───────────────────────────────────────────────────
 # bun outdated uses plain ASCII pipes; format: | Package | Current | Update | Latest |
 # Separator rows (|------|) are excluded by checking that cur starts with a digit.
+print_header
+out_progress "Checking for outdated packages…"
 _bun_raw=$(bun outdated 2>/dev/null || true)
 # shellcheck disable=SC2034  # read by _update-lib.sh
 OUTDATED=$(echo "$_bun_raw" | awk -F'|' '

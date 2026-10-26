@@ -109,6 +109,33 @@ class CommandHelpTests(unittest.TestCase):
                     self.assertIn("Usage: wipe", result.stderr)
                     self.assertEqual(sandbox.files(), before)
 
+    def test_dotfiles_update_shows_help_or_rejects_unknown_options_without_updating(self):
+        with tempfile.TemporaryDirectory() as root:
+            sandbox = Sandbox(root)
+            for tool in ("softwareupdate", "mas", "brew"):
+                path = sandbox.root / "bin" / tool
+                path.write_text(f'#!/bin/sh\necho "{tool} $*" >> "{sandbox.calls}"\nexit 1\n')
+                path.chmod(0o755)
+
+            def run(*args):
+                return subprocess.run(
+                    ["/bin/bash", "-c", 'shopt -s expand_aliases\nsource "$HOME/.aliases"\ndotfiles-update "$@"',
+                     "dotfiles-update", *args],
+                    cwd=sandbox.project, env=sandbox.env, capture_output=True, text=True,
+                    stdin=subprocess.DEVNULL, timeout=30,
+                )
+
+            for flag in ("--help", "-h"):
+                with self.subTest(flag=flag):
+                    result = run(flag)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertRegex(result.stdout, r"^Usage: dotfiles-update")
+            result = run("--nodefaults")
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("unknown option: --nodefaults", result.stderr)
+            self.assertEqual(sandbox.tool_calls(), "")
+            self.assertFalse((sandbox.home / ".config" / "dotfiles" / "profile").exists())
+
     def test_wipe_deletes_matching_folders_outside_node_modules(self):
         with tempfile.TemporaryDirectory() as root:
             sandbox = Sandbox(root)

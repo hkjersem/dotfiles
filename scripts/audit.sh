@@ -501,13 +501,7 @@ source "$DOTFILES/scripts/audit-skills.sh"
 # ──────────────────────────────────────────────────────
 # SUMMARY
 # ──────────────────────────────────────────────────────
-out_section "Summary"
-if [ "$ISSUES" -eq 0 ] && [ "$WARNINGS" -eq 0 ]; then
-    echo "  $OUT_OK All good — no issues found"
-else
-    [ "$ISSUES" -gt 0 ]   && echo "  $OUT_FAIL $ISSUES issue(s) found"
-    [ "$WARNINGS" -gt 0 ] && echo "  $OUT_WARN $WARNINGS warning(s) found"
-fi
+out_summary "$ISSUES" "$WARNINGS" "All good — no issues found"
 echo ""
 
 [ "$ISSUES" -gt 0 ] && exit 1

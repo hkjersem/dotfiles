@@ -102,7 +102,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 seen.add(os.path.realpath(root))
                 roots.append(root)
 
-    print(output.paint(f"Roadmaps, {today.isoformat()}", "bold"))
+    output.context(today.isoformat())
     quiet: List[str] = []
     failed = False
     for root in roots:
@@ -143,7 +143,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     if quiet:
         print(f"\n  {output.mark('ok')} Nothing needs attention: " + ", ".join(quiet))
     if not roots:
-        print("\n    No roadmaps found.")
+        print()
+        output.note("No roadmaps found.")
     if notes or problems:
         print()
     for note in notes:

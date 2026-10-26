@@ -248,18 +248,11 @@ fi
 
 # ── Header ────────────────────────────────────────────────────────────────────
 
-echo ""
-echo "${BOLD}audit-repo · ${REPO_NAME}${RESET}"
-if $HAS_PACKAGE_JSON; then
-  HEADER_META="Package manager: ${PM}"
-  [[ -n "$WORKSPACE_INFO" ]] && HEADER_META+=" │ ${WORKSPACE_INFO}"
-  HEADER_META+=" │ Lookback: ${SINCE}"
-  echo "  ${DIM}${HEADER_META}${RESET}"
-else
-  HEADER_META="Lookback: ${SINCE}"
-  [[ -n "$WORKSPACE_INFO" ]] && HEADER_META="${WORKSPACE_INFO} │ ${HEADER_META}"
-  echo "  ${DIM}${HEADER_META}${RESET}"
-fi
+HEADER_META=("$REPO_NAME")
+$HAS_PACKAGE_JSON && HEADER_META+=("Package manager: ${PM}")
+[[ -n "$WORKSPACE_INFO" ]] && HEADER_META+=("$WORKSPACE_INFO")
+HEADER_META+=("Lookback: ${SINCE}")
+out_context "${HEADER_META[@]}"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 1. GIT SIGNALS
@@ -483,8 +476,10 @@ elif [[ ${#LOCKFILES[@]} -eq 0 ]]; then
 elif [[ "$PM" != "npm" && "$PM" != "pnpm" ]]; then
   warn "Structured ${PM} auditing is not implemented here — run '${PM} audit' manually"
 else
+  out_progress "Running $PM audit…"
   AUDIT_OUTPUT=$("$PM" audit --json 2>"$AUDIT_TMP/stderr")
   AUDIT_STATUS=$?
+  out_progress_done
   AUDIT_COUNTS=$(printf '%s\n' "$AUDIT_OUTPUT" | jq -er '
     select(has("error") | not) | .metadata.vulnerabilities | select(type == "object")
     | [.critical, .high, .moderate, .low]
@@ -599,8 +594,10 @@ fi
 if [[ "$PM" != "npm" && "$PM" != "pnpm" ]]; then
   info "Structured ${PM} outdated checks are not implemented here"
 else
+  out_progress "Running $PM outdated…"
   OUTDATED_OUTPUT=$("$PM" outdated --json 2>"$AUDIT_TMP/stderr")
   OUTDATED_STATUS=$?
+  out_progress_done
   OUTDATED_COUNT=$(printf '%s\n' "$OUTDATED_OUTPUT" | jq -er '
     select(type == "object" and (has("error") | not))
     | select(all(.[]; type == "object" and (.latest | type == "string")))
@@ -1137,11 +1134,8 @@ else
   VERDICT="${SIGNAL_STR}"
 fi
 
-out_section "Summary"
-[[ "$ISSUES"   -gt 0 ]] && echo "  $OUT_FAIL ${ISSUES} issue(s)"
-[[ "$WARNINGS" -gt 0 ]] && echo "  $OUT_WARN ${WARNINGS} warning(s)"
-[[ "$ISSUES" -eq 0 && "$WARNINGS" -eq 0 ]] && echo "  $OUT_OK No issues or warnings"
-echo "    ${BOLD}${VERDICT}${RESET}"
+out_summary "$ISSUES" "$WARNINGS" "No issues or warnings"
+out_note "${BOLD}${VERDICT}${RESET}"
 echo ""
 
 [[ "$ISSUES" -gt 0 ]] && exit 1

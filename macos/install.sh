@@ -5,6 +5,7 @@
 DOTFILES="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$DOTFILES/scripts/machine-profile.sh" || exit 1
 ensure_machine_profile || exit 1
+source "$DOTFILES/scripts/lib/output.sh" || exit 1
 
 SKIP_DEFAULTS=false
 for arg in "$@"; do
@@ -17,5 +18,6 @@ source "${DOTFILES}/macos/applications.sh"
 
 # End script
 echo "Done. Enjoy your fresh install."
-
+echo ""
+out_title "Audit"
 bash "${DOTFILES}/scripts/audit.sh"

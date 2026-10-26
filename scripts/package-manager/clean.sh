@@ -52,6 +52,10 @@ case "$pm" in
 esac
 cd "$ROOT"
 
+$DRY_RUN && out_dry_run
+out_context "$pm"
+out_progress "Scanning manifests…"
+
 declare -a pkgjsons=()
 while IFS= read -r pkgjson; do pkgjsons+=("$pkgjson"); done < <(_collect_workspace_pkgjsons)
 
@@ -210,7 +214,7 @@ for ((i = 0; i < ${#CLEAN_SECTIONS[@]}; i++)); do
   done <<< "${CLEAN_SECTIONS[$i]}"
 done
 
-echo -e "${BOLD}Checking cleanup opportunities...${RESET}  ${DIM}(${pm})${RESET}"
+out_progress_done
 
 if [[ ${#UNUSED_CATALOG_PKGS[@]} -gt 0 ]]; then
   out_section "Unused pnpm catalog entries"
@@ -252,7 +256,7 @@ if [[ $cleanup_count -eq 0 ]]; then
   exit 0
 fi
 
-$DRY_RUN && { echo "    Dry run — no changes made."; exit 0; }
+$DRY_RUN && exit 0
 
 confirm_apply "Apply ${cleanup_count} cleanup(s)?" "$AUTO_YES" || exit 0
 

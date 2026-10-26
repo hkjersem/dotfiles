@@ -77,7 +77,7 @@ class PruneBranchesTests(unittest.TestCase):
         dry = self.run_prune()
         self.assertEqual(dry.returncode, 0, dry.stderr)
         self.assertIn("already in origin/main", dry.stdout)
-        self.assertIn("Dry run", dry.stdout)
+        self.assertTrue(dry.stdout.startswith("Dry run — nothing will be changed. Run prune_branches --apply"), dry.stdout)
         self.assertIn("merged", self.branches())
 
         applied = self.run_prune("--apply", "--yes")
@@ -414,7 +414,7 @@ class PruneBranchesTests(unittest.TestCase):
         result = self.run_prune("--apply", "--yes")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("merged into origin/main, but origin/merged-kept still exists", result.stdout)
-        self.assertNotIn("open", result.stdout.split("── Summary")[0])
+        self.assertNotIn("open", result.stdout.split("─ Summary")[0])
         self.assertRegex(result.stdout, r"Checked +3 local branch\(es\) in 1 repository")
         self.assertNotIn("To delete", result.stdout)
         self.assertEqual(self.branches(), {"main", "merged-kept", "open"})

@@ -135,9 +135,18 @@ else
 fi
 
 if [[ ${#REPOS[@]} -eq 0 ]]; then
-  echo "No Git repositories found in $(sb_short_path "$TARGET")."
+  out_note "No Git repositories found in $(sb_short_path "$TARGET")."
   exit 0
 fi
+
+if ! $APPLY; then
+  apply_cmd="prune_branches --apply"
+  [[ "$SB_INCLUDE_MERGED" == true ]] && apply_cmd+=" --include-merged"
+  out_dry_run "Run ${BOLD}${apply_cmd}${RESET} to delete."
+fi
+context=("$(sb_short_path "$TARGET")" "${#REPOS[@]} repositor$( [[ ${#REPOS[@]} -eq 1 ]] && echo y || echo ies)")
+$FETCH || context+=("No fetch: using remote-tracking refs from the last fetch")
+out_context "${context[@]}"
 
 repo_name() {
   if [[ "$(basename "$1")" == .git ]]; then sb_short_path "$(dirname "$1")"; else sb_short_path "$1"; fi
@@ -163,8 +172,7 @@ for i in "${!REPOS[@]}"; do
 done
 
 if $FETCH; then
-  [[ -t 2 ]] && printf '%sFetching remotes for %d repositor%s…%s\n' "$DIM" "${#REPOS[@]}" \
-    "$( [[ ${#REPOS[@]} -eq 1 ]] && echo y || echo ies)" "$RESET" >&2
+  out_progress "Fetching remotes for ${#REPOS[@]} repositor$( [[ ${#REPOS[@]} -eq 1 ]] && echo y || echo ies)…"
   running=0
   for i in "${!REPOS[@]}"; do
     [[ "${STATUS[$i]}" == ok ]] || continue
@@ -173,6 +181,7 @@ if $FETCH; then
     if [[ "$running" -ge "$JOBS" ]]; then wait; running=0; fi
   done
   wait
+  out_progress_done
 fi
 
 for i in "${!REPOS[@]}"; do
@@ -203,14 +212,6 @@ print_kind() {
 
 count_kind() { awk -F "$SB_SEP" -v k="$2" '$1 == k { n++ } END { print n + 0 }' "$1"; }
 
-mode="dry run"
-$APPLY && mode="apply"
-$FETCH || mode="dry run, no fetch"
-echo ""
-echo "${BOLD}╔══════════════════════════════════════════╗${RESET}"
-printf '%s║  prune_branches: %-24s║%s\n' "$BOLD" "$mode" "$RESET"
-echo "${BOLD}╚══════════════════════════════════════════╝${RESET}"
-echo "  ${DIM}$(sb_short_path "$TARGET") │ ${#REPOS[@]} repositor$( [[ ${#REPOS[@]} -eq 1 ]] && echo y || echo ies)${RESET}"
 
 for i in "${!REPOS[@]}"; do
   name=$(repo_name "${REPOS[$i]}")
@@ -231,7 +232,7 @@ for i in "${!REPOS[@]}"; do
     echo "  $OUT_FAIL Fetch failed for: ${failed% } — branches tracking it were left alone"
     [[ -s "$TMP/$i.errors" ]] && sed -n '1,2s/^/    /p' "$TMP/$i.errors"
   fi
-  print_kind "$plan" delete "${RED}✂${RESET}"
+  print_kind "$plan" delete "${RED}−${RESET}"
   print_kind "$plan" blocked "$OUT_WARN"
   print_kind "$plan" review "$OUT_WARN"
   print_kind "$plan" unverified "$OUT_WARN"
@@ -244,29 +245,26 @@ for i in "${!REPOS[@]}"; do
   N_HINT=$((N_HINT + $(count_kind "$plan" hint)))
 done
 
-summary_row() { printf '  %s %-22s %s\n' "$1" "$2" "$3"; }
-
 out_section "Summary"
 N_WITH_REMOTE=$(( ${#REPOS[@]} - ${#NO_REMOTE[@]} ))
-summary_row "$OUT_INFO" "Checked" "$N_CHECKED local branch(es) in $N_WITH_REMOTE repositor$( [[ "$N_WITH_REMOTE" -eq 1 ]] && echo y || echo ies) with a remote"
+out_row "$OUT_INFO" "Checked" "$N_CHECKED local branch(es) in $N_WITH_REMOTE repositor$( [[ "$N_WITH_REMOTE" -eq 1 ]] && echo y || echo ies) with a remote"
 if [[ "$N_DELETE" -gt 0 ]]; then
   detail="$N_DELETE branch(es)"
   [[ "$N_DELETE_WT" -gt 0 ]] && detail+=", $N_DELETE_WT with a worktree"
-  summary_row "${RED}✂${RESET}" "To delete" "$detail"
+  out_row "${RED}−${RESET}" "To delete" "$detail"
 fi
-[[ "$N_BLOCKED" -gt 0 ]] && summary_row "$OUT_WARN" "Blocked by worktree" "$N_BLOCKED (uncommitted changes, ignored local files, locked, or checked out)"
-[[ "$N_REVIEW" -gt 0 ]] && summary_row "$OUT_WARN" "Needs review" "$N_REVIEW (upstream gone, but commits not confirmed on a remote)"
-[[ "$N_UNVERIFIED" -gt 0 ]] && summary_row "$OUT_WARN" "Unverified" "$N_UNVERIFIED (remote could not be fetched)"
-[[ "$N_HINT" -gt 0 ]] && summary_row "$OUT_INFO" "Kept, looks stale" "$N_HINT (merged or old, but not prunable; see above)"
-[[ "$N_CLEAN" -gt 0 ]] && summary_row "$OUT_OK" "Nothing to report" "$N_CLEAN repositor$( [[ "$N_CLEAN" -eq 1 ]] && echo y || echo ies)"
+[[ "$N_BLOCKED" -gt 0 ]] && out_row "$OUT_WARN" "Blocked by worktree" "$N_BLOCKED (uncommitted changes, ignored local files, locked, or checked out)"
+[[ "$N_REVIEW" -gt 0 ]] && out_row "$OUT_WARN" "Needs review" "$N_REVIEW (upstream gone, but commits not confirmed on a remote)"
+[[ "$N_UNVERIFIED" -gt 0 ]] && out_row "$OUT_WARN" "Unverified" "$N_UNVERIFIED (remote could not be fetched)"
+[[ "$N_HINT" -gt 0 ]] && out_row "$OUT_INFO" "Kept, looks stale" "$N_HINT (merged or old, but not prunable; see above)"
+[[ "$N_CLEAN" -gt 0 ]] && out_row "$OUT_OK" "Nothing to report" "$N_CLEAN repositor$( [[ "$N_CLEAN" -eq 1 ]] && echo y || echo ies)"
 if [[ ${#NO_REMOTE[@]} -gt 0 ]]; then
   list="${NO_REMOTE[0]}"
   for ((j = 1; j < ${#NO_REMOTE[@]} && j < 5; j++)); do list+=", ${NO_REMOTE[$j]}"; done
   [[ ${#NO_REMOTE[@]} -gt 5 ]] && list+=" (+$((${#NO_REMOTE[@]} - 5)) more)"
-  summary_row "${DIM}–${RESET}" "No remote (skipped)" "${#NO_REMOTE[@]}: $list"
+  out_row "${DIM}–${RESET}" "No remote (skipped)" "${#NO_REMOTE[@]}: $list"
 fi
-[[ "$N_FETCH_FAILED" -gt 0 ]] && summary_row "$OUT_FAIL" "Fetch failed" "$N_FETCH_FAILED repositor$( [[ "$N_FETCH_FAILED" -eq 1 ]] && echo y || echo ies)"
-$FETCH || echo "  ${DIM}Based on remote-tracking refs from the last fetch.${RESET}"
+[[ "$N_FETCH_FAILED" -gt 0 ]] && out_row "$OUT_FAIL" "Fetch failed" "$N_FETCH_FAILED repositor$( [[ "$N_FETCH_FAILED" -eq 1 ]] && echo y || echo ies)"
 
 STATUS_CODE=0
 [[ "$N_FETCH_FAILED" -gt 0 ]] && STATUS_CODE=1
@@ -274,19 +272,13 @@ STATUS_CODE=0
 if [[ "$N_DELETE" -eq 0 ]]; then
   echo ""
   if [[ "$SB_INCLUDE_MERGED" == true ]]; then
-    echo "Nothing to delete."
+    out_note "Nothing to delete."
   else
-    echo "Nothing to delete. ${DIM}Only branches whose remote branch was deleted are pruned, unless --include-merged is given.${RESET}"
+    out_note "Nothing to delete. ${DIM}Only branches whose remote branch was deleted are pruned, unless --include-merged is given.${RESET}"
   fi
   exit "$STATUS_CODE"
 fi
-if ! $APPLY; then
-  echo ""
-  apply_cmd="prune_branches --apply"
-  [[ "$SB_INCLUDE_MERGED" == true ]] && apply_cmd+=" --include-merged"
-  echo "Dry run — nothing was changed. Run ${BOLD}${apply_cmd}${RESET} to delete."
-  exit "$STATUS_CODE"
-fi
+$APPLY || exit "$STATUS_CODE"
 
 # ── Apply ─────────────────────────────────────────────────────────────────────
 
@@ -314,9 +306,11 @@ for i in "${!REPOS[@]}"; do
 done
 
 echo ""
-echo "Deleted $DELETED branch(es), removed $REMOVED_WT worktree(s), $FAILED failed."
+done_mark=$OUT_OK
+[[ "$FAILED" -gt 0 ]] && done_mark=$OUT_FAIL
+echo "  $done_mark Deleted $DELETED branch(es), removed $REMOVED_WT worktree(s), $FAILED failed."
 if [[ "$DELETED" -gt 0 ]]; then
-  echo "${DIM}Restore a branch with: git branch <name> <commit> (each repository logs them in .git/prune-branches.log)${RESET}"
+  out_note "${DIM}Restore a branch with: git branch <name> <commit> (each repository logs them in .git/prune-branches.log)${RESET}"
 fi
 [[ "$FAILED" -gt 0 ]] && STATUS_CODE=1
 exit "$STATUS_CODE"

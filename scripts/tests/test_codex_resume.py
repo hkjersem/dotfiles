@@ -385,10 +385,10 @@ class CodexResumeTests(unittest.TestCase):
                 "Codex resume scheduled for 16.10.2026 kl. 16.30 in the latest chat on this Mac "
                 "with message: Resume now",
                 "",
-                "── Recurring check ──────────────────────────────────",
+                "─ Recurring check ──────────────────────────────────────────",
                 "  Not set up. Start it with --recurring <minutes>.",
                 "",
-                "── Scheduled resume ──────────────────────────────────",
+                "─ Scheduled resume ─────────────────────────────────────────",
                 "  At          16.10.2026 kl. 16.30",
                 "  Chat        latest chat on this Mac",
                 "  Message     Resume now",
@@ -805,7 +805,7 @@ class CodexResumeTests(unittest.TestCase):
         width = len(room)
         self.assertEqual(output.getvalue().splitlines(), [
             "",
-            "── Chats stopped by a usage limit (5) ──────────────────────────────────",
+            "─ Chats stopped by a usage limit (5) ───────────────────────",
             f"  {'Stopped':<{width}}  {'Continues':<{width}}  Chat",
             f"  {t['a']}  {'next check':<{width}}  'a'",
             f"  {t['b']}  {'next check':<{width}}  'b'",
@@ -1074,17 +1074,17 @@ class CodexResumeTests(unittest.TestCase):
             self.assertEqual(lines[1:], ["Recurring check stopped.", "No recurring check is set up."])
             recurring = [
                 "",
-                "── Recurring check ──────────────────────────────────",
+                "─ Recurring check ──────────────────────────────────────────",
                 "  Every       15 minutes",
                 "  Sends       continue to up to 3 stopped chats per 5 hours, newest first, once the usage "
                 "limits allow",
             ]
-            not_scheduled = ["", "── Scheduled resume ──────────────────────────────────", "  None."]
+            not_scheduled = ["", "─ Scheduled resume ─────────────────────────────────────────", "  None."]
             self.assertEqual(recurring_status.getvalue().splitlines(), [
                 *recurring,
                 f"  Last check  {shown('2026-10-21T10:00:00+02:00')}",
                 "",
-                "── Chats stopped by a usage limit (0) ──────────────────────────────────",
+                "─ Chats stopped by a usage limit (0) ───────────────────────",
                 "  None.",
                 *not_scheduled,
                 *recurring,
@@ -1478,7 +1478,7 @@ class CodexResumeTests(unittest.TestCase):
                 arguments = plistlib.load(agent_file)["ProgramArguments"]
         self.assertEqual(arguments[4:-2], ["--chat", "01a1-mine", "--every", "30", "--used-up", "300"])
         lines = output.getvalue().splitlines()
-        self.assertRegex(lines[lines.index("── Recurring check ──────────────────────────────────") - 2], r"^Codex resume scheduled for \S+ kl\. \S+, or earlier if the limit resets "
+        self.assertRegex(lines[lines.index("─ Recurring check ──────────────────────────────────────────") - 2], r"^Codex resume scheduled for \S+ kl\. \S+, or earlier if the limit resets "
                                    r"first \(checked every 30 minutes\) in chat 'Find current project status'\.$")
         self.assertRegex(lines[-3], r"^  At          \S+ kl\. \S+, or earlier if the limit resets first "
                                     r"\(checked every 30 minutes\)$")
@@ -1688,10 +1688,10 @@ class CodexResumeTests(unittest.TestCase):
             "Codex resume scheduled for 20.10.2026 kl. 00.00 in the latest chat on this Mac, "
             "only if no 5-hour window is running.",
             "",
-            "── Recurring check ──────────────────────────────────",
+            "─ Recurring check ──────────────────────────────────────────",
             "  Not set up. Start it with --recurring <minutes>.",
             "",
-            "── Scheduled resume ──────────────────────────────────",
+            "─ Scheduled resume ─────────────────────────────────────────",
             "  At          20.10.2026 kl. 00.00",
             "  Chat        latest chat on this Mac",
             "  Message     continue (not sent if Codex is already replying)",
