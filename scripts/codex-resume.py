@@ -1540,3 +1540,6 @@ if __name__ == "__main__":
     except (OSError, RuntimeError, ValueError) as error:
         print(f"codex-resume: {error}", file=sys.stderr)
         sys.exit(1)
+    except KeyboardInterrupt:
+        print("\nInterrupted.", file=sys.stderr)
+        sys.exit(130)
