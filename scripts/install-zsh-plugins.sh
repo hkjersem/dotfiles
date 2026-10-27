@@ -14,11 +14,5 @@ clone_or_pull() {
 
 [ -d ~/.oh-my-zsh ] || git clone https://github.com/robbyrussell/oh-my-zsh.git ~/.oh-my-zsh
 
-clone_or_pull https://github.com/zsh-users/zsh-syntax-highlighting.git \
-  ~/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting
-
-clone_or_pull https://github.com/zsh-users/zsh-autosuggestions.git \
-  ~/.oh-my-zsh/custom/plugins/zsh-autosuggestions
-
 clone_or_pull https://github.com/Aloxaf/fzf-tab.git \
   ~/.oh-my-zsh/custom/plugins/fzf-tab

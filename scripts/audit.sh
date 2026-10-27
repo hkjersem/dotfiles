@@ -209,7 +209,11 @@ else
     while IFS= read -r plugin; do
         [[ -z "$plugin" ]] && continue
         if echo "$BUILTIN_PLUGINS" | grep -qx "$plugin"; then
-            ok "$plugin (built-in)"
+            if [ -d "$HOME/.oh-my-zsh/custom/plugins/$plugin" ]; then
+                warn "$plugin (a copy in ~/.oh-my-zsh/custom/plugins overrides the built-in one)"
+            else
+                ok "$plugin (built-in)"
+            fi
         elif [ -d "$HOME/.oh-my-zsh/custom/plugins/$plugin" ]; then
             ok "$plugin (custom)"
         else

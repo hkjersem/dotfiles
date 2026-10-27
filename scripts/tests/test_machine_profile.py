@@ -520,6 +520,19 @@ class MachineProfileTests(unittest.TestCase):
         self.assertNotIn("python (in Brewfile but not installed)", section)
         self.assertNotIn("python@3.15 (installed but not in Brewfile)", section)
 
+    def test_audit_warns_when_a_custom_plugin_overrides_a_built_in_one(self):
+        omz = self.home / ".oh-my-zsh"
+        (omz / "plugins/zsh-autosuggestions").mkdir(parents=True)
+        for override, expected in ((False, "✓ zsh-autosuggestions (built-in)"),
+                                   (True, "! zsh-autosuggestions (a copy in ~/.oh-my-zsh/custom/plugins "
+                                          "overrides the built-in one)")):
+            with self.subTest(override=override):
+                if override:
+                    (omz / "custom/plugins/zsh-autosuggestions").mkdir(parents=True)
+                result = self.run_script("scripts/audit.sh")
+                section = result.stdout.split("Oh-my-zsh Plugins", 1)[1].split("\n─", 1)[0]
+                self.assertIn(expected, section)
+
     def test_audit_only_shows_profile_when_expected_tools_are_present(self):
         for profile in ("personal", "work"):
             with self.subTest(profile=profile):

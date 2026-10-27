@@ -143,20 +143,22 @@ class MaintenanceSetupTests(unittest.TestCase):
         self.install_mock("git")
         result = self.run_script("install-zsh-plugins.sh")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(len(self.calls()), 4)
+        self.assertEqual([args[1] for _, args in self.calls()], [
+            "https://github.com/robbyrussell/oh-my-zsh.git", "https://github.com/Aloxaf/fzf-tab.git",
+        ])
         self.assertTrue(all(args[0] == "clone" for _, args in self.calls()))
         result = self.run_script("install-zsh-plugins.sh")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(len(self.calls()), 3)
+        self.assertEqual(len(self.calls()), 1)
         self.assertTrue(all(args[0] == "-C" and args[-1] == "pull" for _, args in self.calls()))
 
     def test_plugin_failure_stops_before_later_clones(self):
         self.install_mock("git")
         omz = self.home / ".oh-my-zsh"
-        plugin = omz / "custom/plugins/zsh-syntax-highlighting"
+        plugin = omz / "custom/plugins/fzf-tab"
         for command in (
             "git clone https://github.com/robbyrussell/oh-my-zsh.git " + str(omz),
-            "git clone https://github.com/zsh-users/zsh-syntax-highlighting.git " + str(plugin),
+            "git clone https://github.com/Aloxaf/fzf-tab.git " + str(plugin),
             "git -C " + str(plugin) + " pull",
         ):
             with self.subTest(command=command):
