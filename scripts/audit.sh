@@ -3,6 +3,22 @@
 # Dotfiles audit script — read-only drift detection.
 # Compares what the repo declares against what's actually installed on this machine.
 
+for arg in "$@"; do
+    case "$arg" in
+        -h|--help)
+            cat <<'EOF'
+Usage: dotfiles-audit
+
+Check for drift between repository declarations and installed state.
+
+  -h, --help  Show this help
+EOF
+            exit 0
+            ;;
+        *) echo "Error: unknown option: $arg (see --help)" >&2; exit 2 ;;
+    esac
+done
+
 DOTFILES="$HOME/.dotfiles"
 source "$DOTFILES/scripts/machine-profile.sh" || exit 1
 source "$DOTFILES/scripts/lib/command-line-tools.sh" || exit 1

@@ -14,9 +14,12 @@ REPO = Path(__file__).resolve().parents[2]
 ALIASES = REPO / "bash" / "aliases"
 COMPLETIONS = REPO / "zsh" / "conf.d" / "completions.zsh"
 FLAG_HIGHLIGHT = REPO / "zsh" / "conf.d" / "flag-highlight.zsh"
-SCRIPT_FUNCTION = re.compile(r'^([\w-]+)\(\) \{ (?:bash|python3) "\$HOME/\.dotfiles/scripts/[^"]+" "\$@"; \}$', re.M)
+SCRIPT_FUNCTION = re.compile(
+    r'^([\w-]+)\(\) \{ (?:bash|python3) "\$HOME/\.dotfiles/(?:scripts|macos)/[^"]+"'
+    r'(?: --[\w-]+)* "\$@"; \}$', re.M)
 # Tools a help request must never run.
-TOOLS = ("bun", "corepack", "fnm", "git", "node", "npm", "npx", "pnpm")
+TOOLS = ("bun", "corepack", "fnm", "git", "node", "npm", "npx", "pnpm",
+         "softwareupdate", "mas", "brew", "sudo", "osascript", "defaults")
 
 
 def script_commands():
@@ -64,6 +67,10 @@ class Sandbox:
 class CommandHelpTests(unittest.TestCase):
     def test_every_script_command_is_completed(self):
         self.assertGreater(len(script_commands()), 10)
+        self.assertTrue({
+            "dotfiles-update", "dotfiles-install", "dotfiles-defaults",
+            "dotfiles-audit", "dotfiles-profile",
+        }.issubset(script_commands()))
         self.assertEqual(completed_commands(), script_commands())
 
     def test_help_prints_usage_without_running_tools_or_changing_files(self):
@@ -112,10 +119,6 @@ class CommandHelpTests(unittest.TestCase):
     def test_dotfiles_update_shows_help_or_rejects_unknown_options_without_updating(self):
         with tempfile.TemporaryDirectory() as root:
             sandbox = Sandbox(root)
-            for tool in ("softwareupdate", "mas", "brew"):
-                path = sandbox.root / "bin" / tool
-                path.write_text(f'#!/bin/sh\necho "{tool} $*" >> "{sandbox.calls}"\nexit 1\n')
-                path.chmod(0o755)
 
             def run(*args):
                 return subprocess.run(
@@ -147,6 +150,34 @@ class CommandHelpTests(unittest.TestCase):
             self.assertEqual(sandbox.files(), [
                 "app", "node_modules", "node_modules/build", "node_modules/left", "notes.txt"])
 
+    def test_dotfiles_install_runs_setup_in_order_and_stops_on_failure(self):
+        with tempfile.TemporaryDirectory() as root:
+            sandbox = Sandbox(root)
+            expected = [
+                f"{sandbox.home}/.dotfiles/scripts/machine-profile.sh",
+                f"{sandbox.home}/.dotfiles/install --no-audit",
+                f"{sandbox.home}/.dotfiles/macos/install.sh --no-defaults",
+            ]
+            mock = sandbox.root / "bin" / "bash"
+            mock.write_text(
+                '#!/bin/sh\nprintf "%s\\n" "$*" >> "$INSTALL_CALLS"\n'
+                '[ "$*" != "$INSTALL_FAIL" ] || exit 7\n'
+            )
+            mock.chmod(0o755)
+            for failure in ("", *expected):
+                with self.subTest(failure=failure):
+                    if sandbox.calls.exists():
+                        sandbox.calls.unlink()
+                    result = subprocess.run(
+                        ["/bin/bash", str(REPO / "scripts/dotfiles-install.sh")],
+                        cwd=sandbox.project,
+                        env={**sandbox.env, "INSTALL_CALLS": str(sandbox.calls), "INSTALL_FAIL": failure},
+                        capture_output=True, text=True, timeout=30,
+                    )
+                    self.assertEqual(result.returncode, 7 if failure else 0, result.stderr)
+                    count = expected.index(failure) + 1 if failure else len(expected)
+                    self.assertEqual(sandbox.tool_calls().splitlines(), expected[:count])
+
 
 @unittest.skipUnless(shutil.which("zsh"), "zsh is not installed")
 class CompletionTests(unittest.TestCase):
@@ -172,8 +203,10 @@ bindkey '^X' finish
     DRIVER = r"""
 zmodload zsh/zpty
 zpty z zsh -i
+suffix=$1
+shift
 for command in "$@"; do
-  zpty -w -n z "$command --"$'\t\x18'
+  zpty -w -n z "$command$suffix"$'\t\x18'
   print -r -- "CMD:$command"
   while zpty -r z line; do
     [[ $line == *'<END>'* ]] && break
@@ -183,8 +216,8 @@ done
 zpty -d z
 """
 
-    def complete(self, commands):
-        """Return the flags zsh offers after `<command> --` for each command."""
+    def complete(self, commands, suffix=" --"):
+        """Return the completions zsh offers after each command and suffix."""
         with tempfile.TemporaryDirectory() as root:
             sandbox = Sandbox(root)
             zdotdir = sandbox.root / "zdotdir"
@@ -194,7 +227,7 @@ zpty -d z
             driver = sandbox.root / "driver.zsh"
             driver.write_text(self.DRIVER)
             result = subprocess.run(
-                ["zsh", "-f", str(driver), *commands], cwd=sandbox.project,
+                ["zsh", "-f", str(driver), suffix, *commands], cwd=sandbox.project,
                 env={**sandbox.env, "ZDOTDIR": str(zdotdir)}, capture_output=True, text=True, timeout=120,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -207,12 +240,28 @@ zpty -d z
                 current.add(line.split("HIT:", 1)[1].strip())
         return offered
 
+    def test_profile_names_are_completed_only_for_the_first_argument(self):
+        for suffix, expected in (
+            (" ", {"personal", "work"}),
+            (" p", {"personal"}),
+            (" w", {"work"}),
+            (" personal ", set()),
+        ):
+            with self.subTest(suffix=suffix):
+                offered = self.complete(["dotfiles-profile"], suffix)["dotfiles-profile"]
+                self.assertEqual(offered & {"personal", "work"}, expected)
+
     def test_flags_are_completed_from_help(self):
         offered = self.complete(script_commands())
         self.assertEqual(
             offered["pmu"], {"--dry-run", "--yes", "--force", "--major", "--cooldown", "--actions", "--help"})
         self.assertEqual(offered["wipe"], {"--file", "--dir", "--help"})
         self.assertEqual(offered["pml"], {"--undo", "--help"})
+        self.assertEqual(offered["dotfiles-update"], {"--skip-os-updates", "--no-defaults", "--help"})
+        self.assertEqual(offered["dotfiles-install"], {"--no-defaults", "--help"})
+        self.assertEqual(offered["dotfiles-defaults"], {"--dns", "--help"})
+        self.assertEqual(offered["dotfiles-audit"], {"--help"})
+        self.assertEqual(offered["dotfiles-profile"], {"--choose", "--help"})
         for command in script_commands():
             with self.subTest(command=command):
                 self.assertIn("--help", offered.get(command, set()))
@@ -271,6 +320,11 @@ done
             "X=1 nocorrect pmu -n --zz",
             "echo pmu --x; pmu --x",
             "pmu -n\nwipe x --nah",
+            "dotfiles-update --skip-os-updates --nope",
+            "dotfiles-defaults --dns --nope",
+            "dotfiles-install --nope",
+            "dotfiles-audit --nope",
+            "dotfiles-profile --choose --nope",
         ), {
             "pmu --dry-run -x --cooldown=3 --nope": ["-x", "--nope"],
             "pmu -ny": ["-ny"],
@@ -278,6 +332,11 @@ done
             "X=1 nocorrect pmu -n --zz": ["--zz"],
             "echo pmu --x; pmu --x": ["--x"],
             "pmu -n\nwipe x --nah": ["--nah"],
+            "dotfiles-update --skip-os-updates --nope": ["--nope"],
+            "dotfiles-defaults --dns --nope": ["--nope"],
+            "dotfiles-install --nope": ["--nope"],
+            "dotfiles-audit --nope": ["--nope"],
+            "dotfiles-profile --choose --nope": ["--nope"],
         })
 
     def test_argparse_bundles_are_accepted_but_not_prefixes(self):

@@ -40,9 +40,9 @@ commit or another install. Shell settings may require a new shell.
 | `dotfiles-profile` | Show or choose the machine's personal/work profile |
 | `roadmaps` | Show due items, items awaiting acceptance, work in progress and errors across `roadmap` skill roadmaps in the repositories, or folders whose direct subfolders are repositories, listed one per line in the machine-local `~/.config/dotfiles/roadmap-paths`; or pass paths directly. Finds `roadmap.md` or `roadmaps.md` (any casing) at the root or in `docs/`, `tasks/` or `planning/`, with briefs in `roadmap/` beside the index or at the repository root |
 
-The commands from this repository print their options with `--help`, and zsh
-completes them: type `pmu --` and press Tab. Flags a command does not accept
-turn red as you type.
+The commands from this repository, including `dotfiles-*`, print their options
+with `--help`, and zsh completes them: type `pmu --` and press Tab. Flags a
+command does not accept turn red as you type.
 
 Use `dotfiles-update --skip-os-updates` to skip macOS updates and their restart
 prompt while still updating App Store apps, Command Line Tools, and other tools.

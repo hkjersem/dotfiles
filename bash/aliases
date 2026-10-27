@@ -58,11 +58,11 @@ alias week="date +%V"
 alias sudo='sudo '
 
 # Dotfiles management
-alias dotfiles-update='bash ~/.dotfiles/macos/update.sh --no-defaults'
-alias dotfiles-install='bash ~/.dotfiles/scripts/machine-profile.sh && bash ~/.dotfiles/install --no-audit && bash ~/.dotfiles/macos/install.sh --no-defaults'
-alias dotfiles-defaults='bash ~/.dotfiles/macos/osxdefaults.sh'
-alias dotfiles-audit='bash ~/.dotfiles/scripts/audit.sh'
-alias dotfiles-profile='bash ~/.dotfiles/scripts/machine-profile.sh'
+dotfiles-update() { bash "$HOME/.dotfiles/macos/update.sh" --no-defaults "$@"; }
+dotfiles-install() { bash "$HOME/.dotfiles/scripts/dotfiles-install.sh" "$@"; }
+dotfiles-defaults() { bash "$HOME/.dotfiles/macos/osxdefaults.sh" "$@"; }
+dotfiles-audit() { bash "$HOME/.dotfiles/scripts/audit.sh" "$@"; }
+dotfiles-profile() { bash "$HOME/.dotfiles/scripts/machine-profile.sh" "$@"; }
 
 # Schedule a one-time Codex submission using local 24-hour HH:MM, HH.MM, or HHMM time.
 codex-resume() { python3 "$HOME/.dotfiles/scripts/codex-resume.py" "$@"; }

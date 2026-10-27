@@ -73,7 +73,17 @@ machine_profile_main() {
         "") ensure_machine_profile || return $? ;;
         personal|work) save_machine_profile "$1" || return $? ;;
         --choose) choose_machine_profile || return $? ;;
-        --help|-h) echo "Usage: dotfiles-profile [personal|work|--choose]"; return 0 ;;
+        --help|-h)
+            cat <<'EOF'
+Usage: dotfiles-profile [personal|work|--choose]
+
+Show or set this machine's profile.
+
+  --choose    Choose the profile interactively
+  -h, --help  Show this help
+EOF
+            return 0
+            ;;
         *) echo "Usage: dotfiles-profile [personal|work|--choose]" >&2; return 2 ;;
     esac
     printf 'Machine profile: %s\n' "$DOTFILES_PROFILE"

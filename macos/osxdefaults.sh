@@ -4,7 +4,21 @@
 
 SET_DNS=false
 for arg in "$@"; do
-  [[ "$arg" == "--dns" ]] && SET_DNS=true
+  case "$arg" in
+    -h|--help)
+      cat <<'EOF'
+Usage: dotfiles-defaults [options]
+
+Apply macOS system preferences.
+
+  --dns       Also set Cloudflare DNS on all network interfaces
+  -h, --help  Show this help
+EOF
+      exit 0
+      ;;
+    --dns) SET_DNS=true ;;
+    *) echo "Error: unknown option: $arg (see --help)" >&2; exit 2 ;;
+  esac
 done
 
 # Close any open System Settings/Preferences panes, to prevent them from overriding settings we're about to change
