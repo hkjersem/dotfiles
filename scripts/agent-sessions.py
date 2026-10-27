@@ -30,6 +30,7 @@ class Session(NamedTuple):
     launcher: str
     shell: str
     status: str
+    app: str = ""
 
 
 def process_starts():
@@ -54,9 +55,10 @@ def read_session(marker, starts, now):
     if lines is None:
         return None
     name, _, claim = marker.name.partition(".")
-    if len(lines) != 7:
+    if len(lines) not in (7, 8):
         return Session(name, "", "", "", "", "Invalid record")
-    cwd, launcher, _, pid, started, initial, agent = lines
+    cwd, launcher, _, pid, started, initial, agent = lines[:7]
+    app = lines[7] if len(lines) == 8 else ""
     if not cwd or launcher not in ("copilot", "claude", "cplt") \
             or agent not in ("copilot", "claude") or not pid.isdigit():
         return Session(name, "", "", launcher, pid, "Invalid record")
@@ -88,7 +90,7 @@ def read_session(marker, starts, now):
     else:
         status = "Waiting to restore" if history else "History missing"
     return Session(cwd, session, agent_sessions.session_name(agent, session) or "",
-                   f"{launcher}/{agent}" if launcher == "cplt" else launcher, pid, status)
+                   f"{launcher}/{agent}" if launcher == "cplt" else launcher, pid, status, app)
 
 
 def sessions(directory):
@@ -122,14 +124,16 @@ def report(directory, entries):
         output.section("Sessions")
         print(f"  {output.mark('info')} No recorded sessions.")
         return
-    headers = ("Project", "Session", "Title", "Launcher", "Shell", "Status")
+    headers = ("Project", "Session", "Title", "App", "Launcher", "Shell", "Status")
     rows = []
     for entry in entries:
         title = cell(entry.title) or "(untitled)"
         if len(title) > 44:
             title = title[:41] + "..."
         rows.append((cell(display_path(entry.project)), entry.session[:8] or "-",
-                     title, cell(entry.launcher) or "-", cell(entry.shell) or "-", entry.status))
+                     title, cell({"vscode": "VS Code", "iTerm.app": "iTerm",
+                                  "Apple_Terminal": "Terminal"}.get(entry.app, entry.app)) or "Unknown",
+                     cell(entry.launcher) or "-", cell(entry.shell) or "-", entry.status))
     widths = [max(len(row[i]) for row in [headers, *rows]) for i in range(len(headers))]
     format = "  ".join(f"%-{width}s" for width in widths[:-1]) + "  %s"
     groups = {"Live sessions": [], "Waiting to restore": [], "Other records": []}

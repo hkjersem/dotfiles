@@ -267,7 +267,7 @@ class AgentSessionsTest(unittest.TestCase):
             time.sleep(0.05)
 
     def write_marker(self, session_id, cwd, launcher="cplt", args="", age=0, pid=99999999, started="",
-                     events=True, agent="copilot"):
+                     events=True, agent="copilot", app=None):
         if events and agent == "claude":
             folder = self.tmp / "claude/projects/-project"
             folder.mkdir(parents=True, exist_ok=True)
@@ -279,6 +279,8 @@ class AgentSessionsTest(unittest.TestCase):
         self.sessions.mkdir(parents=True, exist_ok=True)
         marker = self.sessions / str(uuid.uuid4())
         marker.write_text(f"{cwd}\n{launcher}\n{args}\n{pid}\n{started}\n{session_id}\n{agent}\n")
+        if app is not None:
+            marker.write_text(marker.read_text() + f"{app}\n")
         stamp = time.time() - age
         os.utime(marker, (stamp, stamp))
         return marker
@@ -288,6 +290,34 @@ class AgentSessionsTest(unittest.TestCase):
         snapshot.write_text(f"{sampled}\n{pid} {started}\n")
         os.utime(snapshot, (sampled, sampled))
         return snapshot
+
+    def test_restore_only_claims_records_for_the_current_terminal_app(self):
+        vscode = self.write_marker(ID_A, self.project, launcher="copilot", app="vscode", age=10)
+        iterm = self.write_marker(ID_B, self.project, launcher="copilot", app="iTerm.app")
+        self.open_and_close(self.project, TERM_PROGRAM="iTerm.app")
+        self.assertEqual(self.args(), [["copilot", f"--resume={ID_B}"]])
+        self.assertTrue(vscode.exists())
+        self.assertFalse(iterm.exists())
+        self.open_and_close(self.project, TERM_PROGRAM="vscode")
+        self.assertEqual(self.args()[-1], ["copilot", f"--resume={ID_A}"])
+        self.assertFalse(vscode.exists())
+
+    def test_new_launch_saves_terminal_app_and_keeps_it_after_hangup(self):
+        pid, fd = self.interactive_shell(self.project, TERM_PROGRAM="vscode", AGENT_TEST_HANG="1")
+        os.write(fd, b"copilot\n")
+        self.wait_for_calls(fd, 1)
+        marker = next(self.sessions.glob("????????-????-????-????-????????????"))
+        self.assertEqual(marker.read_text().splitlines()[7], "vscode")
+        self.hang_up(pid, fd)
+        self.assertEqual(marker.read_text().splitlines()[7], "vscode")
+        self.open_and_close(self.project, TERM_PROGRAM="iTerm.app")
+        self.assertEqual(len(self.calls()), 1)
+        self.assertTrue(marker.exists())
+
+    def test_legacy_record_without_app_can_still_restore(self):
+        self.write_marker(ID_A, self.project, launcher="copilot")
+        self.open_and_close(self.project, TERM_PROGRAM="iTerm.app")
+        self.assertEqual(self.args(), [["copilot", f"--resume={ID_A}"]])
 
     def test_cplt_new_session_gets_allow_all_and_id_and_clean_exit_removes_marker(self):
         self.run_zsh("cplt -d 'my dir'")

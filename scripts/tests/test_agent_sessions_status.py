@@ -148,6 +148,20 @@ class SessionStatusTests(unittest.TestCase):
         self.assertNotIn("─ Other records ", text)
         self.assertEqual(text.count("Project "), 1)
 
+    def test_table_displays_saved_app_and_accepts_legacy_records(self):
+        self.history()
+        for app, label in (("vscode", "VS Code"), ("iTerm.app", "iTerm"),
+                           ("Apple_Terminal", "Terminal"), ("unknown", "unknown")):
+            with self.subTest(app=app):
+                marker = self.marker()
+                marker.write_text(marker.read_text() + app + "\n")
+                row = self.read(marker)
+                self.assertEqual(row.app, app)
+                with redirect_stdout(io.StringIO()) as stdout:
+                    cli.report(self.directory, [row])
+                self.assertIn(label, stdout.getvalue())
+        self.assertEqual(self.read(self.marker()).app, "")
+
     def test_exact_seven_day_boundary_uses_observations_not_pid_snapshot(self):
         self.history()
         path = self.marker(age=8 * 86400)

@@ -321,7 +321,7 @@ writes through a tool's memory command land in this tracked file.
 `zsh/conf.d/agent-sessions.zsh` wraps `copilot`, `claude` and `cplt` when
 they are installed, for Copilot CLI and Claude Code sessions. If a session's
 terminal closes while it runs, such as when VS Code or iTerm2 quits, the next
-terminal opened in the same directory resumes it. Switching session with
+terminal opened in the same directory and terminal app resumes it. Switching session with
 `/new`, `/clear` or `/resume` is followed, so the session in use when the
 terminal closed comes back, even if you only resumed it without writing
 anything. A session you never wrote to cannot be resumed. Several terminals
@@ -335,7 +335,7 @@ Failed automatic launches keep their record for the next terminal to retry.
 `CPLT_NO_RESUME=1` turns resuming off.
 
 Run `agent-sessions` for a read-only table of recorded sessions: project,
-session ID prefix, title, launcher, owning shell PID and restoration status.
+session ID prefix, title, terminal app, launcher, owning shell PID and restoration status.
 Live sessions come first, followed by waiting sessions and other records;
 empty sections are omitted. Each section is sorted by project path, session
 ID and shell PID.
@@ -346,6 +346,11 @@ claims are shown separately. The command never claims or cleans records.
 It reports the latest saved observation, not an instantaneous inspection of
 the agent UI, and lists only launches that have a tracking record.
 Records live in `${XDG_STATE_HOME:-~/.local/state}/agent-sessions`.
+New launches save `TERM_PROGRAM` so VS Code and iTerm cannot claim each other's
+sessions, including after a reboot. This matches the app, not individual windows
+or tabs within it. Older records without an app show `Unknown` and remain
+eligible in any app; their next wrapped launch saves the app. Existing running
+shells need to reload the wrapper or start a fresh terminal to save this field.
 
 Sessions launched with `copilot --resume` or `--continue`, including names and
 ID prefixes, are tracked once Copilot opens the selected session. The same

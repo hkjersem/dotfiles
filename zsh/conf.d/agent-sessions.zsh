@@ -273,7 +273,7 @@ _agent_session_run() {
     # Named per launch, so a claimed record is never recreated under the
     # name another restored terminal may be about to claim.
     marker=$_agent_sessions_dir/${(L)$(uuidgen)}
-    print -r -- "${PWD:A}"$'\n'"$launcher"$'\n'"${(j: :)${(q)launcher_args[@]}}"$'\n'$$$'\n'"$(_agent_session_started $$)"$'\n'"$id"$'\n'"$agent" > "$marker"
+    print -r -- "${PWD:A}"$'\n'"$launcher"$'\n'"${(j: :)${(q)launcher_args[@]}}"$'\n'$$$'\n'"$(_agent_session_started $$)"$'\n'"$id"$'\n'"$agent"$'\n'"${TERM_PROGRAM:-unknown}" > "$marker"
     DOTFILES_AGENT_SESSION=${marker:t}
     context_args=(--pass-env DOTFILES_AGENT_SESSION --pass-env DOTFILES_AGENT_KIND)
     _agent_session_follow "$marker" $$ $agent </dev/null >/dev/null 2>&1 &!
@@ -426,7 +426,7 @@ _agent_session_resume() {
   add-zsh-hook -d precmd _agent_session_resume
   _agent_session_stop_waiting
   [[ -t 0 && -z $CPLT_NO_RESUME && -z $__CPLT_WRAPPED && -d $_agent_sessions_dir ]] || return
-  local f cwd launcher line pid started claim id agent activity file owner ret=0
+  local f cwd launcher line pid started claim id agent app activity file owner ret=0
   local _agent_session_resume_claim
   local -a launcher_args resume claims
   for file in "$_agent_sessions_dir"/*.*(N.m+6); do
@@ -446,9 +446,10 @@ _agent_session_resume() {
     esac
   done
   for f in "$_agent_sessions_dir"/^*.*(N.Om); do
-    cwd= launcher= line= pid= started= id= agent=
+    cwd= launcher= line= pid= started= id= agent= app=
     { IFS= read -r cwd; IFS= read -r launcher; IFS= read -r line; IFS= read -r pid
-      IFS= read -r started; IFS= read -r id; IFS= read -r agent } < "$f"
+      IFS= read -r started; IFS= read -r id; IFS= read -r agent
+      IFS= read -r app } < "$f"
     [[ $pid == <-> ]] && kill -0 $pid 2>/dev/null &&
       [[ -z $started || $started == "$(_agent_session_started $pid)" ]] && continue
     activity=$f
@@ -460,6 +461,7 @@ _agent_session_resume() {
       continue
     fi
     [[ $cwd == "${PWD:A}" ]] || continue
+    [[ -z $app || $app == "${TERM_PROGRAM:-unknown}" ]] || continue
     [[ $launcher == (copilot|claude|cplt) && $agent == (copilot|claude) ]] &&
       (( $+functions[$launcher] )) || continue
     if ! _agent_session_displayed; then
