@@ -2,6 +2,23 @@
 
 [README](../README.md#repository-triage)
 
+## Package-manager execution
+
+Use `--no-package-manager` for local checks without running a package manager or
+Node. It skips vulnerability and outdated queries, the current Node version and
+pnpm's global cooldown lookup; skipped checks are reported, not counted as clean.
+It also skips stale-branch classification, which can run configured Git hooks
+and merge drivers. Git lazy fetching and optional index writes are disabled;
+missing local objects fail the check instead of being downloaded.
+File-based package metadata, project/home cooldown configuration, Git signals,
+roadmap validation, test discovery and build configuration checks remain.
+
+Without that flag, the command runs the package manager selected by the target
+repository. Corepack can download and execute the selected version or URL.
+Package queries can contact registries and write caches, even though no project
+tests run and project files are not changed. `--skip-security` skips only the
+vulnerability query; it does not disable outdated or configuration commands.
+
 ## Documentation checks
 
 Documentation checks cover tracked and untracked files that Git doesn't ignore.
@@ -38,7 +55,8 @@ documentation check.
 A project is labelled a workspace only when `pnpm-workspace.yaml` or
 `package.json` `workspaces` lists packages. With a root `package.json`, it also
 checks package metadata, cooldowns, and JS/TS tooling; these checks require jq.
-npm and pnpm provide structured vulnerability and outdated-package results.
+Without `--no-package-manager`, npm and pnpm provide structured vulnerability
+and outdated-package results.
 Bun and other managers' audit/outdated results are not parsed by this tool.
 
 It also reports a Node runtime vendored into `node_modules` by

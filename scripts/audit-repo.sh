@@ -11,6 +11,7 @@
 #   --dir PATH       Target directory (default: current dir)
 #   --since PERIOD   Git lookback for churn/firefighting (default: "1 year ago")
 #   --skip-security  Skip package manager security audit
+#   --no-package-manager  Skip package managers and Node execution
 #   -h, --help       Show this help
 
 set -uo pipefail
@@ -31,6 +32,7 @@ source "$SCRIPT_DIR/lib/output.sh" || exit 1
 TARGET_DIR="$PWD"
 SINCE="1 year ago"
 SKIP_AUDIT=false
+NO_PACKAGE_MANAGER=false
 
 usage() {
   cat <<EOF
@@ -40,10 +42,11 @@ Read-only triage audit for git repositories.
 Runs git signals for any repo; adds JS/TS-specific checks when package.json is present.
 
 Options:
-  --dir PATH        Target directory (default: current dir)
-  --since PERIOD    Git lookback period (default: "1 year ago")
-  --skip-security   Skip package manager security audit
-  -h, --help        Show this help
+  --dir PATH             Target directory (default: current dir)
+  --since PERIOD         Git lookback period (default: "1 year ago")
+  --skip-security        Skip package manager security audit
+  --no-package-manager   Skip package managers and Node execution; keep local checks
+  -h, --help             Show this help
 EOF
 }
 
@@ -56,10 +59,15 @@ while [[ $# -gt 0 ]]; do
     --since)    [[ $# -ge 2 ]] || { echo "Missing value for --since" >&2; exit 1; }
                 SINCE="$2"; shift 2 ;;
     --skip-security) SKIP_AUDIT=true; shift ;;
+    --no-package-manager) NO_PACKAGE_MANAGER=true; shift ;;
     --help|-h)  usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
   esac
 done
+
+if $NO_PACKAGE_MANAGER; then
+  export GIT_NO_LAZY_FETCH=1 GIT_OPTIONAL_LOCKS=0
+fi
 
 [[ -n "$TARGET_DIR" && -n "$SINCE" ]] || { echo "--dir and --since must not be empty" >&2; exit 1; }
 if ! cd "$TARGET_DIR"; then
@@ -416,7 +424,9 @@ section_start "Stale Branches & Worktrees"
 SB_TMP=$AUDIT_TMP
 # shellcheck disable=SC2034  # read by lib/stale-branches.sh
 SB_INVOKING_TOP=$(pwd -P)
-if [[ -z "$HAS_REMOTE" ]]; then
+if $NO_PACKAGE_MANAGER; then
+  info "Stale-branch classification skipped (--no-package-manager)"
+elif [[ -z "$HAS_REMOTE" ]]; then
   info "No remote — stale branch check skipped"
 elif ! SB_GIT_DIR=$(sb_common_dir "$GIT_ROOT"); then
   SB_ERR=$(git -C "$GIT_ROOT" rev-parse --path-format=absolute --git-common-dir 2>&1 >/dev/null | head -1)
@@ -469,6 +479,8 @@ section_start "Security"
 
 if ! $HAS_PACKAGE_JSON; then
   info "Security audit skipped — not a Node.js project"
+elif $NO_PACKAGE_MANAGER; then
+  info "Security audit skipped (--no-package-manager)"
 elif $SKIP_AUDIT; then
   info "Security audit skipped (--skip-security)"
 elif [[ ${#LOCKFILES[@]} -eq 0 ]]; then
@@ -546,7 +558,11 @@ if command -v jq &>/dev/null; then
 
   # engines.node
   ENGINES_NODE=$(jq -r '.engines.node // empty' package.json 2>/dev/null || true)
-  CURRENT_NODE=$(node -v 2>/dev/null | sed 's/v//' || true)
+  if $NO_PACKAGE_MANAGER; then
+    CURRENT_NODE="not checked (--no-package-manager)"
+  else
+    CURRENT_NODE=$(node -v 2>/dev/null | sed 's/v//' || true)
+  fi
   if [[ -n "$ENGINES_NODE" ]]; then
     info "engines.node: ${ENGINES_NODE} (current: ${CURRENT_NODE:-unavailable}; compatibility not evaluated)"
   else
@@ -591,7 +607,9 @@ if command -v jq &>/dev/null; then
 fi
 
 # Outdated
-if [[ "$PM" != "npm" && "$PM" != "pnpm" ]]; then
+if $NO_PACKAGE_MANAGER; then
+  info "Outdated check skipped (--no-package-manager)"
+elif [[ "$PM" != "npm" && "$PM" != "pnpm" ]]; then
   info "Structured ${PM} outdated checks are not implemented here"
 else
   out_progress "Running $PM outdated…"
@@ -661,6 +679,8 @@ elif [[ "$PM" == "pnpm" ]]; then
     report_cooldown "$MRA_WS" pnpm-workspace.yaml minutes
   elif [[ -n "$MRA_NPMRC" ]]; then
     report_cooldown "$MRA_NPMRC" .npmrc minutes
+  elif $NO_PACKAGE_MANAGER; then
+    info "pnpm global cooldown skipped (--no-package-manager)"
   elif MRA_VAL=$(pnpm config get minimumReleaseAge --global 2>"$AUDIT_TMP/stderr"); then
     if [[ -n "$MRA_VAL" && "$MRA_VAL" != "undefined" && "$MRA_VAL" != "null" ]]; then
       report_cooldown "$MRA_VAL" "pnpm global config" minutes

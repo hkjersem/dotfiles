@@ -44,9 +44,24 @@ prune branches". Its description makes agents load it only when a message
 says "dotfiles" and asks for a command or task, and its body runs a
 command only on a direct request, so mentioning one in discussion does
 nothing. Each command has a reference file in `references/` with the
-preview-before-change and approval steps agents follow. It is the only
-repo-authored skill that may reference this repository. Add another command
-as a reference file and a row in its table, not as a separate skill.
+preview-before-change and approval steps agents follow. Keep command-specific
+guidance there: add another command as a reference file and a row in its table,
+not as a separate skill.
+
+Other repo-authored skills may reuse these commands and consult their reference
+files instead of duplicating logic. They follow their own triggers; the user
+does not have to say "dotfiles" for such an integration. Only skills explicitly
+intended for standalone distribution must avoid dotfiles dependencies.
+
+The `repo-audit` skill uses `audit-repo --no-package-manager` as a local triage
+helper when available, then investigates its leads. Snapshots and missing
+tooling still support manual inspection; a missing or blocked check is reported.
+
+Command reuse does not expand a task's permissions. Check whether a command
+executes project code, contacts the network or changes files before using it,
+and keep the task's approval boundaries. Use the script entry point, since
+agent shells may not load interactive aliases. Report missing tools and access
+failures rather than installing tools or working around restrictions.
 
 ## Skills from other repositories
 

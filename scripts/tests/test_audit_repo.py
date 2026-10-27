@@ -92,7 +92,7 @@ class AuditRepoTests(unittest.TestCase):
             self.env.pop(key, None)
         subprocess.run([self.git, "init", "--quiet", str(self.project)],
                        env=self.env, check=True, capture_output=True)
-        for name in ("git", "npm", "pnpm", "bun", "yarn"):
+        for name in ("git", "npm", "pnpm", "bun", "yarn", "node", "corepack"):
             tool = self.bin / name
             tool.write_text("#!" + sys.executable + "\n" + MOCK_TOOL)
             tool.chmod(0o755)
@@ -137,6 +137,87 @@ class AuditRepoTests(unittest.TestCase):
     def calls(self, name):
         return [args for tool, args in map(json.loads, self.log.read_text().splitlines())
                 if tool == name]
+
+    def test_no_package_manager_skips_execution_but_keeps_local_checks(self):
+        for pm in ("npm", "pnpm", "bun", "yarn"):
+            with self.subTest(pm=pm):
+                self.package(pm)
+                manifest = json.loads((self.project / "package.json").read_text())
+                manifest["packageManager"] = pm + "@https://example.invalid/manager.tgz"
+                manifest["engines"] = {"node": ">=24"}
+                self.write("package.json", json.dumps(manifest))
+                result = self.run_audit("--no-package-manager")
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn(f"Package manager: {pm}", result.stdout)
+                self.assertIn("Security audit skipped (--no-package-manager)", result.stdout)
+                self.assertIn("Outdated check skipped (--no-package-manager)", result.stdout)
+                self.assertIn("engines.node: >=24", result.stdout)
+                self.assertIn("build script: tsc", result.stdout)
+                for tool in ("npm", "pnpm", "bun", "yarn", "node", "corepack"):
+                    self.assertEqual(self.calls(tool), [], f"{tool} ran:\n{result.stdout}")
+                if pm == "pnpm":
+                    self.assertIn("pnpm global cooldown skipped (--no-package-manager)", result.stdout)
+                self.assertNotIn("No known vulnerabilities", result.stdout)
+                self.assertNotIn("All dependencies appear up-to-date", result.stdout)
+
+    def test_no_package_manager_preserves_static_failures_and_cooldowns(self):
+        self.package("pnpm")
+        self.write("pnpm-workspace.yaml", "minimumReleaseAge: 4320\n")
+        manifest = json.loads((self.project / "package.json").read_text())
+        manifest["scripts"]["test"] = "exit 1"
+        self.write("package.json", json.dumps(manifest))
+        result = self.run_audit("--no-package-manager", "--skip-security")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("test script is a placeholder", result.stdout)
+        self.assertIn("Release-age cooldown: 3d (pnpm-workspace.yaml)", result.stdout)
+        self.assertIn("Summary", result.stdout)
+        self.assertEqual(self.calls("pnpm"), [])
+
+    def test_no_package_manager_skips_branch_checks_that_can_execute_git_helpers(self):
+        self.add_remote()
+        result = self.run_audit("--no-package-manager")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Stale-branch classification skipped (--no-package-manager)", result.stdout)
+        for args in self.calls("git"):
+            self.assertNotIn("merge-tree", args)
+            self.assertNotIn("status", args)
+            self.assertNotIn("for-each-ref", args)
+
+    def test_no_package_manager_does_not_lazy_fetch_missing_git_objects(self):
+        def git(*args):
+            return subprocess.run([self.git, *args], env=self.env, check=True,
+                                  capture_output=True, text=True)
+
+        git("-C", str(self.project), "config", "user.name", "Fixture")
+        git("-C", str(self.project), "config", "user.email", "fixture@example.invalid")
+        self.write("original.txt", "a line of fixture data\n" * 1000)
+        git("-C", str(self.project), "add", "--all")
+        git("-C", str(self.project), "commit", "--quiet", "-m", "Add fixture")
+        git("-C", str(self.project), "mv", "original.txt", "renamed.txt")
+        self.write("renamed.txt", "a line of fixture data\n" * 1000 + "changed line\n")
+        git("-C", str(self.project), "commit", "--quiet", "--all", "-m", "Rename fixture")
+        remote = self.root / "remote.git"
+        git("clone", "--quiet", "--bare", str(self.project), str(remote))
+        git("--git-dir=" + str(remote), "config", "uploadpack.allowFilter", "true")
+        partial = self.root / "partial"
+        git("clone", "--quiet", "--filter=blob:none", "--no-checkout", remote.as_uri(), str(partial))
+        git("-C", str(partial), "config", "diff.renames", "true")
+        objects = partial / ".git/objects"
+        before = sorted(path.relative_to(objects).as_posix() for path in objects.rglob("*"))
+        trace = self.root / "git-trace"
+        env = dict(self.env, GIT_TRACE=str(trace),
+                   PATH=str(Path(self.git).parent) + os.pathsep + os.environ["PATH"])
+        env.pop("GIT_NO_LAZY_FETCH", None)
+        result = subprocess.run(
+            ["/bin/bash", str(REPO / "scripts/audit-repo.sh"),
+             "--no-package-manager", "--dir", str(partial)],
+            env=env, text=True, capture_output=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("Could not read Git data", result.stderr)
+        self.assertNotRegex(trace.read_text(), r"\bfetch\b")
+        self.assertEqual(
+            sorted(path.relative_to(objects).as_posix() for path in objects.rglob("*")), before)
 
     def make_roadmap(self, index="docs/roadmap.md", brief_dir="docs/roadmap"):
         (self.project / index).parent.mkdir(parents=True, exist_ok=True)

@@ -225,10 +225,14 @@ roadmaps (candidate roadmap files require Python 3), and, with a root
 and outdated packages (requires jq). Other roadmap formats are left alone.
 `.env` files are never read.
 
-The script does not install dependencies, run project tests, apply fixes, or
-edit project files. **It is not offline:** npm/pnpm audit and outdated queries
-can contact registries and write package-manager caches. `--skip-security`
-skips only the vulnerability query, not the outdated query.
+The script does not install project dependencies, run project tests, apply fixes,
+or edit project files. By default it runs the repository-selected package
+manager, which Corepack may download and execute; queries can contact registries
+and write caches. Use `--no-package-manager` to skip package-manager and Node
+execution while keeping local checks; it also skips branch classification that
+can run Git hooks or merge drivers and disables Git lazy fetching.
+`--skip-security` skips only the vulnerability query, not outdated or
+configuration commands.
 
 Findings are triage indicators, not a security verdict. Exit status is 1 for
 concrete issues (such as vulnerabilities or npm's always-failing placeholder
@@ -240,6 +244,7 @@ each check covers and how to read the results.
 
 Run from the repository root on macOS, with Python 3, Node.js, jq, and Perl
 available. Some fixtures also use `/usr/bin/python3`, `/usr/bin/ruby`, and macOS
+audit-repo --no-package-manager    # local checks without package-manager or Node execution
 copy/archive tools. No Python test packages need to be installed.
 
 ```sh

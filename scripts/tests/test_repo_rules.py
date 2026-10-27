@@ -3,7 +3,9 @@
 from pathlib import Path, PurePosixPath
 import re
 import subprocess
+import tempfile
 import unittest
+from unittest.mock import patch
 
 
 REPO = Path(__file__).resolve().parents[2]
@@ -37,7 +39,6 @@ BASH4_ONLY = {
     "wait -n": re.compile(r"\bwait\s+-n\b"),
 }
 HARDCODED_HOME = re.compile(r"/Users/[A-Za-z0-9._-]+")
-SKILL_COUPLING = re.compile(r"dotfiles|sync-agent-|audit-skills|scripts/tests", re.IGNORECASE)
 DOTFILES_REF = re.compile(r"(?:\$HOME|\$\{HOME\}|~)/\.dotfiles/([A-Za-z0-9_./-]+)")
 
 
@@ -103,28 +104,40 @@ class RepoRulesTests(unittest.TestCase):
                     found.append(f"{path}:{number}: {line.strip()}")
         self.assert_no_violations(found, "Use $HOME or ~ instead of /Users/<name>")
 
-    def test_repo_authored_skills_do_not_reference_this_repository(self):
-        found = []
+    def test_repo_authored_skill_dotfiles_references_exist(self):
         broken = []
         for path in repo_files("agents/skills/"):
             if path.parent == PurePosixPath("agents/skills"):
                 continue
-            # The dotfiles skill exists to run this repository's commands from other repositories.
-            if path.parts[2] == "dotfiles":
-                for number, line in text_lines(path):
-                    for match in DOTFILES_REF.finditer(line):
-                        target = match.group(1).rstrip(".")
-                        if not (REPO / target).exists():
-                            broken.append(f"{path}:{number}: ~/.dotfiles/{target}")
-                continue
             for number, line in text_lines(path):
-                if SKILL_COUPLING.search(line):
-                    found.append(f"{path}:{number}: {line.strip()}")
-        self.assert_no_violations(found, "Skills must stand alone without repository-specific references")
-        self.assert_no_violations(broken, "The dotfiles skill points to repository files that do not exist")
+                for match in DOTFILES_REF.finditer(line):
+                    target = match.group(1).rstrip(".")
+                    if not (REPO / target).exists():
+                        broken.append(f"{path}:{number}: ~/.dotfiles/{target}")
+        self.assert_no_violations(broken, "Skills point to repository files that do not exist")
 
 
 class RuleCheckSelfTests(unittest.TestCase):
+    def test_skill_command_references_allow_existing_targets_and_reject_missing_ones(self):
+        with tempfile.TemporaryDirectory(prefix="skill-reference-test-") as temporary:
+            root = Path(temporary)
+            script = root / "scripts/example.sh"
+            script.parent.mkdir()
+            script.write_text("#!/bin/bash\n")
+            paths = [PurePosixPath(f"agents/skills/{name}/SKILL.md")
+                     for name in ("dotfiles", "repo-audit")]
+            for path in paths:
+                target = root / path
+                target.parent.mkdir(parents=True)
+                target.write_text("Run `bash ~/.dotfiles/scripts/example.sh`.\n")
+            with patch(f"{__name__}.REPO", root), \
+                    patch(f"{__name__}.repo_files", return_value=paths):
+                check = RepoRulesTests().test_repo_authored_skill_dotfiles_references_exist
+                check()
+                script.unlink()
+                with self.assertRaisesRegex(AssertionError, "scripts/example.sh"):
+                    check()
+
     def test_bash4_patterns_match_known_bad_and_spare_portable_forms(self):
         bad = [
             "declare -A seen=()", "local -a -A x", "if true; then local -n r=$1", "local -n ref=$1", "declare -g X=1",
@@ -159,11 +172,9 @@ class RuleCheckSelfTests(unittest.TestCase):
         for line, expected in cases.items():
             self.assertEqual(DOTFILES_REF.search(line).group(1), expected)
 
-    def test_home_and_coupling_patterns(self):
+    def test_home_path_pattern(self):
         self.assertTrue(HARDCODED_HOME.search("cd /Users/someone/x"))
         self.assertFalse(HARDCODED_HOME.search("never `/Users/<username>/...`"))
-        self.assertTrue(SKILL_COUPLING.search("Run ~/.dotfiles/install"))
-        self.assertFalse(SKILL_COUPLING.search("Run the project's test suite"))
 
 
 if __name__ == "__main__":

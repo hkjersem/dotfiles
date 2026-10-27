@@ -41,6 +41,30 @@ is not permission to disclose private source, credentials, or unrelated data.
 If useful evidence is unavailable, report the gap rather than silently widening
 access or treating a skipped or failed check as a pass.
 
+## Local triage helper
+
+For a local Git checkout, start with the installed `audit-repo` helper when
+command execution is permitted and an equivalent report is not already
+available. Skip it for supplied snapshots and non-Git targets.
+
+Read `~/.dotfiles/agents/skills/dotfiles/references/audit-repo.md`, then run:
+
+```sh
+bash "$HOME/.dotfiles/scripts/audit-repo.sh" --no-package-manager --dir "<target>"
+```
+
+Keep `--no-package-manager` unless the task explicitly authorizes package-manager
+execution and its network access. `--skip-security` is not a substitute: it still
+runs outdated and configuration commands.
+If the helper, its reference or a dependency is missing, report that gap and
+continue manual inspection. If access is blocked or the flag is unsupported,
+report it without bypassing restrictions or retrying without the flag. Never
+edit or install tools in the dotfiles checkout from another repository.
+
+Use the output as investigation leads, not established findings. Distinguish
+reported issues from checks that could not run, and do not repeat mechanical
+checks whose results are already available.
+
 ## Investigation standard
 
 Start with the project's purpose and the requested focus. Use history, code,
