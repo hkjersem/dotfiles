@@ -38,7 +38,13 @@ commit or another install. Shell settings may require a new shell.
 | `dotfiles-defaults` | Apply macOS system preferences |
 | `dotfiles-audit` | Check for drift between repo and installed state (includes skills) |
 | `dotfiles-profile` | Show or choose the machine's personal/work profile |
-| `roadmaps` | Show due items, items awaiting acceptance, work in progress and errors across `roadmap` skill roadmaps in the repositories, or folders whose direct subfolders are repositories, listed one per line in the machine-local `~/.config/dotfiles/roadmap-paths`; or pass paths directly. Finds `roadmap.md` or `roadmaps.md` (any casing) at the root or in `docs/`, `tasks/` or `planning/`, with briefs in `roadmap/` beside the index or at the repository root |
+| `roadmaps` | Show due items, items awaiting acceptance, work in progress and errors across `roadmap` skill roadmaps in the repositories, or folders whose direct subfolders are repositories, listed one per line in the machine-local `~/.config/dotfiles/roadmap-paths`; or pass paths directly. Finds `roadmap.md` or `roadmaps.md` (any casing) at the root or in `docs/`, `tasks/` or `planning/`, with briefs in `roadmap/` beside the index or at the repository root. Add `--check` for detailed validation |
+
+Use `roadmaps --check .` (or `roadmaps . --check`) to validate the current
+repository without changing files. `roadmaps --check` validates all configured
+locations. Check mode exits 1 for invalid or unreadable roadmaps, missing paths
+and paths without a managed roadmap. Progress appears only on a terminal;
+Ctrl+C stops the command without a traceback and exits 130.
 
 The commands from this repository, including `dotfiles-*`, print their options
 with `--help`, and zsh completes them: type `pmu --` and press Tab. Flags a

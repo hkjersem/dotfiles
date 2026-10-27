@@ -4,7 +4,7 @@ import pty
 import subprocess
 import sys
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -75,15 +75,15 @@ printf '%s %s\\n' "$ERR_WARN" "$ERR_FAIL" >&2
 """
 
 
-def bash_stderr(stderr_is_terminal):
+def bash_stderr(stderr_is_terminal, script=STDERR_BASH):
     """Run STDERR_BASH with exactly one of stdout and stderr on a terminal; return what reached stderr."""
     env = {**os.environ, "NO_COLOR": ""}
     main, follower = pty.openpty()
     if stderr_is_terminal:
-        process = subprocess.Popen(["/bin/bash", "-c", STDERR_BASH], env=env,
+        process = subprocess.Popen(["/bin/bash", "-c", script], env=env,
                                    stdout=subprocess.DEVNULL, stderr=follower)
     else:
-        process = subprocess.Popen(["/bin/bash", "-c", STDERR_BASH], env=env,
+        process = subprocess.Popen(["/bin/bash", "-c", script], env=env,
                                    stdout=follower, stderr=subprocess.PIPE)
     os.close(follower)
     on_terminal = read_terminal(main)
@@ -165,6 +165,22 @@ class OutputTests(unittest.TestCase):
             expected = f"{output.mark('warn', Terminal())} {output.mark('fail', Terminal())}\n"
         self.assertEqual(bash_stderr(True), expected)
         self.assertIn("\033[", expected)
+
+    def test_progress_matches_bash_and_only_appears_on_terminal_stderr(self):
+        script = f"""
+source {str(LIB / "output.sh")!r}
+out_progress "Checking roadmap"
+out_progress_done
+"""
+        for terminal in (False, True):
+            with self.subTest(terminal=terminal):
+                stream = Terminal() if terminal else io.StringIO()
+                with redirect_stdout(io.StringIO()), redirect_stderr(stream):
+                    output.progress("Checking roadmap")
+                    output.progress_done()
+                expected = "\r\033[KChecking roadmap\r\033[K" if terminal else ""
+                self.assertEqual(stream.getvalue(), expected)
+                self.assertEqual(bash_stderr(terminal, script), expected)
 
 
 if __name__ == "__main__":

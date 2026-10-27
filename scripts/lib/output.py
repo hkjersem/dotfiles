@@ -59,6 +59,18 @@ def dry_run(hint="", stream=None):
     print(f"{paint('Dry run', 'yellow', stream)} — nothing will be changed.{' ' + hint if hint else ''}", file=stream)
 
 
+def progress(text, stream=None):
+    stream = stream or sys.stderr
+    if stream.isatty():
+        print(f"\r\033[K{paint(text, 'dim')}", end="", file=stream, flush=True)
+
+
+def progress_done(stream=None):
+    stream = stream or sys.stderr
+    if stream.isatty():
+        print("\r\033[K", end="", file=stream, flush=True)
+
+
 def note(text, stream=None):
     print(f"    {text}", file=stream or sys.stdout)
 

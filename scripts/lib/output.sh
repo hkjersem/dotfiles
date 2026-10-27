@@ -7,6 +7,7 @@
 #   out_dry_run ["hint"]   first line of a dry run; add how to apply only when dry run is the default
 #   out_context "a" "b"     a dim "a │ b" line of context, such as the target, at the top of a report
 #   out_progress "text…"    a transient progress line on stderr, only on a terminal; out_progress_done clears it
+#                          mirrored by output.progress() and output.progress_done() in Python
 #   out_section "Name"      blank line, then a bold "─ Name ───…" heading
 #   out_subsection "Name"   blank line, then a bold "  ▸ Name" heading under a section
 # Columns: whole-run lines (dry run, context, headings, progress) start in column 0. Entries line up with

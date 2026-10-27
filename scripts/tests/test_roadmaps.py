@@ -20,13 +20,13 @@ class RoadmapsTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.home = Path(temporary.name)
 
-    def run_roadmaps(self, *args, config=None):
+    def run_roadmaps(self, *args, config=None, cwd=None):
         if config is not None:
             path = self.home / ".config/dotfiles/roadmap-paths"
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(config)
         return subprocess.run([PYTHON, str(SCRIPT), *args, "--today", "2026-10-21"],
-                              capture_output=True, text=True, check=False,
+                              capture_output=True, text=True, check=False, cwd=cwd,
                               env={**os.environ, "HOME": str(self.home)})
 
     def make_roadmap(self, relative, briefs, index="ROADMAP.md", brief_dir="roadmap"):
@@ -80,7 +80,7 @@ class RoadmapsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout)
         for name in ("docs", "tasks", "planning", "app"):
             self.assertIn(f"─ {name}  ~/repos/{name} ", result.stdout)
-        self.assertIn("error(s); run the roadmap skill's `check`", result.stdout)
+        self.assertIn("error(s); run roadmaps --check ", result.stdout)
         self.assertNotIn("─ repos ", result.stdout)
 
     def test_symlinked_index_alias_is_checked_only_once(self):
@@ -113,7 +113,70 @@ class RoadmapsTests(unittest.TestCase):
         result = self.run_roadmaps(str(self.home / "repos"))
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("─ project  ~/repos/project ", result.stdout)
-        self.assertIn("error(s); run the roadmap skill's `check`", result.stdout)
+        self.assertIn("error(s); run roadmaps --check ", result.stdout)
+
+    def test_check_accepts_either_argument_order_and_preserves_files(self):
+        self.make_roadmap("repo with spaces", {
+            "broken": ("title: Broken\nstatus: active", "[Missing](../missing.md)\n"),
+        }, index="docs/roadmaps.md", brief_dir="docs/roadmap")
+        root = self.home / "repo with spaces"
+        before = {path.relative_to(root): path.read_bytes()
+                  for path in root.rglob("*") if path.is_file()}
+        for args in [("--check", "."), (".", "--check")]:
+            with self.subTest(args=args):
+                result = self.run_roadmaps(*args, cwd=root)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("docs/roadmap/broken.md: broken link to ../missing.md", result.stdout)
+                self.assertNotIn("In progress", result.stdout)
+                self.assertNotIn("Valid roadmap:", result.stdout)
+                self.assertEqual(result.stderr, "")
+                self.assertEqual({path.relative_to(root): path.read_bytes()
+                                  for path in root.rglob("*") if path.is_file()}, before)
+
+    def test_check_without_paths_validates_configured_roadmaps(self):
+        self.make_roadmap("repos/clean", {"working": ("title: Working\nstatus: active", "")})
+        self.make_roadmap("repos/broken", {"bad": ("title: Bad\nstatus: shipped", "")})
+        result = self.run_roadmaps("--check", config="~/repos\n")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("Valid roadmap: ROADMAP.md (1 open, 0 archived)", result.stdout)
+        self.assertIn("roadmap/bad.md: status `shipped` is not one of", result.stdout)
+        self.assertNotIn("In progress", result.stdout)
+        self.assertNotIn("Nothing needs attention", result.stdout)
+
+        result = self.run_roadmaps("--check", str(self.home / "repos/clean"))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Valid roadmap:", result.stdout)
+
+    def test_check_does_not_treat_missing_roadmaps_as_valid(self):
+        self.make_roadmap("valid", {})
+        empty = self.home / "empty"
+        empty.mkdir()
+        (empty / "ROADMAP.md").write_text("# Hand-written plans\n")
+        for args, config in [
+                (("--check", str(empty)), None),
+                (("--check",), "~/valid\n~/empty\n~/missing\n")]:
+            with self.subTest(args=args):
+                result = self.run_roadmaps(*args, config=config)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("~/empty: no managed roadmap found", result.stdout)
+                if config:
+                    self.assertIn("~/missing: not a directory", result.stdout)
+                    self.assertIn("Valid roadmap:", result.stdout)
+                else:
+                    self.assertNotIn("Valid roadmap:", result.stdout)
+
+    def test_overview_error_hint_quotes_paths_with_spaces(self):
+        self.make_roadmap("repo with spaces", {"bad": ("title: Bad\nstatus: shipped", "")})
+        result = self.run_roadmaps(str(self.home / "repo with spaces"))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            f"run roadmaps --check '{self.home / 'repo with spaces'}'", result.stdout)
+
+    def test_check_without_configured_paths_is_not_success(self):
+        result = self.run_roadmaps("--check", config="# no locations yet\n")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("No roadmaps found.", result.stdout)
+        self.assertNotIn("Valid roadmap:", result.stdout)
 
     def test_summarises_roadmaps_in_a_folder(self):
         self.make_roadmap("repos/busy", {
@@ -153,7 +216,7 @@ class RoadmapsTests(unittest.TestCase):
         result = self.run_roadmaps(config="# mine\n~/code\n\n~/solo\n~/solo/\n~/empty\n~/gone\n")
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("─ broken  ~/code/broken ", result.stdout)
-        self.assertIn("  ✗ 1 error(s); run the roadmap skill's `check`", result.stdout)
+        self.assertIn("  ✗ 1 error(s); run roadmaps --check ", result.stdout)
         self.assertIn("Nothing needs attention: solo\n", result.stdout, "listed twice, shown once")
         self.assertIn("  • note: ~/gone: not a directory", result.stdout)
         self.assertNotIn("empty", result.stdout, "folders without roadmaps are skipped quietly")

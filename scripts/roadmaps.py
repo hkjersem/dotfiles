@@ -8,6 +8,8 @@ generated-list markers in roadmap.md or roadmaps.md (case-insensitive), at the
 repository root or in docs/, tasks/ or planning/, are included. Briefs live in
 roadmap/ beside the index, or at the repository root. Read-only; exits 1 when a
 roadmap has errors or cannot be read, or no paths are configured.
+Use --check to print detailed validation results instead of the overview;
+missing paths and paths without managed roadmaps then also exit 1.
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ import argparse
 import datetime
 import importlib.util
 import os
+import shlex
 import sys
 from pathlib import Path
 from typing import List, Optional
@@ -119,6 +122,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("paths", nargs="*", metavar="PATH",
                         help="a repository, or a folder whose direct subfolders are repositories")
     parser.add_argument("--today", metavar="YYYY-MM-DD", help="treat this date as today")
+    parser.add_argument("--check", action="store_true",
+                        help="report detailed validation results without changing files")
     args = parser.parse_args(argv)
     today = rm.parse_date(args.today) if args.today else datetime.date.today()
     if today is None:
@@ -143,9 +148,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     for entry in entries:
         folder = os.path.abspath(os.path.expanduser(entry))
         if not os.path.isdir(folder):
-            notes.append(f"{entry}: not a directory")
+            (problems if args.check else notes).append(f"{entry}: not a directory")
             continue
-        for repo in find_roadmaps(folder, problems):
+        output.progress(f"Finding roadmaps in {home_short(folder)}…")
+        try:
+            found = find_roadmaps(folder, problems)
+        finally:
+            output.progress_done()
+        if args.check and not found:
+            problems.append(f"{home_short(folder)}: no managed roadmap found")
+        for repo in found:
             index = os.path.realpath(os.path.join(repo.root, repo.index))
             if index not in seen:
                 seen.add(index)
@@ -157,11 +169,28 @@ def main(argv: Optional[List[str]] = None) -> int:
     for repo in roadmaps:
         root = repo.root
         try:
-            report, briefs = rm.check_report(repo)
+            output.progress(f"Checking {home_short(root)}…")
+            try:
+                report, briefs = rm.check_report(repo)
+            finally:
+                output.progress_done()
         except (OSError, UnicodeDecodeError) as exc:
             failed = True
             output.section(f"{os.path.basename(root)}  {home_short(root)}")
             print(f"  {output.mark('fail')} cannot read the roadmap: {exc}")
+            continue
+        if args.check:
+            output.section(f"{os.path.basename(root)}  {home_short(root)}")
+            for error in report.errors:
+                print(f"  {output.mark('fail')} {error}")
+            for warning in report.warnings:
+                print(f"  {output.mark('warn')} {warning}")
+            if report.errors:
+                failed = True
+            else:
+                open_count = sum(not brief.archived for brief in briefs)
+                print(f"  {output.mark('ok')} Valid roadmap: {repo.index} "
+                      f"({open_count} open, {len(briefs) - open_count} archived)")
             continue
         view = rm.Overview(briefs, today)
         verifying = [b for b in view.now if b.status == "verifying"]
@@ -188,12 +217,15 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"  {output.mark('info')} Ready to start: {len(view.can_start)}")
         if report.errors:
             failed = True
-            print(f"  {output.mark('fail')} {len(report.errors)} error(s); run the roadmap skill's `check` in the repository")
+            print(f"  {output.mark('fail')} {len(report.errors)} error(s); "
+                  f"run roadmaps --check {shlex.quote(root)}")
     if quiet:
         print(f"\n  {output.mark('ok')} Nothing needs attention: " + ", ".join(quiet))
     if not roadmaps:
         print()
         output.note("No roadmaps found.")
+        if args.check:
+            failed = True
     if notes or problems:
         print()
     for note in notes:
@@ -204,4 +236,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        print("\nInterrupted.", file=sys.stderr)
+        sys.exit(130)
