@@ -67,6 +67,9 @@ dotfiles-profile() { bash "$HOME/.dotfiles/scripts/machine-profile.sh" "$@"; }
 # Schedule a one-time Codex submission using local 24-hour HH:MM, HH.MM, or HHMM time.
 codex-resume() { python3 "$HOME/.dotfiles/scripts/codex-resume.py" "$@"; }
 
+# List recorded terminal sessions and their automatic-restoration status.
+agent-sessions() { python3 "$HOME/.dotfiles/scripts/agent-sessions.py" "$@"; }
+
 # Summarise due and pending items across roadmaps listed in ~/.config/dotfiles/roadmap-paths.
 roadmaps() { python3 "$HOME/.dotfiles/scripts/roadmaps.py" "$@"; }
 

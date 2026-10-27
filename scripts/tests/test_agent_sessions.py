@@ -31,13 +31,29 @@ import json, os, signal, sys, time
 from pathlib import Path
 args = sys.argv[1:]
 # Like Copilot and Claude Code, shut down cleanly when the terminal closes.
-signal.signal(signal.SIGHUP, lambda *_: (time.sleep(0.3), sys.exit(0)))
+signal.signal(signal.SIGHUP, lambda *_: (time.sleep(0.3), sys.exit(int(os.environ.get("AGENT_TEST_HUP_STATUS", "0")))))
+if Path(sys.argv[0]).name == "cplt" and args == ["--help"]:
+    print('''Options:
+      --agent <AGENT>
+      --preset <PRESET>
+  -d, --project-dir <DIR>
+      --repo-dir <DIR>
+      --name <SESSION>
+      --allow-write-state <PATH>
+      --future-option <VALUE>
+      --pass-env <VAR>
+      --resume[=<SESSION>]
+      --continue
+''')
+    sys.exit(0)
 # AGENT_TEST_CPLT_AGENT is the sandbox.agent value in cplt's config.
 if Path(sys.argv[0]).name == "cplt" and args[:3] == ["config", "get", "sandbox.agent"]:
     print(os.environ.get("AGENT_TEST_CPLT_AGENT", ""))
     sys.exit(0)
 with open(os.environ["AGENT_TEST_LOG"], "a") as log:
     log.write(json.dumps([Path(sys.argv[0]).name, os.getcwd()] + args) + "\\n")
+if os.environ.get("AGENT_TEST_FAIL_EARLY"):
+    sys.exit(3)
 session = None
 for i, arg in enumerate(args):
     if arg in ("--session-id", "--resume") and i + 1 < len(args):
@@ -48,6 +64,10 @@ for i, arg in enumerate(args):
 switches = [s for s in os.environ.get("AGENT_TEST_SWITCH", "").split(",") if s]
 agent = Path(sys.argv[0]).name
 if agent == "cplt":
+    separator = args.index("--") if "--" in args else len(args)
+    for key in ("DOTFILES_AGENT_SESSION", "DOTFILES_AGENT_KIND"):
+        if not any(args[i:i + 2] == ["--pass-env", key] for i in range(separator)):
+            os.environ.pop(key, None)
     agent = os.environ.get("AGENT_TEST_CPLT_AGENT") or "copilot"
     for i, arg in enumerate(args):
         if arg == "--":
@@ -71,13 +91,14 @@ if agent == "claude":
     sys.exit(int(os.environ.get("AGENT_TEST_STATUS", "0")))
 home = Path(os.environ["COPILOT_HOME"])
 (home / "logs").mkdir(parents=True, exist_ok=True)
+process_log = home / "logs" / f"process-{int(time.time() * 1000)}-{os.getpid()}.log"
 for i, target in enumerate(([session] if session else []) + switches):
     if i:
         time.sleep(1.1)
     target = session if target == "LAUNCHED" else target
     # AGENT_TEST_NO_LOG acts like Copilot versions that do not log this line.
     if not os.environ.get("AGENT_TEST_NO_LOG"):
-        with open(home / "logs" / f"process-1-{os.getpid()}.log", "a") as log:
+        with process_log.open("a") as log:
             log.write(f"2026-01-01T00:00:00.000Z [INFO] Registering foreground session: {target}\\n")
     folder = home / "session-state" / target
     lock = folder / f"inuse.{os.getpid()}.lock"
@@ -93,12 +114,16 @@ for i, target in enumerate(([session] if session else []) + switches):
         (folder / "events.jsonl").write_text("{}\\n")
     lock.touch()
 if os.environ.get("AGENT_TEST_HANG"):
-    time.sleep(30)
+    time.sleep(float(os.environ.get("AGENT_TEST_HANG_SECONDS", "30")))
+if os.environ.get("AGENT_TEST_INPUT"):
+    print("AGENT_INPUT_READY", flush=True)
+    Path(os.environ["AGENT_TEST_INPUT"]).write_text(input())
 sys.exit(int(os.environ.get("AGENT_TEST_STATUS", "0")))
 """
 UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 ID_A = "0f6a2b4c-1d3e-4f50-8a9b-0c1d2e3f4a5b"
 ID_B = "1a2b3c4d-5e6f-4a70-8b9c-0d1e2f3a4b5c"
+CONTEXT = ["--pass-env", "DOTFILES_AGENT_SESSION", "--pass-env", "DOTFILES_AGENT_KIND"]
 
 
 @unittest.skipUnless(shutil.which("zsh"), "zsh is required")
@@ -258,11 +283,17 @@ class AgentSessionsTest(unittest.TestCase):
         os.utime(marker, (stamp, stamp))
         return marker
 
+    def write_snapshot(self, marker, pid, started, sampled):
+        snapshot = marker.with_name(f"{marker.name}.pids")
+        snapshot.write_text(f"{sampled}\n{pid} {started}\n")
+        os.utime(snapshot, (sampled, sampled))
+        return snapshot
+
     def test_cplt_new_session_gets_allow_all_and_id_and_clean_exit_removes_marker(self):
         self.run_zsh("cplt -d 'my dir'")
         [call] = self.args()
-        self.assertEqual(call[:6], ["cplt", "-d", "my dir", "--", "--allow-all", "--session-id"])
-        self.assertRegex(call[6], f"^{UUID}$")
+        self.assertEqual(call[:-1], ["cplt", "-d", "my dir", *CONTEXT, "--", "--allow-all", "--session-id"])
+        self.assertRegex(call[-1], f"^{UUID}$")
         self.assertEqual(self.markers(), [])
 
     def test_copilot_new_session_gets_id_without_allow_all(self):
@@ -276,19 +307,23 @@ class AgentSessionsTest(unittest.TestCase):
     def test_agent_args_are_kept(self):
         self.run_zsh(f"cplt --preset strict -- --resume={ID_A} --model x; copilot --resume {ID_A}")
         self.assertEqual(self.args(), [
-            ["cplt", "--preset", "strict", "--", "--allow-all", f"--resume={ID_A}", "--model", "x"],
+            ["cplt", "--preset", "strict", *CONTEXT, "--", "--allow-all", f"--resume={ID_A}", "--model", "x"],
             ["copilot", "--resume", ID_A],
         ])
 
     def test_untrackable_runs_get_no_session_id(self):
-        self.run_zsh("cplt -- -p 'fix it'; cplt -- --continue; copilot --resume; copilot --resume my-name; copilot --acp")
+        self.run_zsh("cplt -- -p 'fix it'; copilot --resume --prompt='fix it'; copilot --acp")
         self.assertEqual(self.args(), [
             ["cplt", "--", "--allow-all", "-p", "fix it"],
-            ["cplt", "--", "--allow-all", "--continue"],
-            ["copilot", "--resume"],
-            ["copilot", "--resume", "my-name"],
+            ["copilot", "--resume", "--prompt=fix it"],
             ["copilot", "--acp"],
         ])
+        self.assertEqual(self.markers(), [])
+
+    def test_copilot_picker_exit_without_selection_removes_marker(self):
+        self.run_zsh("copilot --resume; copilot --continue")
+        self.assertEqual(self.args(), [["copilot", "--resume"], ["copilot", "--continue"]])
+        self.assertEqual(self.markers(), [])
 
     def test_subcommands_and_other_agents_pass_through(self):
         self.run_zsh("cplt config show; cplt exec -- env; cplt --agent opencode; cplt --agent=pi -- x; "
@@ -309,8 +344,23 @@ class AgentSessionsTest(unittest.TestCase):
         self.run_zsh("cplt -- -x")
         calls = self.args()
         self.assertEqual(calls[0], ["cplt", "--", "-x"])
-        self.assertEqual(calls[1][:6], ["cplt", "--agent", "copilot", "--", "--allow-all", "--session-id"])
+        self.assertEqual(calls[1][:-2], ["cplt", "--agent", "copilot", *CONTEXT, "--", "--allow-all", "--session-id"])
+        self.assertRegex(calls[1][-2], f"^{UUID}$")
+        self.assertEqual(calls[1][-1], "-x")
         self.assertEqual(calls[2], ["cplt", "--", "-x"])
+
+    def test_cplt_value_options_are_read_from_installed_help(self):
+        self.run_zsh("cplt --allow-write-state '/tmp/tool state'; "
+                     "cplt --future-option config --agent claude")
+        calls = self.args()
+        self.assertEqual(calls[0][:-1], ["cplt", "--allow-write-state", "/tmp/tool state",
+                                       *CONTEXT, "--", "--allow-all", "--session-id"])
+        self.assertIn("--session-id", calls[0])
+        self.assertEqual(calls[1][:-1], ["cplt", "--future-option", "config", "--agent",
+                                       "claude", *CONTEXT, "--", "--dangerously-skip-permissions", "--session-id"])
+        self.assertIn("--dangerously-skip-permissions", calls[1])
+        self.assertIn("--session-id", calls[1])
+        self.assertEqual(self.markers(), [])
 
     def test_failed_session_returns_its_status_and_removes_marker(self):
         result = self.run_zsh("cplt; print cplt=$?; copilot; print copilot=$?", AGENT_TEST_STATUS="3")
@@ -350,7 +400,7 @@ class AgentSessionsTest(unittest.TestCase):
         self.wait_for_calls(fd, 2)
         self.exit_shell(pid, fd)
         self.assertEqual(self.args()[1],
-                         ["cplt", "--agent", "copilot", "--repo-dir", "a b", "--", "--allow-all",
+                         ["cplt", "--agent", "copilot", "--repo-dir", "a b", *CONTEXT, "--", "--allow-all",
                           f"--resume={session_id}"])
         self.assertEqual(self.calls()[1][1], str(self.project))
         self.assertEqual(self.markers(), [])
@@ -422,7 +472,7 @@ class AgentSessionsTest(unittest.TestCase):
         self.wait_for_calls(second[1], 2)
         self.open_and_close(self.project)
         self.assertEqual(self.args(), [
-            ["cplt", "--agent", "copilot", "--", "--allow-all", f"--resume={ID_A}"],
+            ["cplt", "--agent", "copilot", *CONTEXT, "--", "--allow-all", f"--resume={ID_A}"],
             ["copilot", f"--resume={ID_B}"],
         ])
         records = [ID_A, f"{ID_A}.current", ID_B, f"{ID_B}.current"]
@@ -449,6 +499,221 @@ class AgentSessionsTest(unittest.TestCase):
         self.open_and_close(self.project)
         self.assertEqual(self.args(), [["copilot", f"--resume={ID_A}"]])
 
+    def test_old_record_of_a_live_shell_is_not_deleted(self):
+        started = subprocess.run(["ps", "-o", "lstart=", "-p", str(os.getpid())],
+                                 capture_output=True, text=True, check=True).stdout.split()
+        marker = self.write_marker(ID_A, self.project, age=8 * 86400,
+                                   pid=os.getpid(), started=" ".join(started))
+        self.open_and_close(self.project)
+        self.assertTrue(marker.exists())
+        self.assertEqual(self.calls(), [])
+
+    def test_old_launch_with_recent_activity_is_resumed(self):
+        marker = self.write_marker(ID_A, self.project, launcher="copilot", age=8 * 86400)
+        marker.with_name(f"{marker.name}.current").write_text(f"{ID_A}\n")
+        self.open_and_close(self.project)
+        self.assertEqual(self.args(), [["copilot", f"--resume={ID_A}"]])
+        self.assertEqual(self.markers(), [])
+
+    def test_expired_orphans_are_cleaned_but_live_claims_and_foreign_files_are_kept(self):
+        for owner in (99999999, os.getpid()):
+            with self.subTest(owner=owner):
+                marker = self.write_marker(ID_A, self.project, age=8 * 86400)
+                claim = marker.with_name(f"{marker.name}.{owner}")
+                marker.rename(claim)
+                current = marker.with_name(f"{marker.name}.current")
+                current.write_text(f"{ID_A}\n")
+                foreign = marker.with_name(f"{marker.name}.notes")
+                foreign.write_text("not managed by the wrapper\n")
+                stamp = time.time() - 8 * 86400
+                os.utime(current, (stamp, stamp))
+                os.utime(foreign, (stamp, stamp))
+                self.open_and_close(self.project)
+                self.assertEqual(claim.exists(), owner == os.getpid())
+                self.assertEqual(current.exists(), owner == os.getpid())
+                self.assertTrue(foreign.exists())
+                self.assertEqual(self.calls(), [])
+
+    def test_failed_automatic_resume_keeps_record_for_next_terminal(self):
+        self.write_marker(ID_A, self.project, launcher="cplt", args="--preset strict")
+        self.open_and_close(self.project, AGENT_TEST_FAIL_EARLY="1")
+        self.assertIsNotNone(self.record(ID_A))
+        self.open_and_close(self.project)
+        self.assertEqual(self.args(), [
+            ["cplt", "--agent", "copilot", "--preset", "strict", *CONTEXT, "--", "--allow-all",
+             f"--resume={ID_A}"],
+        ] * 2)
+        self.assertEqual(self.markers(), [])
+
+    def test_closed_restored_session_with_nonzero_exit_has_only_one_record(self):
+        self.write_marker(ID_A, self.project, launcher="copilot")
+        pid, fd = self.interactive_shell(
+            self.project, leader="trap '' HUP;", AGENT_TEST_HANG="1",
+            AGENT_TEST_HANG_SECONDS="0.6", AGENT_TEST_HUP_STATUS="129", AGENT_TEST_STATUS="129",
+        )
+        self.wait_for_calls(fd, 1)
+        self.drain(fd, lambda _: ID_A in self.currents())
+        self.hang_up(pid, fd)
+        self.assertEqual(self.recorded().count(ID_A), 1)
+        self.open_and_close(self.project)
+        self.open_and_close(self.project)
+        self.assertEqual(self.args(), [["copilot", f"--resume={ID_A}"]] * 2)
+
+    def test_crash_after_successful_restore_does_not_restore_original_retry_record(self):
+        self.write_marker(ID_A, self.project, launcher="copilot")
+        self.open_and_close(self.project, AGENT_TEST_HANG="1",
+                            AGENT_TEST_HANG_SECONDS="0.5", AGENT_TEST_STATUS="3")
+        self.assertEqual(self.markers(), [])
+        self.open_and_close(self.project)
+        self.assertEqual(self.args(), [["copilot", f"--resume={ID_A}"]])
+
+    def test_reused_pid_log_does_not_replace_recorded_session(self):
+        marker = self.write_marker(ID_A, self.project, launcher="copilot", age=180)
+        marker.with_name(f"{marker.name}.current").write_text(f"{ID_A}\n")
+        now = time.time()
+        self.write_snapshot(marker, 41002, int(now) - 120, now - 60)
+        logs = self.tmp / "copilot/logs"
+        logs.mkdir()
+        (logs / f"process-{int(now * 1000)}-41002.log").write_text(
+            f"[INFO] Registering foreground session: {ID_B}\n")
+        folder = self.tmp / "copilot/session-state" / ID_B
+        folder.mkdir()
+        (folder / "events.jsonl").write_text("{}\n")
+        self.open_and_close(self.project)
+        self.assertEqual(self.args(), [["copilot", f"--resume={ID_A}"]])
+
+    def test_reused_pid_session_file_or_lock_does_not_replace_recorded_session(self):
+        for agent in ("copilot", "claude"):
+            with self.subTest(agent=agent):
+                marker = self.write_marker(ID_A, self.project, launcher=agent, agent=agent, age=180)
+                marker.with_name(f"{marker.name}.current").write_text(f"{ID_A}\n")
+                now = time.time()
+                self.write_snapshot(marker, 99999999, int(now) - 120, now - 60)
+                if agent == "claude":
+                    folder = self.tmp / "claude/sessions"
+                    folder.mkdir(parents=True, exist_ok=True)
+                    (folder / "99999999.json").write_text(json.dumps({"sessionId": ID_B}))
+                    (self.tmp / "claude/projects/-project" / f"{ID_B}.jsonl").touch()
+                else:
+                    folder = self.tmp / "copilot/session-state" / ID_B
+                    folder.mkdir()
+                    (folder / "events.jsonl").write_text("{}\n")
+                    (folder / "inuse.99999999.lock").touch()
+                self.open_and_close(self.project)
+                expected = ([agent, "--resume", ID_A] if agent == "claude"
+                            else [agent, f"--resume={ID_A}"])
+                self.assertEqual(self.args()[-1], expected)
+                self.assertEqual(self.markers(), [])
+
+    def test_rotated_foreground_registration_is_used_when_current_log_has_none(self):
+        marker = self.write_marker(ID_A, self.project, launcher="copilot", age=180)
+        marker.with_name(f"{marker.name}.current").write_text(f"{ID_A}\n")
+        now = time.time()
+        started = int(now) - 120
+        self.write_snapshot(marker, 41002, started, now)
+        logs = self.tmp / "copilot/logs"
+        logs.mkdir()
+        prefix = f"process-{started * 1000 + 100}-41002"
+        (logs / f"{prefix}.1.log").write_text(f"[INFO] Registering foreground session: {ID_B}\n")
+        (logs / f"{prefix}.log").write_text("[INFO] Tool finished\n")
+        folder = self.tmp / "copilot/session-state" / ID_B
+        folder.mkdir()
+        (folder / "events.jsonl").write_text("{}\n")
+        self.open_and_close(self.project)
+        self.assertEqual(self.args(), [["copilot", f"--resume={ID_B}"]])
+
+    def test_log_from_an_older_pid_generation_is_rejected_even_if_modified_later(self):
+        marker = self.write_marker(ID_B, self.project, launcher="copilot", age=180)
+        now = time.time()
+        started = int(now) - 30
+        self.write_snapshot(marker, 41002, started, now)
+        logs = self.tmp / "copilot/logs"
+        logs.mkdir()
+        (logs / f"process-{(started + 1) * 1000}-41002.log").write_text(
+            f"[INFO] Registering foreground session: {ID_A}\n")
+        old = logs / f"process-{(started - 30) * 1000}-41002.log"
+        old.write_text(f"[INFO] Registering foreground session: {ID_B}\n")
+        os.utime(old, (now + 1, now + 1))
+        folder = self.tmp / "copilot/session-state" / ID_A
+        folder.mkdir()
+        (folder / "events.jsonl").write_text("{}\n")
+        self.open_and_close(self.project)
+        self.assertEqual(self.args(), [["copilot", f"--resume={ID_A}"]])
+
+    def test_failed_restore_does_not_extend_original_activity_deadline(self):
+        marker = self.write_marker(ID_A, self.project, launcher="copilot", age=6 * 86400 + 120)
+        activity = time.time() - 6 * 86400
+        current = marker.with_name(f"{marker.name}.current")
+        current.write_text(f"{ID_A}\n")
+        os.utime(current, (activity, activity))
+        started = int(activity) - 60
+        self.write_snapshot(marker, 41002, started, activity)
+        logs = self.tmp / "copilot/logs"
+        logs.mkdir()
+        (logs / f"process-{(started + 1) * 1000}-41002.log").write_text(
+            f"[INFO] Registering foreground session: {ID_A}\n")
+        self.open_and_close(self.project, AGENT_TEST_FAIL_EARLY="1")
+        self.assertIsNotNone(self.record(ID_A))
+        self.assertAlmostEqual(current.stat().st_mtime, activity, delta=1)
+
+    def test_missing_session_capture_backs_off_to_normal_poll_interval(self):
+        marker = self.write_marker("", self.project, events=False)
+        result = self.run_zsh(f"""
+_agent_session_descendants() {{ return 0; }}
+_agent_session_capture() {{ return 1; }}
+calls=0
+sleep() {{
+  print -r -- "$1"
+  (( ++calls == 12 )) && rm -f -- "{marker}"
+}}
+_agent_session_follow "{marker}" $$ copilot
+""", AGENT_SESSION_FOLLOW_INTERVAL="")
+        self.assertEqual(result.stdout.splitlines()[-1], "5")
+
+    def test_dead_session_expires_after_seven_days_not_eight(self):
+        self.write_marker(ID_A, self.project, age=7 * 86400 + 60)
+        self.open_and_close(self.project)
+        self.assertEqual(self.calls(), [])
+        self.assertEqual(self.markers(), [])
+
+    def test_dead_session_just_under_seven_days_is_still_restored(self):
+        self.write_marker(ID_A, self.project, launcher="copilot", age=7 * 86400 - 60)
+        self.open_and_close(self.project)
+        self.assertEqual(self.args(), [["copilot", f"--resume={ID_A}"]])
+
+    def test_session_switch_just_before_terminal_closes_is_captured(self):
+        pid, fd = self.interactive_shell(self.project, AGENT_TEST_HANG="1",
+                                         AGENT_SESSION_FOLLOW_INTERVAL="2")
+        os.write(fd, b"copilot\n")
+        self.wait_for_calls(fd, 1)
+        launched = self.args()[0][2]
+        self.drain(fd, lambda _: self.current(launched) == launched)
+        log, = (self.tmp / "copilot/logs").glob("process-*.log")
+        with log.open("a") as stream:
+            stream.write(f"2026-01-01T00:00:00.000Z [INFO] Registering foreground session: {ID_B}\n")
+        (self.tmp / "copilot/session-state" / ID_B).mkdir()
+        (self.tmp / "copilot/session-state" / ID_B / "events.jsonl").write_text("{}\n")
+        self.hang_up(pid, fd)
+
+        pid, fd = self.interactive_shell(self.project)
+        self.wait_for_calls(fd, 2)
+        self.exit_shell(pid, fd)
+        self.assertEqual(self.args()[-1], ["copilot", f"--resume={ID_B}"])
+
+    def test_picker_selection_before_first_regular_poll_is_captured(self):
+        pid, fd = self.interactive_shell(self.project, AGENT_TEST_HANG="1",
+                                         AGENT_TEST_SWITCH=ID_A,
+                                         AGENT_SESSION_FOLLOW_INTERVAL="30")
+        os.write(fd, b"copilot --resume\n")
+        self.wait_for_calls(fd, 1)
+        self.drain(fd, lambda _: (self.tmp / "copilot/session-state" / ID_A / "events.jsonl").exists())
+        self.hang_up(pid, fd)
+
+        pid, fd = self.interactive_shell(self.project)
+        self.wait_for_calls(fd, 2)
+        self.exit_shell(pid, fd)
+        self.assertEqual(self.args()[-1], ["copilot", f"--resume={ID_A}"])
+
     def test_claude_new_session_gets_id_without_skipping_permissions(self):
         self.run_zsh("claude --model opus 'fix it'; claude -p 'fix it'; claude mcp list; claude --version")
         calls = self.args()
@@ -462,9 +727,9 @@ class AgentSessionsTest(unittest.TestCase):
         self.run_zsh(f"cplt --agent claude -- --resume {ID_A}")
         self.run_zsh("cplt", AGENT_TEST_CPLT_AGENT="claude")
         calls = self.args()
-        self.assertEqual(calls[0], ["cplt", "--agent", "claude", "--", "--dangerously-skip-permissions",
+        self.assertEqual(calls[0], ["cplt", "--agent", "claude", *CONTEXT, "--", "--dangerously-skip-permissions",
                                     "--resume", ID_A])
-        self.assertEqual(calls[1][:4], ["cplt", "--", "--dangerously-skip-permissions", "--session-id"])
+        self.assertEqual(calls[1][:-1], ["cplt", *CONTEXT, "--", "--dangerously-skip-permissions", "--session-id"])
         self.assertNotIn("--allow-all", calls[0] + calls[1])
 
     def test_closed_claude_terminal_resumes_the_session_switched_to(self):
@@ -478,7 +743,7 @@ class AgentSessionsTest(unittest.TestCase):
         pid, fd = self.interactive_shell(self.project)
         self.wait_for_calls(fd, 2)
         self.exit_shell(pid, fd)
-        self.assertEqual(self.args()[1], ["cplt", "--agent", "claude", "--", "--dangerously-skip-permissions",
+        self.assertEqual(self.args()[1], ["cplt", "--agent", "claude", *CONTEXT, "--", "--dangerously-skip-permissions",
                                           "--resume", ID_B])
         self.assertEqual(self.markers(), [])
 
@@ -494,6 +759,31 @@ class AgentSessionsTest(unittest.TestCase):
         self.wait_for_calls(fd, 2)
         self.exit_shell(pid, fd)
         self.assertEqual(self.args()[1], ["claude", "--resume", ID_A])
+
+    def test_copilot_selected_session_is_followed_and_restored(self):
+        for command in ("copilot --resume", "copilot -r", "copilot --resume my-name",
+                        "copilot --resume=my-name", "copilot --resume=0f6a2b4",
+                        "copilot --resume --model x", "copilot --continue",
+                        "cplt -- --resume", "cplt -- --continue",
+                        "cplt --resume", "cplt --continue", f"cplt --resume={ID_B}"):
+            with self.subTest(command=command):
+                count = len(self.calls())
+                pid, fd = self.interactive_shell(
+                    self.project, AGENT_TEST_HANG="1", AGENT_TEST_SWITCH=ID_A,
+                )
+                os.write(fd, f"{command}\n".encode())
+                self.wait_for_calls(fd, count + 1)
+                self.assertNotIn("--session-id", self.args()[-1])
+                self.drain(fd, lambda _: ID_A in self.currents())
+                self.hang_up(pid, fd)
+
+                pid, fd = self.interactive_shell(self.project)
+                self.wait_for_calls(fd, count + 2)
+                self.exit_shell(pid, fd)
+                expected = (["cplt", "--agent", "copilot", *CONTEXT, "--", "--allow-all"]
+                            if command.startswith("cplt") else ["copilot"])
+                self.assertEqual(self.args()[-1], expected + [f"--resume={ID_A}"])
+                self.assertEqual(self.markers(), [])
 
     def test_claude_session_without_transcript_is_dropped(self):
         self.write_marker(ID_A, self.project, launcher="claude", agent="claude", events=False)
@@ -548,14 +838,14 @@ class AgentSessionsTest(unittest.TestCase):
         self.write_marker(ID_A, self.project, launcher="cplt", args="--preset strict")
         self.open_and_close(self.project, AGENT_TEST_CPLT_AGENT="claude")
         self.assertEqual(self.args(), [
-            ["cplt", "--agent", "copilot", "--preset", "strict", "--", "--allow-all", f"--resume={ID_A}"],
+            ["cplt", "--agent", "copilot", "--preset", "strict", *CONTEXT, "--", "--allow-all", f"--resume={ID_A}"],
         ])
 
     def test_wrappers_work_under_strict_user_options(self):
         self.run_zsh("setopt nounset ksh_arrays; copilot; cplt --agent claude -- --resume " + ID_A)
         calls = self.args()
         self.assertEqual(calls[0][:2], ["copilot", "--session-id"])
-        self.assertEqual(calls[1], ["cplt", "--agent", "claude", "--", "--dangerously-skip-permissions",
+        self.assertEqual(calls[1], ["cplt", "--agent", "claude", *CONTEXT, "--", "--dangerously-skip-permissions",
                                     "--resume", ID_A])
 
     def test_vscode_resumes_only_in_a_terminal_it_displays(self):
@@ -574,6 +864,80 @@ class AgentSessionsTest(unittest.TestCase):
         self.wait_for_calls(fd, 1)
         self.exit_shell(pid, fd)
         self.assertEqual(self.args()[0][-1], f"--resume={ID_A}")
+
+    def test_vscode_resumes_when_terminal_is_displayed_later(self):
+        self.write_marker(ID_A, self.project)
+        pid, fd = self.interactive_shell(self.project, size=(30, 80), TERM_PROGRAM="vscode")
+        self.drain(fd, lambda output: b"\r% " in output or b"\r# " in output)
+        self.assertEqual(self.calls(), [])
+        set_size(fd, 43, 106)
+        self.wait_for_calls(fd, 1)
+        self.exit_shell(pid, fd)
+        self.assertEqual(self.args()[-1][-1], f"--resume={ID_A}")
+
+    def test_vscode_does_not_resume_after_user_enters_a_command(self):
+        self.write_marker(ID_A, self.project)
+        pid, fd = self.interactive_shell(self.project, size=(30, 80), TERM_PROGRAM="vscode")
+        os.write(fd, b"print USER_COMMAND_RAN\n")
+        self.drain(fd, lambda output: b"\r\nUSER_COMMAND_RAN\r\n" in output)
+        set_size(fd, 43, 106)
+        self.exit_shell(pid, fd)
+        self.assertEqual(self.calls(), [])
+        self.assertEqual(self.recorded(), [ID_A])
+
+    def test_deferred_resume_agent_can_read_the_terminal(self):
+        self.write_marker(ID_A, self.project)
+        received = self.tmp / "agent-input"
+        pid, fd = self.interactive_shell(self.project, size=(30, 80), TERM_PROGRAM="vscode",
+                                         AGENT_TEST_INPUT=str(received))
+        self.drain(fd, lambda output: b"\r% " in output or b"\r# " in output)
+        set_size(fd, 43, 106)
+        self.drain(fd, lambda output: b"AGENT_INPUT_READY" in output)
+        os.write(fd, b"answer\n")
+        self.drain(fd, lambda _: received.exists() and received.read_text() == "answer")
+        self.exit_shell(pid, fd)
+        self.assertEqual(self.markers(), [])
+
+    def test_ctrl_c_during_automatic_resume_does_not_leave_retry_record(self):
+        self.write_marker(ID_A, self.project, launcher="copilot")
+        pid, fd = self.interactive_shell(self.project, AGENT_TEST_HANG="1")
+        self.wait_for_calls(fd, 1)
+        os.write(fd, b"\x03")
+        self.drain(fd, lambda _: self.markers() == [])
+        self.exit_shell(pid, fd)
+        self.assertEqual(self.markers(), [])
+
+    def test_hook_observation_can_restore_without_a_follower_poll(self):
+        marker = self.write_marker("", self.project, launcher="copilot", events=False)
+        folder = self.tmp / "copilot/session-state" / ID_A
+        folder.mkdir(parents=True)
+        (folder / "events.jsonl").write_text("{}\n")
+        observed = self.tmp / ".cache/agent-sessions"
+        observed.mkdir(parents=True)
+        (observed / marker.name).write_text(f"{ID_A}\n")
+        self.open_and_close(self.project)
+        self.assertEqual(self.args(), [["copilot", f"--resume={ID_A}"]])
+        self.assertEqual(list(observed.iterdir()), [])
+
+    def test_latest_observation_wins_when_dead_claude_process_cannot_be_read(self):
+        for latest in ("current", "hook"):
+            with self.subTest(latest=latest):
+                calls_before = len(self.calls())
+                marker = self.write_marker(ID_A, self.project, launcher="claude", agent="claude")
+                (self.tmp / "claude/projects/-project" / f"{ID_B}.jsonl").touch()
+                current = marker.with_name(f"{marker.name}.current")
+                observed = self.tmp / ".cache/agent-sessions"
+                observed.mkdir(parents=True, exist_ok=True)
+                hook = observed / marker.name
+                current.write_text(f"{ID_B if latest == 'current' else ID_A}\n")
+                hook.write_text(f"{ID_B if latest == 'hook' else ID_A}\n")
+                older = hook if latest == "current" else current
+                stamp = time.time() - 60
+                os.utime(older, (stamp, stamp))
+                self.write_snapshot(marker, 99999999, int(stamp) - 60, time.time())
+                self.open_and_close(self.project)
+                self.assertEqual(len(self.calls()), calls_before + 1)
+                self.assertEqual(self.args()[-1], ["claude", "--resume", ID_B])
 
     def test_resume_is_skipped_when_disabled_or_stale(self):
         marker = self.write_marker(ID_A, self.project)

@@ -327,10 +327,43 @@ terminal closed comes back, even if you only resumed it without writing
 anything. A session you never wrote to cannot be resumed. Several terminals
 in one repository each get one session back, oldest first; which tab gets
 which is not guaranteed. VS Code can revive terminals it never shows, so
-there a session only resumes in a terminal that gets a real size within 2
-seconds. Exiting the agent normally means it is not resumed,
-and sessions older than 7 days are dropped. `CPLT_NO_RESUME=1` turns resuming
-off.
+there a hidden terminal waits until it gets a real size, checking while its
+prompt is empty. Entering a shell command cancels that wait. Exiting the
+agent normally means it is not resumed. Records are dropped after 7 days
+without tracking activity, and never while their shell is still running.
+Failed automatic launches keep their record for the next terminal to retry.
+`CPLT_NO_RESUME=1` turns resuming off.
+
+Run `agent-sessions` for a read-only table of recorded sessions: project,
+session ID prefix, title, launcher, owning shell PID and restoration status.
+Live sessions come first, followed by waiting sessions and other records;
+empty sections are omitted. Each section is sorted by project path, session
+ID and shell PID.
+`Live, tracked` means the record has a matching live shell and saved
+conversation; `Waiting to restore` means its shell has gone and the next terminal in that project can
+resume it. Unknown sessions, missing history, expired records and restore
+claims are shown separately. The command never claims or cleans records.
+It reports the latest saved observation, not an instantaneous inspection of
+the agent UI, and lists only launches that have a tracking record.
+Records live in `${XDG_STATE_HOME:-~/.local/state}/agent-sessions`.
+
+Sessions launched with `copilot --resume` or `--continue`, including names and
+ID prefixes, are tracked once Copilot opens the selected session. The same
+applies to `cplt --resume`, `cplt --continue` and agent flags after `--`.
+The follower polls rapidly for at most ten unsuccessful startup samples, then
+uses its normal five-second interval. Saved process start times and log
+creation timestamps prevent a reused PID from selecting an unrelated session;
+rotated Copilot logs are included. Process-local files are only reused at
+restoration while the original process identity can still be verified.
+The wrappers expose a launch tag and agent kind for optional prompt hooks;
+cplt explicitly forwards only those two environment variables through its
+filter. If a process-local source is gone, the newest valid hook or follower
+observation is used.
+Once the selected session is observed, its new record replaces the restore
+attempt's retry record. A later crash or terminal hangup cannot resurrect that
+old record. Only a launch whose selected session was never observed is eligible
+for retry.
+Failed attempts do not extend the original record's seven-day retention.
 
 `cplt` also starts Copilot with `--allow-all` and Claude Code with
 `--dangerously-skip-permissions`, since cplt has no setting for agent flags;
