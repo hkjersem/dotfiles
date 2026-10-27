@@ -58,7 +58,6 @@ _Nothing committed._
 - **Corepack `devEngines.packageManager`**: corepack 0.36 reads it when `packageManager` is missing, but `audit-repo.sh` and `_detect-pm.sh` don't. When: a project uses it.
 - **Bun 1.4 support**: use `bun audit fix`, check the `bun outdated` parsing after the Rust rewrite, and fix the outdated "bun does not support catalogs" message. When: Bun is installed on a machine.
 - **codex-resume queue start**: the experimental `thread/queue/start` or `codex queue` could send right away instead of waiting for the app. `--reset` also ignores `rateLimitsByLimitId`. When: next codex-resume change.
-- **Claude skill folders**: make sure the skills audit never touches `~/.claude/skills/synced` or `.trash`. When: before relying on claude.ai skill sync.
 - **COPILOT_HOME warning**: setting it stops Copilot from reading `~/.agents/skills`, so the audit could warn when it is set. When: next time `audit-skills.sh` changes.
 - **Manage agent hooks, MCP and plugins**: Claude, Codex and Copilot all support user-level hooks and MCP. Keep files that hold secrets out of Git. When: a hook or MCP server is wanted on every machine.
 - **Frecency directory jumping**: [zoxide](https://github.com/ajeetdsouza/zoxide) (or similar) jumps to frequently used directories by partial name and works with fzf. It needs a Brewfile entry and an init line in `zsh/conf.d/`. When: anytime.

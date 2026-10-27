@@ -286,6 +286,32 @@ class AgentSkillsTests(unittest.TestCase):
         self.assertEqual(self.snapshot(), before)
         self.assertIn("warning(s)", result.stdout)
 
+    def test_claude_synced_and_trash_folders_are_never_touched(self):
+        provider = self.provider()
+        synced = provider / "synced"
+        (synced / "remote").mkdir(parents=True)
+        (synced / "remote/SKILL.md").write_text("from claude.ai\n")
+        (synced / "gone").symlink_to("../../../.agents/skills/gone")
+        trash = provider / ".trash"
+        trash.mkdir()
+        (trash / "gone").symlink_to("../../../.agents/skills/gone")
+        dangling = provider / "removed"
+        dangling.symlink_to("../../.agents/skills/removed")
+
+        def kept():
+            return {path: entry for path, entry in self.snapshot().items()
+                    if path.startswith((str(synced), str(trash)))}
+
+        before = kept()
+        for script, args in (("audit-skills.sh", ()), ("audit-skills.sh", ("--fix-symlinks", "--clean-stale")),
+                             ("sync-agent-skills.sh", ())):
+            with self.subTest(script=script, args=args):
+                result = self.run_script(script, *args)
+                self.assertEqual(kept(), before)
+                self.assertNotIn("synced", result.stdout + result.stderr)
+                self.assertNotIn(".trash", result.stdout + result.stderr)
+        self.assertFalse(dangling.is_symlink(), "the repair run should still clean the provider's top level")
+
     def test_skills_suppressions_come_from_machine_config(self):
         self.installed()
         (self.home / ".cursor/skills").mkdir(parents=True)
