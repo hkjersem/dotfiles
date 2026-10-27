@@ -71,7 +71,7 @@ brew cleanup
 
 header "Zsh"
 # Update Zsh plugins
-ZSH=~/.oh-my-zsh DISABLE_UPDATE_PROMPT=true zsh ~/.oh-my-zsh/tools/upgrade.sh -v minimal
+ZSH=~/.oh-my-zsh DISABLE_UPDATE_PROMPT=true zsh ~/.oh-my-zsh/tools/upgrade.sh -v minimal -c 3
 bash ~/.dotfiles/scripts/install-zsh-plugins.sh || exit 1
 
 # Run settings script (skip with --no-defaults)

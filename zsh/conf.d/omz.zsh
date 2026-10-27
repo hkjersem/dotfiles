@@ -7,6 +7,9 @@ ZSH_THEME="agnoster"
 # Change how often to auto-update (in days).
 export UPDATE_ZSH_DAYS=100
 
+# Only update to commits at least 3 days old, like the package manager cooldowns.
+zstyle ':omz:update' cooldown 3
+
 # Enable command auto-correction.
 ENABLE_CORRECTION="true"
 CORRECT_IGNORE_FILE='.*'

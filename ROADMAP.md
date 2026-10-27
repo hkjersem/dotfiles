@@ -55,7 +55,6 @@ _Nothing committed._
 
 <!-- One-liners not yet worth a brief: "- **Name**: why. When: entry condition." -->
 
-- **oh-my-zsh update cooldown**: `upgrade.sh -c <days>` would match the release-age cooldowns used for package managers. When: anytime.
 - **Corepack `devEngines.packageManager`**: corepack 0.36 reads it when `packageManager` is missing, but `audit-repo.sh` and `_detect-pm.sh` don't. When: a project uses it.
 - **Bun 1.4 support**: use `bun audit fix`, check the `bun outdated` parsing after the Rust rewrite, and fix the outdated "bun does not support catalogs" message. When: Bun is installed on a machine.
 - **codex-resume queue start**: the experimental `thread/queue/start` or `codex queue` could send right away instead of waiting for the app. `--reset` also ignores `rateLimitsByLimitId`. When: next codex-resume change.
