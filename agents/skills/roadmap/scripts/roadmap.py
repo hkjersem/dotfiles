@@ -409,11 +409,12 @@ def is_local(target: str) -> bool:
     return bool(target) and not target.startswith("#") and not re.match(r"^[a-z][a-z0-9+.-]*:", target, re.I)
 
 
-def check_links(path: str, text: str, root: str, report: Report) -> None:
+def check_links(path: str, text: str, root: str, report: Report,
+                directory_cache: Optional[Dict[str, List[str]]] = None) -> None:
     base = os.path.dirname(path)
     for target in link_targets(text):
         wanted = os.path.normpath(os.path.join(base, target.split("#", 1)[0]))
-        actual = disk_case(wanted, root)
+        actual = disk_case(wanted, root, directory_cache)
         if actual is None:
             report.error(rel(path, root), f"broken link to {target}",
                          "point it at the moved or renamed file, or remove it if the target is gone")
@@ -560,7 +561,8 @@ def paths(args: argparse.Namespace) -> Tuple[str, str, str]:
     return root, os.path.join(root, args.index), os.path.join(root, args.dir)
 
 
-def disk_case(path: str, root: str) -> Optional[str]:
+def disk_case(path: str, root: str,
+              directory_cache: Optional[Dict[str, List[str]]] = None) -> Optional[str]:
     """`path` spelled as on disk, or None when missing. macOS accepts any
     casing, but Git, Linux and web hosts do not."""
     path, root = os.path.normpath(os.path.abspath(path)), os.path.normpath(root)
@@ -571,7 +573,11 @@ def disk_case(path: str, root: str) -> Optional[str]:
         if part == ".":
             continue
         try:
-            names = os.listdir(current)
+            names = directory_cache.get(current) if directory_cache is not None else None
+            if names is None:
+                names = os.listdir(current)
+                if directory_cache is not None:
+                    directory_cache[current] = names
         except OSError:
             return path if os.path.exists(path) else None
         match = part if part in names else next((n for n in names if n.lower() == part.lower()), None)
@@ -585,8 +591,9 @@ def shown(path: str, root: str) -> str:
     return rel(disk_case(path, root) or path, root)
 
 
-def check_case(path: str, root: str, what: str, option: str, report: Report) -> None:
-    actual = disk_case(path, root)
+def check_case(path: str, root: str, what: str, option: str, report: Report,
+               directory_cache: Optional[Dict[str, List[str]]] = None) -> None:
+    actual = disk_case(path, root, directory_cache)
     if actual and actual != os.path.normpath(os.path.abspath(path)):
         report.error(rel(actual, root), f"{what} is spelled {rel(actual, root)}, not {rel(path, root)}",
                      f"rename it with `git mv`, or pass {option} {rel(actual, root)}; "
@@ -696,11 +703,12 @@ def cmd_check(args: argparse.Namespace) -> int:
 def check_report(args: argparse.Namespace) -> Tuple[Report, List[Brief]]:
     root, index_path, brief_dir = paths(args)
     report = Report()
+    directory_cache: Dict[str, List[str]] = {}
     if not os.path.isdir(brief_dir):
         report.error(rel(brief_dir, root), "brief directory not found",
                      "run `init`, or pass --dir for a roadmap kept elsewhere")
-    check_case(brief_dir, root, "brief directory", "--dir", report)
-    check_case(index_path, root, "index", "--index", report)
+    check_case(brief_dir, root, "brief directory", "--dir", report, directory_cache)
+    check_case(index_path, root, "index", "--index", report, directory_cache)
     briefs = load_briefs(brief_dir, report, root, index_path)
     if not os.path.exists(index_path):
         report.error(rel(index_path, root), "index not found",
@@ -715,10 +723,10 @@ def check_report(args: argparse.Namespace) -> Tuple[Report, List[Brief]]:
             if parts[1] != render(index_path, briefs):
                 report.error(rel(index_path, root), "generated lists are out of date with the briefs",
                              "run `sync`; make lasting changes in the briefs, not the generated lines")
-        check_links(index_path, text, root, report)
+        check_links(index_path, text, root, report, directory_cache)
     validate(briefs, index_path, root, args.strict, report)
     for brief in briefs:
-        check_links(brief.path, brief.text, root, report)
+        check_links(brief.path, brief.text, root, report, directory_cache)
     return report, briefs
 
 

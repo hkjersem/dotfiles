@@ -1,5 +1,8 @@
 """Roadmap skill script tests using disposable repositories."""
 
+import argparse
+from collections import Counter
+import importlib.util
 import os
 from pathlib import Path
 import subprocess
@@ -7,12 +10,16 @@ import sys
 import tempfile
 import textwrap
 import unittest
+from unittest.mock import patch
 
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "agents/skills/roadmap/scripts/roadmap.py"
 # The skill promises compatibility with macOS's bundled Python 3.9.
 PYTHON = "/usr/bin/python3" if os.path.exists("/usr/bin/python3") else sys.executable
+SPEC = importlib.util.spec_from_file_location("roadmap_skill_test", SCRIPT)
+ROADMAP = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(ROADMAP)
 
 
 def brief(front_matter, body="[Roadmap](../ROADMAP.md)\n"):
@@ -120,6 +127,60 @@ class RoadmapScriptTests(unittest.TestCase):
         self.assertEqual(result.stdout.count("dependency cycle"), 2)
         self.assertIn("unknown item `missing`", result.stdout)
         self.assertIn("dropped item `gone`", result.stdout)
+
+    def test_check_reuses_directory_listings_without_skipping_link_errors(self):
+        self.init()
+        self.write("docs/Guide.md", "# Guide\n")
+        for name, prefix, status in (
+                ("live", "../", "active"), ("archive/old", "../../", "done")):
+            body = (f"[Roadmap]({prefix}ROADMAP.md)\n"
+                    + f"[Guide]({prefix}docs/Guide.md)\n" * 20
+                    + f"[Wrong case]({prefix}docs/guide.md)\n"
+                    + f"[Missing]({prefix}docs/missing.md)\n")
+            self.write(f"roadmap/{name}.md", brief(f"title: Item\nstatus: {status}", body))
+        result = self.run_script("sync")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        args = argparse.Namespace(root=str(self.root), index="ROADMAP.md",
+                                  dir="roadmap", strict=False)
+        with patch.object(ROADMAP.os, "listdir", wraps=os.listdir) as listing:
+            report, _ = ROADMAP.check_report(args)
+        self.assertEqual(len(report.errors), 4, report.errors)
+        for name, prefix in (("live", "../"), ("archive/old", "../../")):
+            self.assertTrue(any(
+                f"roadmap/{name}.md: link to {prefix}docs/guide.md differs in case from docs/Guide.md"
+                in error for error in report.errors), report.errors)
+            self.assertTrue(any(
+                f"roadmap/{name}.md: broken link to {prefix}docs/missing.md"
+                in error for error in report.errors), report.errors)
+        counts = Counter(os.fspath(call.args[0]) for call in listing.call_args_list)
+        self.assertEqual(counts[str(self.root)], 1, counts)
+        self.assertEqual(counts[str(self.root / "docs")], 1, counts)
+
+    def test_check_refreshes_directory_listings_between_runs(self):
+        self.init()
+        self.write("docs/Existing.md", "# Existing\n")
+        self.write("roadmap/live.md", brief(
+            "title: Item\nstatus: active",
+            "[Roadmap](../ROADMAP.md)\n[Later](../docs/Later.md)\n"))
+        result = self.run_script("sync")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        args = argparse.Namespace(root=str(self.root), index="ROADMAP.md",
+                                  dir="roadmap", strict=False)
+        report, _ = ROADMAP.check_report(args)
+        self.assertEqual(len(report.errors), 1, report.errors)
+        self.assertIn("broken link to ../docs/Later.md", report.errors[0])
+
+        target = self.write("docs/Later.md", "# Later\n")
+        report, _ = ROADMAP.check_report(args)
+        self.assertEqual(report.errors, [])
+        target = target.rename(self.root / "docs/later.md")
+        report, _ = ROADMAP.check_report(args)
+        self.assertEqual(len(report.errors), 1, report.errors)
+        self.assertIn("differs in case from docs/later.md", report.errors[0])
+        target.unlink()
+        report, _ = ROADMAP.check_report(args)
+        self.assertEqual(len(report.errors), 1, report.errors)
+        self.assertIn("broken link to ../docs/Later.md", report.errors[0])
 
     def test_front_matter_rejects_unsupported_syntax(self):
         self.init()
