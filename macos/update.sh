@@ -2,23 +2,26 @@
 # Update installed software, then audit. Run as dotfiles-update, which passes --no-defaults.
 
 SKIP_DEFAULTS=false
+SKIP_OS_UPDATES=false
 for arg in "$@"; do
   case "$arg" in
     -h|--help)
       cat <<'EOF'
-Usage: dotfiles-update
+Usage: dotfiles-update [options]
 
 Updates macOS and App Store apps, Command Line Tools, Homebrew packages, Node
 and npm globals, Zsh plugins and supported installed CLIs, then runs the audit.
 It does not pull this repository; run git pull in ~/.dotfiles for that.
 
 Options:
+  --skip-os-updates  Skip macOS updates and their restart prompt; still update apps and Command Line Tools
   --no-defaults  Skip applying macOS defaults (osxdefaults.sh); dotfiles-update always passes it
   -h, --help     Show this help
 EOF
       exit 0
       ;;
     --no-defaults) SKIP_DEFAULTS=true ;;
+    --skip-os-updates) SKIP_OS_UPDATES=true ;;
     *) echo "Error: unknown option: $arg (see --help)" >&2; exit 2 ;;
   esac
 done
@@ -34,13 +37,15 @@ subheader() { out_subsection "$1"; }
 
 header "System & App Store"
 # Update macOS
-UPDATE_OUT=$(softwareupdate -i -a 2>&1)
-echo "$UPDATE_OUT"
-if echo "$UPDATE_OUT" | grep -qi "restart"; then
-    read -r -p "A restart is required to complete installation. Restart now? [y/N] " _response
-    if [[ "$_response" =~ ^[Yy]$ ]]; then
-        sudo -n true 2>/dev/null && echo "Restarting..." || { echo "Administrator access required to restart. Please enter your password:"; sudo -v; echo "Restarting..."; }
-        sudo shutdown -r now
+if [[ "$SKIP_OS_UPDATES" == false ]]; then
+    UPDATE_OUT=$(softwareupdate -i -a 2>&1)
+    echo "$UPDATE_OUT"
+    if echo "$UPDATE_OUT" | grep -qi "restart"; then
+        read -r -p "A restart is required to complete installation. Restart now? [y/N] " _response
+        if [[ "$_response" =~ ^[Yy]$ ]]; then
+            sudo -n true 2>/dev/null && echo "Restarting..." || { echo "Administrator access required to restart. Please enter your password:"; sudo -v; echo "Restarting..."; }
+            sudo shutdown -r now
+        fi
     fi
 fi
 # Update App Store apps

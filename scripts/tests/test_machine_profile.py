@@ -244,6 +244,37 @@ class MachineProfileTests(unittest.TestCase):
             self.assertEqual([call[1] for call in self.calls("gcloud")],
                              [["components", "update", "--quiet"]])
 
+    def test_updater_can_skip_os_updates_without_skipping_apps_or_tools(self):
+        self.set_profile("personal")
+        for tool in ("mas", "sudo"):
+            self.write_mock(self.bin / tool)
+        with (self.bin / "softwareupdate").open("a") as mock:
+            mock.write('\nprint("A restart is required to complete installation.")\n')
+        for skip in (False, True):
+            with self.subTest(skip_os_updates=skip):
+                if self.log.exists():
+                    self.log.unlink()
+                args = ["--no-defaults"]
+                if skip:
+                    args.append("--skip-os-updates")
+                result = self.run_script("macos/update.sh", *args)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(
+                    [call[1] for call in self.calls("softwareupdate")],
+                    [] if skip else [["-i", "-a"]],
+                )
+                self.assertEqual("A restart is required" in result.stdout, not skip)
+                self.assertFalse(self.calls("sudo"))
+                self.assertEqual([call[1] for call in self.calls("mas")], [["upgrade"]])
+                self.assertIn(
+                    ["brew", ["doctor", "check_clt_minimum_version", "check_clt_up_to_date"], "personal"],
+                    self.calls(),
+                )
+                self.assertIn(["brew", ["upgrade", "--yes"], "personal"], self.calls())
+                self.assertIn(
+                    ["bash", [str(self.dotfiles / "scripts/audit.sh")], "personal"], self.calls(),
+                )
+
     def test_personal_gcloud_is_updated_by_full_updater(self):
         self.set_profile("personal")
         self.write_mock(self.bin / "gcloud")

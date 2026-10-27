@@ -44,6 +44,9 @@ The commands from this repository print their options with `--help`, and zsh
 completes them: type `pmu --` and press Tab. Flags a command does not accept
 turn red as you type.
 
+Use `dotfiles-update --skip-os-updates` to skip macOS updates and their restart
+prompt while still updating App Store apps, Command Line Tools, and other tools.
+
 `dotfiles-update` updates installed software, not this Git checkout. To get new
 dotfiles and reapply their symlinks:
 
