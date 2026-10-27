@@ -61,7 +61,6 @@ _Nothing committed._
 - **COPILOT_HOME warning**: setting it stops Copilot from reading `~/.agents/skills`, so the audit could warn when it is set. When: next time `audit-skills.sh` changes.
 - **Manage agent hooks, MCP and plugins**: Claude, Codex and Copilot all support user-level hooks and MCP. Keep files that hold secrets out of Git. When: a hook or MCP server is wanted on every machine.
 - **Frecency directory jumping**: [zoxide](https://github.com/ajeetdsouza/zoxide) (or similar) jumps to frequently used directories by partial name and works with fzf. It needs a Brewfile entry and an init line in `zsh/conf.d/`. When: anytime.
-- **Per-directory environment**: [direnv](https://direnv.net/) loads environment variables and tokens for each project, and could extend the work/personal split beyond Git identity. It needs a Brewfile entry and `eval "$(direnv hook zsh)"` in `env.zsh`. When: a project needs its own environment variables or tokens.
 
 ## Not doing
 
@@ -69,3 +68,4 @@ _Nothing committed._
 
 - **dotbot-brew / dotbot-git plugins**: these would make `./install` slow, need network access and rely on small, barely maintained plugins. Setup and update already run `brew bundle` and `install-zsh-plugins.sh`, and keeping links separate from installs is deliberate.
 - **Shell start-up rewrite (lazy loading, zimfw)**: an interactive shell starts in about 0.1 s with the compinit and zcompile shortcuts in place, so there is little to gain.
+- **direnv (per-directory environment)**: the machine profile covers each Mac and Git identity already switches by directory, so per-project variables add a tool without a current need.
