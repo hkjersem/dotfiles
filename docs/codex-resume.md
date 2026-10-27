@@ -42,12 +42,15 @@ limit stop. If its reply hits the limit again, it is resumed after the next
 reset.
 
 Each 5-hour window holds up to three chats of one tier. Unmarked chats come
-first. Start a chat's title with `!` to stagger it to the next window, `!!` to
-the window after that, and so on. Marks never hold a chat back when no lower
-tier is waiting, and a chat of the window's tier or lower that stops meanwhile
-joins it while it has room. When a marked chat is resumed, its marks are
-removed. The app shows a title changed this way after it restarts. Pause the
-check with `--recurring off` to keep a daytime window free.
+first. Start a chat's title with `!` to make it sit out one window, `!!` two,
+and so on. Each window that runs while a marked chat waits removes one of its
+`!`, once, so `!!Fix` becomes `!Fix` and then `Fix`. A chat can't join the
+window that passed it by; this is recorded with the resumes. Marks never hold
+a chat back when no lower tier is waiting, and a chat of the window's tier or
+lower that stops meanwhile joins it while it has room. When a marked chat is
+resumed, any marks left are removed. Titles are read at each check, so you can
+rename a chat at any time; the app shows a title the check changed after it
+restarts. Pause the check with `--recurring off` to keep a daytime window free.
 
 Add `--morning 09.00` to plan nights around that time. From ten hours before
 it, at 23.00 here, a single waiting chat waits for a window from five hours
@@ -59,8 +62,9 @@ for the morning, so a new window is free then.
 Only chats updated in the last eight days are checked. A chat stopped more than
 24 hours before the most recently stopped chat is skipped: an earlier limit
 stopped it, and it was likely left on purpose. The check runs alongside a
-scheduled resume, opens the app if it isn't running, and logs only what it sends, when it waits for a reset, and any
-errors. `--status` shows when it last checked and lists the chats stopped by a
+scheduled resume, opens the app if it isn't running, and logs only what it
+sends or renames, when it waits for a reset, and any errors. `--status` shows
+when it last checked and lists the chats stopped by a
 usage limit: whether each continues at the next check, when it is planned to
 continue if the limits allow it then, or is left alone as an older limit
 stopped it. A chat the app hasn't titled yet shows as

@@ -830,11 +830,12 @@ class CodexResumeTests(unittest.TestCase):
 
     def recurring(self, chats, allowed=True, state=None, queued=True, now="2026-10-21T10:00:00+02:00",
                   stopped="2026-10-21T01:00:00+02:00", minutes=15, resets=None, sent=None, after_wait=None,
-                  morning=None, rename_error=None):
+                  morning=None, rename_error=None, scan_error=None):
         """Run one recurring check, set up every minutes, with chats stuck since stopped and a used-up limit
         resetting at resets; allowed is the answer, or the answers in turn, to whether the limits allow use.
         A wait ends at sent, with the chats in after_wait (default: the same) still stuck. Chats are named by
-        their id; renaming one fails with rename_error if given, and self.renames records the new names.
+        their id, or given as (id, title); if given, reading them fails with scan_error and renaming one with
+        rename_error, and self.renames records the new names.
         Return the chats it resumed, what it printed, and the state it saved."""
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -867,10 +868,13 @@ class CodexResumeTests(unittest.TestCase):
 
         def stuck(moment, since):
             # As the real one does, stops before a chat's last resume do not count.
+            if scan_error is not None:
+                raise scan_error
             stop = datetime.fromisoformat(stopped)
             waited = after_wait is not None and wait.called
-            return [{**self.LOCAL_CHAT, "id": name, "name": name, "stopped": stop}
-                    for name in (after_wait if waited else chats) if name not in since or since[name] < stop]
+            found = [chat if isinstance(chat, tuple) else (chat, chat) for chat in (after_wait if waited else chats)]
+            return [{**self.LOCAL_CHAT, "id": chat, "name": title, "stopped": stop}
+                    for chat, title in found if chat not in since or since[chat] < stop]
 
         answers = {"side_effect": allowed} if isinstance(allowed, list) else {"return_value": allowed}
         self.renames = []
@@ -1042,23 +1046,37 @@ class CodexResumeTests(unittest.TestCase):
         self.assertEqual(state["resumed"], {"a": "2026-10-21T10:00:00+02:00"})
         self.assertEqual(self.recurring(["a"], state=state)[0], [])
 
-    def test_marked_chats_go_in_later_windows_and_lose_their_marks_when_resumed(self):
-        # Unmarked chats get the first window, and ! the one after; marks are only removed from resumed chats.
-        resumed, _, state = self.recurring(["!b", "a", "!! c", "d"])
-        self.assertEqual((resumed, self.renames), (["a", "d"], []))
+    def test_marked_chats_sit_out_a_window_per_mark(self):
+        # Unmarked chats get the first window, which removes one ! from each marked chat it passes by.
+        resumed, _, state = self.recurring(["!b", "a", "!!c", "d"])
+        self.assertEqual((resumed, self.renames), (["a", "d"], [("!b", "b"), ("!!c", "!c")]))
         self.assertEqual(state["window"], {"start": "2026-10-21T10:00:00+02:00", "tier": 0, "early": False})
-        # A chat of the window's tier or lower joins it while it has room; a higher one waits for it to end.
-        resumed, _, state = self.recurring(["!b", "!! c", "e"], state=state, now="2026-10-21T14:59:00+02:00")
-        self.assertEqual(resumed, ["e"])
-        resumed, _, state = self.recurring(["!b", "!! c"], state=state, now="2026-10-21T15:00:00+02:00")
-        self.assertEqual((resumed, self.renames), (["!b"], [("!b", "b")]))
-        # With no lower tier waiting, the next window takes the next tier.
-        resumed, _, state = self.recurring(["!! c"], state=state, now="2026-10-21T20:00:00+02:00")
-        self.assertEqual((resumed, self.renames), (["!! c"], [("!! c", "c")]))
+        b, c = ("!b", "b"), ("!!c", "!c")
+        # A marked chat that stops meanwhile is passed by too, and cannot join the window that passed it by,
+        # though there is room; each window removes only one ! from a chat.
+        resumed, _, state = self.recurring([b, c, "!g"], state=state, now="2026-10-21T10:15:00+02:00")
+        self.assertEqual((resumed, self.renames), ([], [("!g", "g")]))
+        g = ("!g", "g")
+        # A check that cannot read the chats keeps the record of which window passed them by.
+        with self.assertRaisesRegex(RuntimeError, "unreadable"):
+            self.recurring([], state=state, now="2026-10-21T10:20:00+02:00", scan_error=RuntimeError("unreadable"))
+        state = json.loads(self.state_path.read_text())
+        resumed, _, state = self.recurring([b, c, g, "e"], state=state, now="2026-10-21T10:30:00+02:00")
+        self.assertEqual((resumed, self.renames), (["e"], []))
+        # The next window takes them as any other chats, newest first.
+        resumed, _, state = self.recurring([b, g, c], state=state, now="2026-10-21T15:30:00+02:00")
+        self.assertEqual((resumed, self.renames), (["!b", "!g"], [("!!c", "c")]))
+        resumed, _, state = self.recurring([("!!c", "c")], state=state, now="2026-10-21T20:30:00+02:00")
+        self.assertEqual((resumed, state["passed"]), (["!!c"], {}))
+        # A failed rename is retried at the next check, so the chat does not sit out a window it was not counted
+        # as passed by.
+        resumed, _, state = self.recurring(["a", "!b"], rename_error=RuntimeError("app server is down"))
+        self.assertEqual((resumed, state["passed"]), (["a"], {}))
+        self.assertEqual(self.errors, "[stamp] Could not remove a ! from chat '!b': app server is down\n")
         # A failed rename is reported without stopping the run, and a window nothing was queued in never starts.
         resumed, _, _ = self.recurring(["!b"], rename_error=RuntimeError("app server is down"))
         self.assertEqual((resumed, self.watch.call_count), (["!b"], 1))
-        self.assertEqual(self.errors, "[stamp] Could not remove the ! from chat '!b': app server is down\n")
+        self.assertEqual(self.errors, "[stamp] Could not remove the marks from chat '!b': app server is down\n")
         self.assertIsNone(self.recurring(["a"], queued=False)[2]["window"])
         # A chat Codex is already replying in gets nothing: it keeps its marks, and neither the cap nor a window
         # counts it, though its earlier stop is not resumed later.
@@ -1067,7 +1085,7 @@ class CodexResumeTests(unittest.TestCase):
         self.assertEqual(self.recurring(["!b"], state=state)[0], [])
         # A title of marks alone cannot be emptied, so that is reported.
         self.recurring(["!!"])
-        self.assertEqual((self.renames, self.errors), ([], "[stamp] Could not remove the ! from chat '!!': its "
+        self.assertEqual((self.renames, self.errors), ([], "[stamp] Could not remove the marks from chat '!!': its "
                                                             "title is only marks; rename it in the app\n"))
 
     def test_at_night_chats_are_split_so_a_new_window_is_free_by_morning(self):
@@ -1095,9 +1113,9 @@ class CodexResumeTests(unittest.TestCase):
             return {chat: f"{at:%H.%M}" for chat, at in planned.items()}
 
         with local_zone("Europe/Oslo"):
-            # By day, each tier gets its own window of up to three, unmarked chats first.
+            # By day, unmarked chats come first, and a marked chat sits out one window per mark.
             self.assertEqual(times("a", "b", "c", "d", "!e", now="2026-10-21T12:00:00+02:00"),
-                             {"a": "12.00", "b": "12.00", "c": "12.00", "d": "17.00", "!e": "22.00"})
+                             {"a": "12.00", "b": "12.00", "c": "12.00", "d": "17.00", "!e": "17.00"})
             self.assertEqual(times("a"), {"a": "04.00"})
             self.assertEqual(times("a", "b", "c"), {"a": "23.00", "b": "04.00", "c": "04.00"})
             self.assertEqual(times("!a", "!!b"), {"!a": "23.00", "!!b": "04.00"})
@@ -1167,7 +1185,7 @@ class CodexResumeTests(unittest.TestCase):
                 "─ Recurring check ──────────────────────────────────────────",
                 "  Every       15 minutes",
                 "  Sends       continue to up to 3 stopped chats per 5 hours, newest first, once the usage "
-                "limits allow; titles starting with ! go in a later window, one per !",
+                "limits allow; titles starting with ! sit out one window per !, each removing one",
             ]
             not_scheduled = ["", "─ Scheduled resume ─────────────────────────────────────────", "  None."]
             self.assertEqual(recurring_status.getvalue().splitlines(), [
