@@ -60,7 +60,8 @@ per line, such as `brew:tool` or `home:.config/dir`.
 
 `codex-resume` sends `continue`, or a custom message, to a Codex desktop chat
 on this Mac now, at a set time or when a usage limit resets, even while the
-screen is locked. `--recurring` keeps resuming chats a usage limit stopped.
+screen is locked. `--recurring` keeps resuming chats a usage limit stopped,
+with `!` in a title to stagger chats and `--morning` to plan nights.
 
 ```sh
 codex-resume --time 15.03 --chat "explore pwa"

@@ -41,14 +41,29 @@ as `--reset` does, instead of at the next check. Each chat is resumed once per
 limit stop. If its reply hits the limit again, it is resumed after the next
 reset.
 
+Each 5-hour window holds up to three chats of one tier. Unmarked chats come
+first. Start a chat's title with `!` to stagger it to the next window, `!!` to
+the window after that, and so on. Marks never hold a chat back when no lower
+tier is waiting, and a chat of the window's tier or lower that stops meanwhile
+joins it while it has room. When a marked chat is resumed, its marks are
+removed. The app shows a title changed this way after it restarts. Pause the
+check with `--recurring off` to keep a daytime window free.
+
+Add `--morning 09.00` to plan nights around that time. From ten hours before
+it, at 23.00 here, a single waiting chat waits for a window from five hours
+before it, at 04.00. Two or more are split: an early window takes the smaller
+half, or only the lowest tier when tiers differ, and takes no later chats. The
+rest wait for the 04.00 window. From an hour after that, at 05.00, chats wait
+for the morning, so a new window is free then.
+
 Only chats updated in the last eight days are checked. A chat stopped more than
 24 hours before the most recently stopped chat is skipped: an earlier limit
 stopped it, and it was likely left on purpose. The check runs alongside a
 scheduled resume, opens the app if it isn't running, and logs only what it sends, when it waits for a reset, and any
 errors. `--status` shows when it last checked and lists the chats stopped by a
-usage limit: whether each continues once the limit allows, waits for room
-among the three per five hours (with the earliest time), or is left alone as an
-older limit stopped it. A chat the app hasn't titled yet shows as
+usage limit: whether each continues at the next check, when it is planned to
+continue if the limits allow it then, or is left alone as an older limit
+stopped it. A chat the app hasn't titled yet shows as
 `untitled (folder, start of its ID)`. `--recurring off` stops it. If
 its record of resumed chats can't be read, it stops sending rather than risk
 sending twice, and `--status` and the log say which file to fix or delete.

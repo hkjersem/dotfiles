@@ -33,14 +33,20 @@ session logs uncompressed for over a week. Chats the limit stopped more than
 24 hours before it stopped the latest one were left stuck by an earlier limit
 and are skipped. Once the limits read through the CLI allow use, it queues
 continue to up to three chats, newest first, and at most three in any five
-hours, queueing them together and following them in one loop. When a used-up
+hours, queueing them together and following them in one loop. Each 5-hour
+window takes up to three chats of one tier, the number of ! their title starts
+with (read from Codex's thread records, which the catalogue only catches up
+with on restart); resuming a marked chat removes its marks through the app
+server. With --morning HH:MM, nights from ten hours before it split waiting
+chats between an early window and one five hours before it. When a used-up
 limit resets before the next check, the check waits and sends a minute after
 the reset, as --reset does. When each chat was last resumed is recorded before queueing in
-~/Library/Application Support/codex-resume/recurring.json, and only limit stops
+~/Library/Application Support/codex-resume/recurring.json, with the resumes and
+window counted towards the caps, and only limit stops
 after that count, so each chat is resumed once per stop. An unreadable record
 stops the checks rather than risk sending twice, and a lock skips a check while
 another runs. It logs only what it sends, when it waits for a reset, and
-errors, and does not inhibit sleep. --status lists the stuck chats and what the next check does with each.
+errors, and does not inhibit sleep. --status lists the stuck chats and when each is planned to continue.
 --recurring off removes it; --cancel leaves it alone.
 
 A scheduled resume is a user LaunchAgent that starts immediately under
@@ -106,6 +112,14 @@ RECURRING_STATE_PATH = Path.home() / "Library/Application Support/codex-resume/r
 RECURRING_CHATS = 3
 RECURRING_PERIOD = timedelta(hours=5)
 RECURRING_LOOKBACK = timedelta(hours=24)
+# Each leading ! in a chat's title puts it one window later than unmarked chats.
+TIER_MARKER = "!"
+# With --morning, nights run this long before it; a window started this long before it ends by then, and one
+# may start up to LATE_SLACK later.
+NIGHT_LENGTH = timedelta(hours=10)
+LATE_SLACK = timedelta(hours=1)
+# How far ahead --status works out when waiting chats continue.
+PLAN_HORIZON = timedelta(days=2)
 # Codex keeps session logs uncompressed for over a week, longer than a weekly limit stays used up.
 RECURRING_SCAN = timedelta(days=8)
 USAGE_LIMIT_ERROR = "usage_limit_exceeded"
@@ -118,6 +132,7 @@ MIN_RESET_CHECK_MINUTES = 5
 LATE_SECONDS = 120
 CODEX_HOME = Path.home() / ".codex"
 CHAT_CATALOG = "sqlite/codex-dev.db"
+CHAT_NAMES = "state_5.sqlite"
 CODEX_CLI_PATHS = (
     Path("/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex"),
     Path.home() / "Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex",
@@ -207,15 +222,30 @@ def load_chats():
             connection.close()
     except sqlite3.Error as error:
         raise RuntimeError(f"Could not read Codex chats from {path}: {error}") from error
+    names = chat_names()
     return [
         {
             "id": chat_id,
-            "name": " ".join((name or "").split()),
+            "name": " ".join((names.get(chat_id) or name or "").split()),
             "cwd": cwd,
             "updated": datetime.fromtimestamp(updated).astimezone(),
         }
         for chat_id, name, cwd, updated in rows
     ]
+
+
+def chat_names():
+    """Chat titles as last set, in the app or through the app server. The app's catalogue shows a title set
+    through the app server only after the app restarts; without this record, the catalogue's titles are used."""
+    path = CODEX_HOME / CHAT_NAMES
+    try:
+        connection = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)
+        try:
+            return dict(connection.execute("SELECT id, name FROM threads WHERE name <> ''").fetchall())
+        finally:
+            connection.close()
+    except sqlite3.Error:
+        return {}
 
 
 def latest_chat():
@@ -828,48 +858,114 @@ def all_stuck_chats(now=None, resumed=None):
                   key=lambda chat: chat["stopped"], reverse=True)
 
 
-def stuck_overview(now, resumed, sends):
-    """Each chat stuck at a usage limit, newest first, with what the next recurring check does with it:
-    resume, wait for the cap of three resumes in five hours, or skip, as an earlier limit stopped it. A waiting
-    chat comes with when the cap next has room for it, or None when that depends on resumes not made yet."""
-    recent = sorted(at for at in sends if at >= now - RECURRING_PERIOD)
-    free = max(0, RECURRING_CHATS - len(recent))
-    waiting = 0
-    overview = []
-    for chat in all_stuck_chats(now, resumed):
-        if chat["earlier"]:
-            overview.append((chat, "skip", None))
-        elif free:
-            free -= 1
-            overview.append((chat, "resume", None))
-        else:
-            # Each waiting chat takes the place of the oldest resume still counted.
-            room = recent[waiting] + RECURRING_PERIOD if waiting < len(recent) else None
-            waiting += 1
-            overview.append((chat, "wait", room))
-    return overview
+def chat_tier(chat):
+    """How many windows after unmarked chats this chat continues: the number of ! its title starts with."""
+    name = chat["name"] or ""
+    return len(name) - len(name.lstrip(TIER_MARKER))
+
+
+def night_end(now, morning):
+    """With a morning time set, the morning that ends the night now falls in; None by day."""
+    if morning is None:
+        return None
+    end = next_occurrence(morning, now)
+    return end if now >= end - NIGHT_LENGTH else None
+
+
+def window_active(window, now):
+    return window is not None and now < window["start"] + RECURRING_PERIOD
+
+
+def plan_resumes(chats, now, sends, window, morning=None):
+    """Which of the waiting chats, newest first, to resume at now, and the window that then runs.
+
+    A window holds up to three chats of one tier, the lowest waiting, and lasts five hours from its first resume;
+    chats of that tier or lower that stop meanwhile join it while it has room. No more than three resumes are made
+    in any five hours. At night, a single waiting chat waits for the window that ends at morning; two or more are
+    split between an early window, which takes no later chats, and that one, which may start up to an hour late.
+    """
+    room = RECURRING_CHATS - sum(at > now - RECURRING_PERIOD for at in sends)
+    if room <= 0 or not chats:
+        return [], window
+    if window_active(window, now):
+        if window["early"]:
+            return [], window
+        room = min(room, RECURRING_CHATS - sum(at >= window["start"] for at in sends))
+        return [chat for chat in chats if chat_tier(chat) <= window["tier"]][:room], window
+    tier = min(chat_tier(chat) for chat in chats)
+    lowest = [chat for chat in chats if chat_tier(chat) == tier]
+    early = False
+    end = night_end(now, morning)
+    if end is not None:
+        late = end - RECURRING_PERIOD
+        if now > late + LATE_SLACK:
+            return [], window
+        if now < late:
+            if len(chats) < 2:
+                return [], window
+            early = True
+            # With one tier waiting, the late window gets the larger half.
+            if len(lowest) == len(chats):
+                lowest = lowest[:len(chats) // 2]
+    return lowest[:min(room, RECURRING_CHATS)], {"start": now, "tier": tier, "early": early}
+
+
+def next_planning_time(now, sends, window, morning):
+    """The next moment the plan can change without new chats stopping: a window or resume ageing out of its
+    five hours, or a night boundary."""
+    moments = [at + RECURRING_PERIOD for at in sends]
+    if window is not None:
+        moments.append(window["start"] + RECURRING_PERIOD)
+    if morning is not None:
+        end = next_occurrence(morning, now)
+        moments += [end - NIGHT_LENGTH, end - RECURRING_PERIOD, end]
+    return min((moment for moment in moments if moment > now), default=None)
+
+
+def resume_times(chats, now, sends, window, morning=None):
+    """When each waiting chat continues, by its id, assuming the limits allow it then and no other chat stops;
+    chats that would continue beyond PLAN_HORIZON are left out."""
+    sends, waiting, times = list(sends), list(chats), {}
+    moment = now
+    while waiting and moment is not None and moment <= now + PLAN_HORIZON:
+        chosen, window = plan_resumes(waiting, moment, sends, window, morning)
+        times.update((chat["id"], moment) for chat in chosen)
+        sends += [moment] * len(chosen)
+        waiting = [chat for chat in waiting if chat["id"] not in times]
+        moment = next_planning_time(moment, sends, window, morning)
+    return times
+
+
+def stuck_overview(now, resumed, sends, window=None, morning=None):
+    """Each chat stuck at a usage limit, newest first, with when it continues: at now, at a later time, or None
+    when not within PLAN_HORIZON; chats an earlier limit stopped are skipped."""
+    chats = all_stuck_chats(now, resumed)
+    times = resume_times([chat for chat in chats if not chat["earlier"]], now, sends, window, morning)
+    return [(chat, "skip", None) if chat["earlier"]
+            else (chat, "resume" if times.get(chat["id"]) == now else "wait", times.get(chat["id"]))
+            for chat in chats]
 
 
 def print_field(label, value):
     print(f"  {label:<{STATUS_LABEL_WIDTH}}{value}")
 
 
-def print_stuck_overview(state):
+def print_stuck_overview(state, morning=None):
     now = local_now()
     resumed = {chat: at for chat, at in state["resumed"].items() if at >= now - RECURRING_SCAN}
-    overview = stuck_overview(now, resumed, state["sends"])
+    overview = stuck_overview(now, resumed, state["sends"], state.get("window"), morning)
     output.section(f"Chats stopped by a usage limit ({len(overview)})")
     if not overview:
         print("  None.")
         return
     rows = []
-    for chat, outcome, room in overview:
+    for chat, outcome, at in overview:
         if outcome == "resume":
             plan = "next check"
         elif outcome == "skip":
             plan = "left alone"
         else:
-            plan = format_time(room.astimezone()) if room is not None else "later"
+            plan = format_time(at.astimezone()) if at is not None else "later"
         rows.append((format_time(chat["stopped"].astimezone()), plan, chat_label(chat)))
     stopped_width = max(len("Stopped"), *(len(row[0]) for row in rows))
     plan_width = max(len("Continues"), *(len(row[1]) for row in rows))
@@ -913,7 +1009,7 @@ def load_recurring_state():
     try:
         state = json.loads(RECURRING_STATE_PATH.read_text())
     except FileNotFoundError:
-        return {"resumed": {}, "sends": []}
+        return {"resumed": {}, "sends": [], "window": None}
     except (OSError, ValueError) as error:
         raise RuntimeError(f"cannot read {RECURRING_STATE_PATH} ({error}); fix or delete it") from None
     try:
@@ -922,18 +1018,24 @@ def load_recurring_state():
         # written before this list existed have only resumed to go by.
         sends = ([datetime.fromisoformat(at) for at in state["sends"]] if "sends" in state
                  else list(resumed.values()))
-        if any(at.tzinfo is None for at in [*resumed.values(), *sends]):
+        window = state.get("window")
+        if window is not None:
+            window = {"start": datetime.fromisoformat(window["start"]), "tier": int(window["tier"]),
+                      "early": bool(window["early"])}
+        if any(at.tzinfo is None for at in [*resumed.values(), *sends, *([window["start"]] if window else [])]):
             raise ValueError("a time has no time zone")
     except (KeyError, AttributeError, TypeError, ValueError) as error:
         raise RuntimeError(f"unexpected contents in {RECURRING_STATE_PATH} ({error}); fix or delete it") from None
-    return {**state, "resumed": resumed, "sends": sends}
+    return {**state, "resumed": resumed, "sends": sends, "window": window}
 
 
 def save_recurring_state(state):
+    window = state.get("window")
     temporary = RECURRING_STATE_PATH.with_suffix(".tmp")
     temporary.write_text(json.dumps(
         {**state, "resumed": {chat: at.isoformat() for chat, at in state["resumed"].items()},
-         "sends": [at.isoformat() for at in state["sends"]]}, indent=1))
+         "sends": [at.isoformat() for at in state["sends"]],
+         "window": window and {**window, "start": window["start"].isoformat()}}, indent=1))
     temporary.replace(RECURRING_STATE_PATH)
 
 
@@ -941,25 +1043,40 @@ def local_now():
     return datetime.now().astimezone()
 
 
-def recurring_check(now=None):
-    """Queue continue to up to three chats stuck at a usage limit once the limits allow it; each chat once per
-    limit stop. Returns without checking while another check runs."""
+def recurring_check(now=None, morning=None):
+    """Queue continue to chats stuck at a usage limit once the limits allow it, as plan_resumes decides; each
+    chat once per limit stop. Returns without checking while another check runs."""
     RECURRING_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
     with RECURRING_STATE_PATH.with_suffix(".lock").open("w") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             return
-        check_stuck_chats(now or datetime.now().astimezone())
+        check_stuck_chats(now or datetime.now().astimezone(), morning)
 
 
-def check_stuck_chats(now):
+def unmark(chat):
+    """Remove the ! a resumed chat's title starts with, so its next stop counts as unmarked."""
+    if not chat_tier(chat):
+        return
+    name = chat["name"].lstrip(TIER_MARKER).strip()
+    try:
+        if not name:
+            raise RuntimeError("its title is only marks; rename it in the app")
+        app_server_request("thread/name/set", {"threadId": chat["id"], "name": name})
+    except RuntimeError as error:
+        print(f"{log_stamp()}Could not remove the {TIER_MARKER} from chat {chat_label(chat)}: {error}",
+              file=sys.stderr, flush=True)
+
+
+def check_stuck_chats(now, morning=None):
     state = load_recurring_state()
     resumed = {chat: at for chat, at in state["resumed"].items() if at >= now - RECURRING_SCAN}
     sends = [at for at in state["sends"] if at >= now - RECURRING_PERIOD]
     state.update(checked=now.isoformat(), resumed=resumed, sends=sends)
+    previous_window = state["window"]
     try:
-        chats = stuck_chats(now, resumed)
+        chats, window = plan_resumes(stuck_chats(now, resumed), now, sends, previous_window, morning)
         if not chats:
             return
         if not usage_allowed():
@@ -971,32 +1088,40 @@ def check_stuck_chats(now):
             wait_until_scheduled_time(resets.isoformat())
             # The wait can run late, as when the Mac slept, and chats can be resumed meanwhile.
             now = local_now()
-            chats = stuck_chats(now, resumed)
+            chats, window = plan_resumes(stuck_chats(now, resumed), now, sends, previous_window, morning)
             if not chats or not usage_allowed():
                 return
-        recent = sum(at >= now - RECURRING_PERIOD for at in sends)
         # All are queued first and then followed together, so the app takes them within seconds of each other.
         queued = []
         try:
-            for chat in chats[:max(0, RECURRING_CHATS - recent)]:
+            for chat in chats:
                 print(f"{log_stamp()}Chat {chat_label(chat)} stopped at a usage limit "
                       f"{format_time(chat['stopped'].astimezone())}; resuming it.", flush=True)
                 # Recorded first, so a message that may have been queued is never sent twice.
                 previous = resumed.get(chat["id"])
                 resumed[chat["id"]] = now
                 sends.append(now)
+                state["window"] = window
                 save_recurring_state(state)
                 try:
                     entry = queue_message(chat, None, log_stamp)
-                    if entry is not None:
-                        queued.append(entry)
                 except NotQueuedError as error:
                     print(f"{log_stamp()}{error}", file=sys.stderr, flush=True)
-                    sends.pop()
+                    entry = None
                     if previous is None:
                         del resumed[chat["id"]]
                     else:
                         resumed[chat["id"]] = previous
+                if entry is None:
+                    # Nothing was sent, either because queueing failed or because Codex is already replying in
+                    # the chat; a replying chat stays recorded, so its earlier stop is not resumed later.
+                    sends.pop()
+                    # A window none of its chats were resumed in has not started.
+                    if not any(at >= window["start"] for at in sends):
+                        state["window"] = previous_window
+                    continue
+                queued.append(entry)
+                unmark(chat)
         except RuntimeError:
             # The chats queued before the failure still need opening if the app leaves them queued.
             watch_queued(queued)
@@ -1049,22 +1174,43 @@ def install_agent(plist, path):
         raise
 
 
-def set_up_recurring(minutes):
+def set_up_recurring(minutes, morning=None):
     # No caffeinate: a check missed while the Mac sleeps runs when it wakes.
     install_agent({
         "Label": RECURRING_LABEL,
-        "ProgramArguments": [sys.executable, str(SCRIPT_PATH), "--recurring-check"],
+        "ProgramArguments": [sys.executable, str(SCRIPT_PATH), "--recurring-check",
+                             *(["--morning", morning] if morning else [])],
         "StartInterval": minutes * 60,
         "RunAtLoad": True,
         "StandardOutPath": str(LOG_PATH),
         "StandardErrorPath": str(LOG_PATH),
     }, RECURRING_PLIST_PATH)
     print(recurring_summary(minutes))
+    if morning:
+        print(night_summary(morning))
 
 
 def recurring_summary(minutes):
     return (f"Every {minutes} minutes, once the usage limits allow it, up to {RECURRING_CHATS} chats on this Mac "
-            "that stopped at a usage limit get continue via the Codex queue.")
+            "that stopped at a usage limit get continue via the Codex queue. Chats whose title starts with "
+            f"{TIER_MARKER} go in a later 5-hour window, one per {TIER_MARKER}.")
+
+
+def night_summary(morning):
+    end = next_occurrence(morning)
+    return (f"At night, from {end - NIGHT_LENGTH:%H.%M}, waiting chats are split between an early window and one "
+            f"from {end - RECURRING_PERIOD:%H.%M}, and a single chat waits for that one, so a new window is free "
+            f"at about {end:%H.%M}.")
+
+
+def recurring_morning():
+    """The morning time the recurring check plans nights around, or None."""
+    try:
+        with RECURRING_PLIST_PATH.open("rb") as agent_file:
+            arguments = plistlib.load(agent_file).get("ProgramArguments", [])
+    except FileNotFoundError:
+        return None
+    return arguments[arguments.index("--morning") + 1] if "--morning" in arguments else None
 
 
 def schedule(scheduled, message=None, chat=None, project=None, start_window=False, every=None, used_up=()):
@@ -1125,7 +1271,11 @@ def status():
     else:
         print_field("Every", f"{minutes} minutes")
         print_field("Sends", f"{DEFAULT_MESSAGE} to up to {RECURRING_CHATS} stopped chats per 5 hours, newest "
-                    "first, once the usage limits allow")
+                    f"first, once the usage limits allow; titles starting with {TIER_MARKER} go in a later "
+                    f"window, one per {TIER_MARKER}")
+        morning = recurring_morning()
+        if morning:
+            print_field("Mornings", f"{morning}. {night_summary(morning)}")
         try:
             state = load_recurring_state()
         except RuntimeError as error:
@@ -1135,7 +1285,7 @@ def status():
             print_field("Last check",
                         format_time(datetime.fromisoformat(checked).astimezone()) if checked else "not yet")
             try:
-                print_stuck_overview(state)
+                print_stuck_overview(state, morning)
             except RuntimeError as error:
                 output.section("Chats stopped by a usage limit")
                 print(f"  Could not read them: {error}")
@@ -1224,6 +1374,11 @@ def argument_parser():
              "'off' stops the checks",
     )
     actions.add_argument("--recurring-check", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--morning", metavar="HH:MM",
+        help="with --recurring, plan nights around this time: from ten hours before it, chats go in an early "
+             "window and one starting five hours before it, so a new window is free then",
+    )
     actions.add_argument("--status", action="store_true",
                          help="show the scheduled resume, the recurring check and chats stopped at a usage limit")
     actions.add_argument("--cancel", action="store_true", help="cancel the scheduled resume")
@@ -1298,6 +1453,13 @@ def main(arguments):
     if options.limits:
         print(describe_limits(usage_limits()))
         return 0
+    if options.morning is not None:
+        if not (options.recurring not in (None, "off") or options.recurring_check):
+            parser.error("--morning requires --recurring MINUTES")
+        match = TIME_PATTERN.fullmatch(options.morning)
+        if match is None:
+            parser.error(f"invalid --morning time {options.morning!r}: expected 24-hour HH:MM, HH.MM, or HHMM")
+        options.morning = ":".join(match.groups())
     if options.recurring is not None:
         if options.recurring == "off":
             print("Recurring check stopped." if remove_agent(RECURRING_LABEL, RECURRING_PLIST_PATH)
@@ -1305,11 +1467,11 @@ def main(arguments):
             return 0
         if not options.recurring.isdigit() or int(options.recurring) < MIN_RESET_CHECK_MINUTES:
             parser.error(f"--recurring takes 'off' or a number of minutes, at least {MIN_RESET_CHECK_MINUTES}")
-        set_up_recurring(int(options.recurring))
+        set_up_recurring(int(options.recurring), options.morning)
         return 0
     if options.recurring_check:
         try:
-            recurring_check()
+            recurring_check(morning=options.morning)
         except (OSError, RuntimeError, ValueError) as error:
             print(f"{log_stamp()}Recurring check stopped: {error}", file=sys.stderr, flush=True)
             return 1
