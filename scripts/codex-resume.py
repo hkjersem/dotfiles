@@ -952,11 +952,11 @@ def pass_by(chats, chosen, window, now, passed):
     return result, passed
 
 
-def resume_times(chats, now, sends, window, morning=None, passed=None):
-    """When each waiting chat continues, by its id, assuming the limits allow it then and no other chat stops;
-    chats that would continue beyond PLAN_HORIZON are left out."""
+def resume_times(chats, now, sends, window, morning=None, passed=None, start=None):
+    """When each waiting chat continues, by its id, planning from start, now by default, and assuming the limits
+    allow it then and no other chat stops; chats that would continue beyond PLAN_HORIZON from now are left out."""
     sends, waiting, passed, times = list(sends), list(chats), passed or {}, {}
-    moment = now
+    moment = start or now
     while waiting and moment is not None and moment <= now + PLAN_HORIZON:
         chosen, window = plan_resumes(waiting, moment, sends, window, morning, passed)
         times.update((chat["id"], moment) for chat in chosen)
@@ -966,11 +966,32 @@ def resume_times(chats, now, sends, window, morning=None, passed=None):
     return times
 
 
+def used_up_reset():
+    """A minute after a used-up usage limit resets, when the recurring check sends; None when no limit is used up
+    or the limits cannot be read."""
+    try:
+        windows = usage_limits()
+    except RuntimeError:
+        return None
+    return reset_time(windows) if any(window["used"] >= 100 for window in windows) else None
+
+
 def stuck_overview(now, resumed, sends, window=None, morning=None, passed=None):
     """Each chat stuck at a usage limit, newest first, with when it continues: at now, at a later time, or None
-    when not within PLAN_HORIZON; chats an earlier limit stopped are skipped."""
+    when not within PLAN_HORIZON; chats an earlier limit stopped are skipped. Nothing continues before a used-up
+    limit resets."""
     chats = all_stuck_chats(now, resumed)
-    times = resume_times([chat for chat in chats if not chat["earlier"]], now, sends, window, morning, passed)
+    waiting = [chat for chat in chats if not chat["earlier"]]
+    start = used_up_reset() if waiting else None
+    if start is not None and start > now:
+        # Checks until then send nothing, but the running window still passes by the marked chats it does not take.
+        chosen, _ = plan_resumes(waiting, now, sends, window, morning, passed)
+        rest, passed = pass_by(waiting, chosen, window, now, passed or {})
+        renamed = {chat["id"]: chat for chat in rest}
+        waiting = [renamed.get(chat["id"], chat) for chat in waiting]
+    else:
+        start = None
+    times = resume_times(waiting, now, sends, window, morning, passed, start)
     return [(chat, "skip", None) if chat["earlier"]
             else (chat, "resume" if times.get(chat["id"]) == now else "wait", times.get(chat["id"]))
             for chat in chats]

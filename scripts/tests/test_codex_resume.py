@@ -808,25 +808,61 @@ class CodexResumeTests(unittest.TestCase):
         # 01.00. One older than five hours does not count.
         state = {"resumed": {"x": now - timedelta(hours=1), "y": now - timedelta(hours=6)}}
         state["sends"] = list(state["resumed"].values())
-        with (patch.object(codex_resume, "load_chats", return_value=catalogue),
-              patch.object(codex_resume, "stuck_at_limit", side_effect=stuck),
-              patch.object(codex_resume, "local_now", return_value=now),
-              redirect_stdout(io.StringIO()) as output):
-            codex_resume.print_stuck_overview(state)
+
+        def overview(limits):
+            with (patch.object(codex_resume, "load_chats", return_value=catalogue),
+                  patch.object(codex_resume, "stuck_at_limit", side_effect=stuck),
+                  patch.object(codex_resume, "local_now", return_value=now),
+                  patch.object(codex_resume, "usage_limits", **limits),
+                  redirect_stdout(io.StringIO()) as output):
+                codex_resume.print_stuck_overview(state)
+            return output.getvalue().splitlines()
+
         t = {name: shown(stop.isoformat()) for name, stop in stops.items()}
         room = shown("2026-10-23T00:00:00+02:00")
         width = len(room)
-        self.assertEqual(output.getvalue().splitlines(), [
-            "",
-            "─ Chats stopped by a usage limit (5) ───────────────────────",
-            f"  {'Stopped':<{width}}  {'Continues':<{width}}  Chat",
-            f"  {t['a']}  {'next check':<{width}}  'a'",
-            f"  {t['b']}  {'next check':<{width}}  'b'",
-            f"  {t['c']}  {room}  untitled (local-relay, c)",
-            f"  {t['d']}  {shown('2026-10-23T01:00:00+02:00')}  'd'",
-            f"  {t['old']}  {'left alone':<{width}}  'old'",
-            "  Chats left alone were stopped by an older usage limit.",
-        ])
+
+        def table(a, b, d):
+            return [
+                "",
+                "─ Chats stopped by a usage limit (5) ───────────────────────",
+                f"  {'Stopped':<{width}}  {'Continues':<{width}}  Chat",
+                f"  {t['a']}  {a:<{width}}  'a'",
+                f"  {t['b']}  {b:<{width}}  'b'",
+                f"  {t['c']}  {room}  untitled (local-relay, c)",
+                f"  {t['d']}  {d}  'd'",
+                f"  {t['old']}  {'left alone':<{width}}  'old'",
+                "  Chats left alone were stopped by an older usage limit.",
+            ]
+
+        def limits(used):
+            return {"return_value": [{"name": "5-hour", "minutes": 300, "used": used,
+                                      "resets": datetime.fromisoformat("2026-10-22T20:29:00+02:00")}]}
+
+        planned = table("next check", "next check", shown("2026-10-23T01:00:00+02:00"))
+        self.assertEqual(overview(limits(40)), planned)
+        # Limits that cannot be read are taken to allow use.
+        self.assertEqual(overview({"side_effect": RuntimeError("app server is down")}), planned)
+        # With the limit used up, nothing continues before a minute after it resets, and later windows move too.
+        after_reset = shown("2026-10-22T20:30:00+02:00")
+        self.assertEqual(overview(limits(100)), table(after_reset, after_reset, shown("2026-10-23T01:30:00+02:00")))
+
+    def test_status_while_a_limit_is_used_up_counts_the_windows_that_pass_marked_chats_by(self):
+        now = datetime.fromisoformat("2026-10-22T20:00:00+02:00")
+        chats = [{"id": name, "name": name, "earlier": False} for name in ("a", "!b")]
+        window = {"start": now - timedelta(hours=2), "tier": 0, "early": False}
+
+        def overview(resets):
+            limits = [{"name": "5-hour", "minutes": 300, "used": 100, "resets": datetime.fromisoformat(resets)}]
+            with (patch.object(codex_resume, "all_stuck_chats", return_value=chats),
+                  patch.object(codex_resume, "usage_limits", return_value=limits)):
+                found = codex_resume.stuck_overview(now, {}, [window["start"]], window)
+            return {chat["id"]: at and f"{at:%d %H.%M}" for chat, _, at in found}
+
+        # The window from 18.00 passes !b by while the limit holds both back, so both start the next one.
+        self.assertEqual(overview("2026-10-22T23:59:00+02:00"), {"a": "23 00.00", "!b": "23 00.00"})
+        # Two days from now is as far as it plans, however late the limit resets.
+        self.assertEqual(overview("2026-10-25T19:59:00+02:00"), {"a": None, "!b": None})
 
     def recurring(self, chats, allowed=True, state=None, queued=True, now="2026-10-21T10:00:00+02:00",
                   stopped="2026-10-21T01:00:00+02:00", minutes=15, resets=None, sent=None, after_wait=None,
