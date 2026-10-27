@@ -19,4 +19,6 @@ vulnerability query, not the outdated query.
 Findings are triage indicators, not a security verdict. Exit status 1 means
 concrete issues or checks that could not run, so read the output to tell
 which; warnings alone exit 0. Summarize issues before warnings, and do not
-start fixing findings unless the user asks.
+start fixing findings unless the user asks. For a deeper review, give the
+output to the `repo-audit` skill as leads, not established findings; run it
+only when the user asks for that review.

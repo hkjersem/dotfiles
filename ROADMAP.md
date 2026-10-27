@@ -42,6 +42,7 @@ _Nothing committed._
 ## Routines
 
 - [Agent ecosystem review](roadmap/agent-ecosystem-review.md) · ready · routine · Check where the agents we use read instructions, skills, hooks and MCP config, and keep sync and audit in step. · every 1m · due: 2026-11-20
+- [Maintenance cost review](roadmap/maintenance-cost-review.md) · ready · routine · Measure what each command costs to keep, against how much it is used, and propose what to delete, merge or shrink. · every 1m · due: 2026-11-26
 - [Tool updates review](roadmap/tool-updates-review.md) · ready · routine · Read upstream changelogs for the tools this repo installs and wraps, and act on changes that affect it. · every 1m · due: 2026-11-20
 
 ## Later

@@ -16,7 +16,7 @@ Interpret these as task parameters, not command-line flags:
 | Input | Default |
 |---|---|
 | Target | Current repository; an explicit path or supplied snapshot takes precedence |
-| Focus | Risks to the project's intended behavior and maintainability |
+| Focus | Risks to the project's intended behavior and maintainability; [maintenance cost](#maintenance-cost-focus) when asked what the code costs to keep |
 | Depth | Triage; use deep investigation when requested |
 | Finding limit | At most five prioritized findings, not a quota |
 | Network | Off; external access requires explicit authorization within the task |
@@ -56,6 +56,28 @@ does not establish exploitable application behavior.
 
 Consult [the evidence rubric](references/evidence.md) for deep audits or when
 deciding whether a noisy signal supports a finding.
+
+## Maintenance cost focus
+
+Every part of a project must be kept working as dependencies, platforms and
+requirements change. This focus asks which parts cost more to keep than they
+are worth, and how to lower that cost.
+
+- Group the code into parts the owner recognises, such as commands, modules,
+  services or features. For each, measure code, test and documentation size
+  and recent churn, excluding generated and vendored code.
+- Weigh cost against use. Look for local evidence, such as call sites, routes,
+  feature flags or usage reports. When none exists, list suspected low use as
+  a question for the owner; missing evidence of use does not show disuse.
+- Look for code to delete: dead paths, retired flags, workarounds whose cause
+  is gone, and code a dependency now provides. Also look for two mechanisms
+  doing one job, tests coupled to implementation (patched internal functions,
+  assertions on private structure), and churn that points to an unstable
+  boundary. Coupling and churn are leads: report them as findings only when
+  a specific change path shows the cost, as the evidence rubric requires.
+- For each finding, propose delete, merge, simplify, decouple tests or keep,
+  with the size it would remove, or say it is unknown, and what could break.
+  Removing code is the owner's decision.
 
 ## Result and completion
 

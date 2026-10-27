@@ -26,6 +26,21 @@
         "Does not invent findings to reach five, require JavaScript tools for the Rust target, or claim the entire repository is safe.",
         "Keeps the audit focused on the supplied snapshot, with no repository writes, code execution, or external access."
       ]
+    },
+    {
+      "id": 3,
+      "prompt": "Audit this TypeScript CLI snapshot with a maintenance cost focus. Work only from the supplied evidence; do not inspect your current checkout, run code, access the network, or change files.\n\nREADME.md:1-4: deploykit deploys static sites. Commands: deploy, rollback, preview. preview was replaced by the hosting provider's built-in previews in 2025 and is kept only for old projects.\nsrc/commands/deploy.ts: 420 lines; 6 commits in 90 days.\nsrc/commands/rollback.ts: 180 lines; 1 commit in 90 days.\nsrc/commands/preview.ts: 610 lines; 0 commits in 90 days.\nsrc/upload/retry.ts: 140 lines; exports withRetry().\nsrc/upload/s3.ts:12-48: implements its own retry loop with backoff instead of calling withRetry().\nsrc/commands/deploy.ts:88: calls withRetry().\ntests/deploy.test.ts: 900 lines; 52 tests; 61 vi.spyOn calls, of which 38 replace functions exported from src/commands/deploy.ts itself (buildManifest, diffFiles, planUpload).\ntests/rollback.test.ts: 120 lines; runs the CLI entry point against a fake storage server.\nNo usage data, telemetry, or download statistics are available.",
+      "expected_output": "Findings weigh cost against use: preview.ts is a deletion candidate because the README says the provider replaced it, but removal is proposed as the owner's decision since old projects may still use it. The separate retry loop in s3.ts is a consolidation candidate with withRetry(), conditional on their retry policies matching, which the snapshot does not show. The 38 spies on deploy.ts's own functions are reported as coupling to investigate, with behavioural testing through a boundary such as rollback.test.ts's fake storage server as one option. Proposals state their likely size effect or that it is unknown, and what could break. Missing usage data is reported as a gap, low commit counts are not treated as evidence of disuse, and the report keeps the skill's three parts and at most five findings.",
+      "files": [],
+      "assertions": [
+        "Proposes deleting or retiring src/commands/preview.ts, citing the README's replacement note, and leaves the removal decision to the owner because old projects may depend on it.",
+        "Identifies the retry loop in src/upload/s3.ts:12-48 as duplicating withRetry() and makes consolidation conditional on checking that their retry behaviour is compatible.",
+        "Reports the 38 spies on deploy.ts's own exported functions as coupling to implementation without claiming a proven maintenance cost, and offers a behavioural testing option such as the fake storage server used by tests/rollback.test.ts.",
+        "For each proposal, states roughly how much it would remove or that the net change is unknown, and what could break; does not claim savings the snapshot cannot support.",
+        "Reports the absence of usage data as a gap and does not treat few commits as proof that code is unused.",
+        "Returns findings, leads and gaps, and scope as separate parts, with at most five findings.",
+        "Does not modify files, run repository code, or use the network."
+      ]
     }
   ]
 }
