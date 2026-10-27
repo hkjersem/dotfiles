@@ -6,17 +6,22 @@ Without PATHs, they are read one per line from ~/.config/dotfiles/roadmap-paths
 (`#` starts a comment, `~` is expanded). Only roadmaps with the skill's
 generated-list markers in roadmap.md or roadmaps.md (case-insensitive), at the
 repository root or in docs/, tasks/ or planning/, are included. Briefs live in
-roadmap/ beside the index, or at the repository root. Read-only; exits 1 when a
+roadmap/ beside the index, or at the repository root. Overview and check are
+read-only; --sync updates only the generated index block. Exits 1 when a
 roadmap has errors or cannot be read, or no paths are configured.
 Use --check to print detailed validation results instead of the overview;
 missing paths and paths without managed roadmaps then also exit 1.
+Add --strict with --check for brief-quality warnings; warnings alone do not fail.
+--sync requires explicit PATHs; it never uses the configured path list.
 """
 
 from __future__ import annotations
 
 import argparse
+from contextlib import redirect_stdout
 import datetime
 import importlib.util
+import io
 import os
 import shlex
 import sys
@@ -118,13 +123,33 @@ def find_roadmaps(folder: str, problems: List[str]) -> List[argparse.Namespace]:
 
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(prog="roadmaps", description=__doc__, allow_abbrev=False,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+                                     formatter_class=argparse.RawDescriptionHelpFormatter,
+                                     epilog="""Examples:
+  roadmaps                      Overview of configured locations
+  roadmaps .                    Overview of the current repository
+  roadmaps --check .             Detailed validation (also: roadmaps . --check)
+  roadmaps --check --strict .    Include brief-quality warnings
+  roadmaps --check               Validate all configured locations
+  roadmaps --sync .              Refresh generated lists, then validate
+
+Sync changes index blocks only, never briefs, statuses or handwritten sections.
+Paths may be collections: sync updates every discovered roadmap in those paths.
+Exit status: 0 success; 1 errors or no roadmaps in check/sync; 2 usage; 130 Ctrl+C.""")
     parser.add_argument("paths", nargs="*", metavar="PATH",
                         help="a repository, or a folder whose direct subfolders are repositories")
     parser.add_argument("--today", metavar="YYYY-MM-DD", help="treat this date as today")
-    parser.add_argument("--check", action="store_true",
-                        help="report detailed validation results without changing files")
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--check", action="store_true",
+                       help="report detailed validation results without changing files")
+    modes.add_argument("--sync", action="store_true",
+                       help="update generated index blocks; requires explicit PATHs")
+    parser.add_argument("--strict", action="store_true",
+                        help="with --check, add heuristic brief-quality warnings")
     args = parser.parse_args(argv)
+    if args.strict and not args.check:
+        parser.error("--strict requires --check")
+    if args.sync and not args.paths:
+        parser.error("--sync requires an explicit path, for example: roadmaps --sync .")
     today = rm.parse_date(args.today) if args.today else datetime.date.today()
     if today is None:
         print("--today must be a YYYY-MM-DD date.")
@@ -148,14 +173,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     for entry in entries:
         folder = os.path.abspath(os.path.expanduser(entry))
         if not os.path.isdir(folder):
-            (problems if args.check else notes).append(f"{entry}: not a directory")
+            (problems if args.check or args.sync else notes).append(f"{entry}: not a directory")
             continue
         output.progress(f"Finding roadmaps in {home_short(folder)}…")
         try:
             found = find_roadmaps(folder, problems)
         finally:
             output.progress_done()
-        if args.check and not found:
+        if (args.check or args.sync) and not found:
             problems.append(f"{home_short(folder)}: no managed roadmap found")
         for repo in found:
             index = os.path.realpath(os.path.join(repo.root, repo.index))
@@ -167,8 +192,19 @@ def main(argv: Optional[List[str]] = None) -> int:
     quiet: List[str] = []
     failed = False
     for repo in roadmaps:
+        repo.strict = args.strict
         root = repo.root
         try:
+            if args.sync:
+                output.section(f"{os.path.basename(root)}  {home_short(root)}")
+                messages = io.StringIO()
+                with redirect_stdout(messages):
+                    status = rm.cmd_sync(repo)
+                for line in messages.getvalue().splitlines():
+                    print(f"  {output.mark('fail' if status else 'ok')} {line}")
+                if status:
+                    failed = True
+                    continue
             output.progress(f"Checking {home_short(root)}…")
             try:
                 report, briefs = rm.check_report(repo)
@@ -176,15 +212,20 @@ def main(argv: Optional[List[str]] = None) -> int:
                 output.progress_done()
         except (OSError, UnicodeDecodeError) as exc:
             failed = True
-            output.section(f"{os.path.basename(root)}  {home_short(root)}")
+            if not args.sync:
+                output.section(f"{os.path.basename(root)}  {home_short(root)}")
             print(f"  {output.mark('fail')} cannot read the roadmap: {exc}")
             continue
-        if args.check:
-            output.section(f"{os.path.basename(root)}  {home_short(root)}")
-            for error in report.errors:
-                print(f"  {output.mark('fail')} {error}")
-            for warning in report.warnings:
-                print(f"  {output.mark('warn')} {warning}")
+        if args.check or args.sync:
+            if not args.sync:
+                output.section(f"{os.path.basename(root)}  {home_short(root)}")
+            for kind, messages in (("fail", report.errors), ("warn", report.warnings)):
+                for message in messages:
+                    message = message.replace("run `sync`", f"run `roadmaps --sync {shlex.quote(root)}`")
+                    lines = message.splitlines()
+                    print(f"  {output.mark(kind)} {lines[0]}")
+                    for line in lines[1:]:
+                        output.note(line.strip())
             if report.errors:
                 failed = True
             else:
@@ -224,7 +265,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not roadmaps:
         print()
         output.note("No roadmaps found.")
-        if args.check:
+        if args.check or args.sync:
             failed = True
     if notes or problems:
         print()

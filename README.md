@@ -46,6 +46,17 @@ locations. Check mode exits 1 for invalid or unreadable roadmaps, missing paths
 and paths without a managed roadmap. Progress appears only on a terminal;
 Ctrl+C stops the command without a traceback and exits 130.
 
+Add `--strict` to check brief quality, for example `roadmaps --check --strict .`
+before handing work to an agent. It warns about missing summaries, acceptance
+criteria, progress/log sections, backlinks and nonexistent code pointers.
+These heuristic warnings do not fail the check or change files.
+
+Use `roadmaps --sync .` (or `roadmaps . --sync`) to refresh the generated index
+lists from the briefs, then validate. It preserves briefs, statuses and
+handwritten sections. Sync requires explicit paths, never the configured list;
+a collection path updates every discovered roadmap in that collection. Invalid
+brief front matter or missing brief directories block the affected index update.
+
 The commands from this repository, including `dotfiles-*`, print their options
 with `--help`, and zsh completes them: type `pmu --` and press Tab. Flags a
 command does not accept turn red as you type.

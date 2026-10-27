@@ -665,6 +665,9 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 def cmd_sync(args: argparse.Namespace) -> int:
     root, index_path, brief_dir = paths(args)
+    if not os.path.isdir(brief_dir):
+        print(f"{rel(brief_dir, root)}: brief directory not found; refusing to sync.")
+        return 1
     if not os.path.exists(index_path):
         print(f"{shown(index_path, root)} not found; run `init` or pass --index.")
         return 1
@@ -676,6 +679,10 @@ def cmd_sync(args: argparse.Namespace) -> int:
         return 1
     report = Report()
     briefs = load_briefs(brief_dir, report, root, index_path)
+    if report.errors:
+        for line in report.errors:
+            print("error: " + line)
+        return 1
     head, _, tail = parts
     new = head + render(index_path, briefs) + tail
     if new != text:
@@ -683,9 +690,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
         print(f"Updated {shown(index_path, root)}.")
     else:
         print(f"{shown(index_path, root)} is up to date.")
-    for line in report.errors:
-        print("error: " + line)
-    return 1 if report.errors else 0
+    return 0
 
 
 def cmd_check(args: argparse.Namespace) -> int:

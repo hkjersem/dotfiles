@@ -157,6 +157,9 @@ Run the bundled script from the repository root:
 | `ready` | Show what is due, what is in progress and which committed items can start |
 | `archive <slug>` | Move a done or dropped brief into the archive, rewrite links to and from it across the repository's Markdown, sync |
 
+`sync` leaves the index unchanged when the brief directory is missing, a brief's
+front matter cannot be parsed, or the index markers are damaged.
+
 Create an item only when the owner asks, or when work is being deferred and
 should not be lost. Implementing something directly needs no item. If the work
 matches an existing item, update that item; otherwise leave the roadmap alone

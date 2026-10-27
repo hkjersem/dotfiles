@@ -23,7 +23,7 @@ repository or chat is meant, ask before running.
 | `codex-resume` | Send `continue` or a message to a Codex desktop chat, now, at a time, or when a usage limit resets | `python3 ~/.dotfiles/scripts/codex-resume.py` | [references/codex-resume.md](references/codex-resume.md) |
 | `prune_branches` | Delete local branches, and their worktrees, whose remote branch is gone | `bash ~/.dotfiles/scripts/prune-branches.sh` | [references/prune-branches.md](references/prune-branches.md) |
 | `audit-repo` | Triage report for a repository: Git activity, tests, build, docs, packages | `bash ~/.dotfiles/scripts/audit-repo.sh` | [references/audit-repo.md](references/audit-repo.md) |
-| `roadmaps` | Show due, awaiting-acceptance and active items, or validate managed roadmaps with `--check` | `python3 ~/.dotfiles/scripts/roadmaps.py` | [references/roadmaps.md](references/roadmaps.md) |
+| `roadmaps` | Show managed roadmaps, validate with `--check`, or refresh generated lists with `--sync` | `python3 ~/.dotfiles/scripts/roadmaps.py` | [references/roadmaps.md](references/roadmaps.md) |
 | `pmu` | Update npm, pnpm or bun dependencies, skipping releases newer than a cooldown | `bash ~/.dotfiles/scripts/package-manager/run.sh` | [references/package-managers.md](references/package-managers.md) |
 | `pma` | Audit dependencies for vulnerabilities, and fix them on request | `bash ~/.dotfiles/scripts/package-manager/audit.sh` | [references/package-managers.md](references/package-managers.md) |
 
