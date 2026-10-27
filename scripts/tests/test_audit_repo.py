@@ -117,11 +117,12 @@ class AuditRepoTests(unittest.TestCase):
         subprocess.run([self.git, "-C", str(self.project), "remote", "add", "origin", "https://example.invalid/x.git"],
                        env=self.env, check=True, capture_output=True)
 
-    def run_audit(self, *args, cwd=None):
+    def run_audit(self, *args, cwd=None, stage=True):
         self.state_file.write_text(json.dumps(self.state))
         self.log.write_text("")
-        subprocess.run([self.git, "-C", str(self.project), "add", "--all"],
-                       env=self.env, check=True, capture_output=True)
+        if stage:
+            subprocess.run([self.git, "-C", str(self.project), "add", "--all"],
+                           env=self.env, check=True, capture_output=True)
         status_args = [self.git, "-C", str(self.project), "status", "--porcelain=v1", "-z"]
         before = subprocess.check_output(status_args, env=self.env)
         result = subprocess.run(
@@ -136,6 +137,116 @@ class AuditRepoTests(unittest.TestCase):
     def calls(self, name):
         return [args for tool, args in map(json.loads, self.log.read_text().splitlines())
                 if tool == name]
+
+    def make_roadmap(self, index="docs/roadmap.md", brief_dir="docs/roadmap"):
+        (self.project / index).parent.mkdir(parents=True, exist_ok=True)
+        options = ["--root", str(self.project), "--index", index, "--dir", brief_dir]
+        script = REPO / "agents/skills/roadmap/scripts/roadmap.py"
+        subprocess.run([sys.executable, "-B", str(script), "init", *options],
+                       env=self.env, check=True, capture_output=True)
+        backlink = os.path.relpath(self.project / index, self.project / brief_dir)
+        brief = self.write(f"{brief_dir}/ship.md",
+                           "---\ntitle: Ship\nstatus: active\n---\n"
+                           f"# Ship\n\n[Roadmap]({backlink})\n")
+        subprocess.run([sys.executable, "-B", str(script), "sync", *options],
+                       env=self.env, check=True, capture_output=True)
+        return self.project / index, brief
+
+    def test_validates_root_and_nested_skill_roadmaps(self):
+        self.make_roadmap(index="ROADMAP.md", brief_dir="roadmap")
+        self.make_roadmap(index="docs/roadmaps.md")
+        (self.project / "docs/roadmap.md").symlink_to("../ROADMAP.md")
+        for module in ("pathlib", "roadmaps", "output"):
+            self.write(f"{module}.py", "raise AssertionError('repository code was executed')\n")
+        result = self.run_audit("--skip-security")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("✓ ROADMAP.md: roadmap layout and briefs are valid", result.stdout)
+        self.assertIn("✓ docs/roadmaps.md: roadmap layout and briefs are valid", result.stdout)
+        self.assertEqual(result.stdout.count("roadmap layout and briefs are valid"), 2)
+        self.assertEqual(result.stderr, "")
+
+    def test_reports_roadmap_validation_errors_without_fixing_them(self):
+        index, brief = self.make_roadmap()
+        original_index, original_brief = index.read_text(), brief.read_text()
+        cases = [
+            (original_index, original_brief.replace("status: active", "status: shipped"),
+             "status `shipped` is not one of"),
+            (original_index, original_brief.replace("status: active",
+                                                   "status: active\ndepends_on: [missing]"),
+             "depends on unknown item `missing`"),
+            (original_index, original_brief.replace("title: Ship", "title: Updated"),
+             "generated lists are out of date"),
+            (original_index.replace("<!-- roadmap:end -->", ""), original_brief,
+             "needs exactly one pair of roadmap markers"),
+            (original_index, original_brief + "\n[Missing](missing.md)\n",
+             "broken link to missing.md"),
+        ]
+        for index_text, brief_text, expected in cases:
+            with self.subTest(expected=expected):
+                index.write_text(index_text)
+                brief.write_text(brief_text)
+                result = self.run_audit("--skip-security")
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn(expected, result.stdout)
+                self.assertIn("    fix:", result.stdout)
+                self.assertNotIn("roadmap layout and briefs are valid", result.stdout)
+                self.assertEqual(index.read_text(), index_text)
+                self.assertEqual(brief.read_text(), brief_text)
+
+    def test_other_roadmap_formats_are_left_alone(self):
+        self.write("docs/roadmap.md", "# Roadmap\n\n- [ ] Ship\n")
+        result = self.run_audit("--skip-security")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("No skill-managed roadmap found", result.stdout)
+        self.assertNotIn("roadmap layout and briefs are valid", result.stdout)
+
+    def test_unreadable_managed_roadmap_fails_validation(self):
+        index, brief = self.make_roadmap()
+        self.run_audit("--skip-security")
+        brief.chmod(0)
+        self.addCleanup(brief.chmod, 0o644)
+        if os.access(brief, os.R_OK):
+            self.skipTest("running with privileges that ignore file permissions")
+        result = self.run_audit("--skip-security", stage=False)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("docs/roadmap.md: cannot read the roadmap", result.stdout)
+        self.assertNotIn("roadmap layout and briefs are valid", result.stdout)
+        brief.chmod(0o644)
+        index.chmod(0)
+        self.addCleanup(index.chmod, 0o644)
+        result = self.run_audit("--skip-security", stage=False)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("cannot read (PermissionError)", result.stdout)
+        self.assertNotIn("No skill-managed roadmap found", result.stdout)
+
+    def test_roadmap_env_briefs_are_not_read(self):
+        self.make_roadmap()
+        try:
+            self.write("docs/roadmap/.env.local.md", "").write_bytes(b"\xffSECRET")
+        except PermissionError:
+            self.skipTest("the sandbox denies .env files, so this case is unverified here")
+        result = self.run_audit("--skip-security")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("skipped 1 .env roadmap brief(s) without reading them", result.stdout)
+        self.assertIn("roadmap validation is incomplete", result.stdout)
+        self.assertNotIn("cannot read the roadmap", result.stdout)
+        self.assertNotIn("SECRET", result.stdout + result.stderr)
+        self.assertNotIn("roadmap layout and briefs are valid", result.stdout)
+
+    def test_unavailable_roadmap_validator_is_not_a_pass(self):
+        python = self.bin / "python3"
+        python.write_text("#!/bin/sh\necho 'validator unavailable' >&2\nexit 127\n")
+        python.chmod(0o755)
+        result = self.run_audit("--skip-security")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("No skill-managed roadmap found", result.stdout)
+        self.assertNotIn("validator unavailable", result.stdout + result.stderr)
+        self.make_roadmap()
+        result = self.run_audit("--skip-security")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("Could not validate skill-managed roadmaps", result.stdout)
+        self.assertIn("validator unavailable", result.stdout)
+        self.assertNotIn("roadmap layout and briefs are valid", result.stdout)
 
     def test_helpers_are_relative_to_script_not_home_checkout(self):
         (self.home / ".dotfiles").unlink()

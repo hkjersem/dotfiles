@@ -124,7 +124,7 @@ else
 fi
 
 AUDIT_TMP=$(mktemp -d) || exit 1
-trap 'rm -f "$AUDIT_TMP/tracked" "$AUDIT_TMP/stderr" "$AUDIT_TMP/sizes" "$AUDIT_TMP/status" "$AUDIT_TMP/upstream-ids" "$AUDIT_TMP/doc-files.z" "$AUDIT_TMP/doc-files" "$AUDIT_TMP/doc-paths" "$AUDIT_TMP/doc-links"; rm -rf "$AUDIT_TMP/merge-objects"; rmdir "$AUDIT_TMP"' EXIT
+trap 'rm -f "$AUDIT_TMP/tracked" "$AUDIT_TMP/stderr" "$AUDIT_TMP/sizes" "$AUDIT_TMP/status" "$AUDIT_TMP/upstream-ids" "$AUDIT_TMP/doc-files.z" "$AUDIT_TMP/doc-files" "$AUDIT_TMP/doc-paths" "$AUDIT_TMP/doc-links" "$AUDIT_TMP/roadmaps"; rm -rf "$AUDIT_TMP/merge-objects"; rmdir "$AUDIT_TMP"' EXIT
 
 command_error() {
   local line
@@ -918,6 +918,78 @@ else
   fi
 fi
 
+section_end
+
+# Uses our installed validator, never code from the repository being audited.
+section_start "Roadmap"
+HAS_ROADMAP_CANDIDATE=false
+for folder in . [Dd][Oo][Cc][Ss] [Tt][Aa][Ss][Kk][Ss] [Pp][Ll][Aa][Nn][Nn][Ii][Nn][Gg]; do
+  [[ -d "$folder" ]] || continue
+  for candidate in "$folder"/*; do
+    [[ -f "$candidate" ]] || continue
+    case "${candidate##*/}" in
+      [Rr][Oo][Aa][Dd][Mm][Aa][Pp].[Mm][Dd]|[Rr][Oo][Aa][Dd][Mm][Aa][Pp][Ss].[Mm][Dd])
+        HAS_ROADMAP_CANDIDATE=true ;;
+    esac
+  done
+done
+if ! $HAS_ROADMAP_CANDIDATE; then
+  info "No skill-managed roadmap found"
+elif python3 -I -B - "$SCRIPT_DIR" "$GIT_ROOT" > "$AUDIT_TMP/roadmaps" 2>"$AUDIT_TMP/stderr" <<'PY'
+import sys
+from pathlib import Path
+
+sys.path.insert(0, sys.argv[1])
+import roadmaps
+
+
+def emit(kind, message):
+    for number, line in enumerate(message.splitlines()):
+        print(f"{kind if number == 0 else 'detail'}\t{line.strip()}")
+
+
+problems = []
+repos = roadmaps.repository_roadmaps(sys.argv[2], problems)
+for problem in problems:
+    emit("error", problem)
+if not repos and not problems:
+    emit("info", "No skill-managed roadmap found")
+for repo in repos:
+    try:
+        brief_dir = Path(repo.root) / repo.dir
+        env_files = [path for directory in (brief_dir, brief_dir / "archive")
+                     if directory.is_dir() for path in directory.iterdir()
+                     if path.suffix == ".md"
+                     and (path.name == ".env.md" or path.name.startswith(".env."))]
+        if env_files:
+            emit("error", f"{repo.index}: skipped {len(env_files)} .env roadmap brief(s) "
+                 "without reading them; roadmap validation is incomplete")
+            continue
+        report, _ = roadmaps.rm.check_report(repo)
+    except (OSError, UnicodeDecodeError) as exc:
+        emit("error", f"{repo.index}: cannot read the roadmap: {exc}")
+        continue
+    for error in report.errors:
+        emit("error", error)
+    for warning in report.warnings:
+        emit("warning", warning)
+    if not report.errors:
+        emit("ok", f"{repo.index}: roadmap layout and briefs are valid")
+PY
+then
+  while IFS=$'\t' read -r kind message; do
+    case "$kind" in
+      ok)      ok "$message" ;;
+      warning) warn "$message" ;;
+      error)   fail "$message" ;;
+      detail)  row "$message" ;;
+      info)    info "$message" ;;
+    esac
+  done < "$AUDIT_TMP/roadmaps"
+else
+  fail "Could not validate skill-managed roadmaps"
+  command_error
+fi
 section_end
 
 # ══════════════════════════════════════════════════════════════════════════════

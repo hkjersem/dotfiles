@@ -38,7 +38,7 @@ commit or another install. Shell settings may require a new shell.
 | `dotfiles-defaults` | Apply macOS system preferences |
 | `dotfiles-audit` | Check for drift between repo and installed state (includes skills) |
 | `dotfiles-profile` | Show or choose the machine's personal/work profile |
-| `roadmaps` | Show due items, items awaiting acceptance, work in progress and errors across `roadmap` skill roadmaps in the repositories, or folders whose direct subfolders are repositories, listed one per line in the machine-local `~/.config/dotfiles/roadmap-paths`; or pass paths directly |
+| `roadmaps` | Show due items, items awaiting acceptance, work in progress and errors across `roadmap` skill roadmaps in the repositories, or folders whose direct subfolders are repositories, listed one per line in the machine-local `~/.config/dotfiles/roadmap-paths`; or pass paths directly. Finds `roadmap.md` or `roadmaps.md` (any casing) at the root or in `docs/`, `tasks/` or `planning/`, with briefs in `roadmap/` beside the index or at the repository root |
 
 The commands from this repository print their options with `--help`, and zsh
 completes them: type `pmu --` and press Tab. Flags a command does not accept
@@ -215,9 +215,11 @@ audit-repo --dir ../project --since "6 months ago"
 audit-repo --skip-security
 ```
 
-It also checks documentation file names and link case, and, with a root
-`package.json`, package metadata, cooldowns, JS/TS tooling, vulnerabilities and
-outdated packages (requires jq). `.env` files are never read.
+It also checks documentation file names and link case, validates skill-managed
+roadmaps (candidate roadmap files require Python 3), and, with a root
+`package.json`, checks package metadata, cooldowns, JS/TS tooling, vulnerabilities
+and outdated packages (requires jq). Other roadmap formats are left alone.
+`.env` files are never read.
 
 The script does not install dependencies, run project tests, apply fixes, or
 edit project files. **It is not offline:** npm/pnpm audit and outdated queries

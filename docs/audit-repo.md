@@ -11,6 +11,22 @@ similar), a `DESIGN.md` without design tokens, paths that differ only in case,
 and Markdown links whose case differs from the file. macOS ignores case, so
 these work locally but break on Linux and on Git hosts.
 
+## Roadmap checks
+
+The audit uses the roadmap skill's read-only `check` validation for managed
+roadmaps. Candidate roadmap files require Python 3 to inspect; repositories
+without any candidate do not need it. It shares discovery with `roadmaps`: a
+`roadmap.md` or `roadmaps.md` (any casing) at the root or in `docs/`, `tasks/`
+or `planning/`, containing `<!-- roadmap:start -->`. Briefs live in `roadmap/`
+beside the index, or at the repository root. Directory names are also matched
+case-insensitively, retaining their actual spelling.
+
+It checks markers, brief front matter, statuses, dependencies, archive placement,
+links and whether the generated lists match the briefs. Errors fail the audit;
+other roadmap formats are left alone. It never syncs or migrates a roadmap.
+An unreadable roadmap or unavailable validator fails the check. `.env` briefs
+are not read; their presence makes roadmap validation incomplete and fails it.
+
 ## Source files and packages
 
 Source-file statistics use tracked files, excluding known generated artifacts,

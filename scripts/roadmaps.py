@@ -4,7 +4,9 @@
 Each PATH is a repository or a folder whose direct subfolders are repositories.
 Without PATHs, they are read one per line from ~/.config/dotfiles/roadmap-paths
 (`#` starts a comment, `~` is expanded). Only roadmaps with the skill's
-generated-list markers in ROADMAP.md are included. Read-only; exits 1 when a
+generated-list markers in roadmap.md or roadmaps.md (case-insensitive), at the
+repository root or in docs/, tasks/ or planning/, are included. Briefs live in
+roadmap/ beside the index, or at the repository root. Read-only; exits 1 when a
 roadmap has errors or cannot be read, or no paths are configured.
 """
 
@@ -26,7 +28,7 @@ _spec.loader.exec_module(rm)
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import output  # noqa: E402
 
-INDEX = "ROADMAP.md"
+INDEX_FOLDERS = ("docs", "tasks", "planning")
 
 
 def config_path() -> str:
@@ -38,8 +40,7 @@ def home_short(path: str) -> str:
     return "~" + path[len(home):] if path == home or path.startswith(home + os.sep) else path
 
 
-def conforming(root: str, problems: List[str]) -> bool:
-    index = os.path.join(root, INDEX)
+def conforming(index: str, problems: List[str]) -> bool:
     if not os.path.isfile(index):
         return False
     try:
@@ -50,19 +51,66 @@ def conforming(root: str, problems: List[str]) -> bool:
         return False
 
 
-def find_roadmaps(folder: str, problems: List[str]) -> List[str]:
+def repository_roadmaps(root: str, problems: List[str],
+                       include_nested: bool = True) -> List[argparse.Namespace]:
+    roadmaps = []
+    seen = set()
+    try:
+        root_names = sorted(os.listdir(root))
+    except OSError as exc:
+        problems.append(f"{home_short(root)}: cannot list ({exc.__class__.__name__})")
+        return []
+    folders = [""] + [name for name in root_names
+                      if include_nested and name.lower() in INDEX_FOLDERS]
+    root_briefs = os.path.join(root, next(
+        (n for n in root_names if n.lower() == "roadmap"
+         and os.path.isdir(os.path.join(root, n))), "roadmap"))
+    for folder in folders:
+        directory = os.path.join(root, folder)
+        if not os.path.isdir(directory):
+            continue
+        try:
+            names = sorted(os.listdir(directory))
+        except OSError as exc:
+            problems.append(f"{home_short(directory)}: cannot list ({exc.__class__.__name__})")
+            continue
+        for name in names:
+            if name.lower() not in ("roadmap.md", "roadmaps.md"):
+                continue
+            index = os.path.join(directory, name)
+            identity = os.path.realpath(index)
+            if identity in seen:
+                continue
+            if not conforming(index, problems):
+                continue
+            seen.add(identity)
+            brief_name = next((n for n in names
+                               if n.lower() == "roadmap"
+                               and os.path.isdir(os.path.join(directory, n))), "roadmap")
+            brief_dir = os.path.join(directory, brief_name)
+            if folder and not os.path.isdir(brief_dir) and os.path.isdir(root_briefs):
+                brief_dir = root_briefs
+            roadmaps.append(argparse.Namespace(
+                root=root, index=os.path.relpath(index, root),
+                dir=os.path.relpath(brief_dir, root), strict=False))
+    return roadmaps
+
+
+def find_roadmaps(folder: str, problems: List[str]) -> List[argparse.Namespace]:
     """`folder` itself when it holds a roadmap, else its direct non-hidden
     subdirectories that do."""
-    if conforming(folder, problems):
-        return [folder]
+    roadmaps = repository_roadmaps(
+        folder, problems, include_nested=os.path.exists(os.path.join(folder, ".git")))
+    if roadmaps:
+        return roadmaps
     try:
         names = sorted(os.listdir(folder))
     except OSError as exc:
         problems.append(f"{home_short(folder)}: cannot list ({exc.__class__.__name__})")
         return []
-    return [os.path.join(folder, n) for n in names
+    return [roadmap for n in names
             if not n.startswith(".") and os.path.isdir(os.path.join(folder, n))
-            and conforming(os.path.join(folder, n), problems)]
+            for roadmap in repository_roadmaps(os.path.join(folder, n), problems)]
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -88,7 +136,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             entries = [line.strip() for line in handle
                        if line.strip() and not line.strip().startswith("#")]
 
-    roots: List[str] = []
+    roadmaps: List[argparse.Namespace] = []
     seen = set()
     notes: List[str] = []
     problems: List[str] = []
@@ -97,16 +145,17 @@ def main(argv: Optional[List[str]] = None) -> int:
         if not os.path.isdir(folder):
             notes.append(f"{entry}: not a directory")
             continue
-        for root in find_roadmaps(folder, problems):
-            if os.path.realpath(root) not in seen:
-                seen.add(os.path.realpath(root))
-                roots.append(root)
+        for repo in find_roadmaps(folder, problems):
+            index = os.path.realpath(os.path.join(repo.root, repo.index))
+            if index not in seen:
+                seen.add(index)
+                roadmaps.append(repo)
 
     output.context(today.isoformat())
     quiet: List[str] = []
     failed = False
-    for root in roots:
-        repo = argparse.Namespace(root=root, index=INDEX, dir="roadmap", strict=False)
+    for repo in roadmaps:
+        root = repo.root
         try:
             report, briefs = rm.check_report(repo)
         except (OSError, UnicodeDecodeError) as exc:
@@ -142,7 +191,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"  {output.mark('fail')} {len(report.errors)} error(s); run the roadmap skill's `check` in the repository")
     if quiet:
         print(f"\n  {output.mark('ok')} Nothing needs attention: " + ", ".join(quiet))
-    if not roots:
+    if not roadmaps:
         print()
         output.note("No roadmaps found.")
     if notes or problems:

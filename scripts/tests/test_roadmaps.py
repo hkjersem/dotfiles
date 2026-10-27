@@ -29,16 +29,91 @@ class RoadmapsTests(unittest.TestCase):
                               capture_output=True, text=True, check=False,
                               env={**os.environ, "HOME": str(self.home)})
 
-    def make_roadmap(self, relative, briefs):
+    def make_roadmap(self, relative, briefs, index="ROADMAP.md", brief_dir="roadmap"):
         root = self.home / relative
         root.mkdir(parents=True)
-        subprocess.run([PYTHON, str(SKILL), "init", "--root", str(root)],
+        (root / ".git").mkdir()
+        (root / index).parent.mkdir(parents=True, exist_ok=True)
+        options = ["--root", str(root), "--index", index, "--dir", brief_dir]
+        subprocess.run([PYTHON, str(SKILL), "init", *options],
                        capture_output=True, text=True, check=True)
         for slug, (front_matter, body) in briefs.items():
-            (root / "roadmap" / f"{slug}.md").write_text(
-                f"---\n{front_matter}\n---\n# Item\n\n[Roadmap](../ROADMAP.md)\n{body}")
-        subprocess.run([PYTHON, str(SKILL), "sync", "--root", str(root)],
+            backlink = os.path.relpath(root / index, root / brief_dir)
+            (root / brief_dir / f"{slug}.md").write_text(
+                f"---\n{front_matter}\n---\n# Item\n\n[Roadmap]({backlink})\n{body}")
+        subprocess.run([PYTHON, str(SKILL), "sync", *options],
                        capture_output=True, text=True, check=True)
+
+    def test_discovers_custom_locations_and_casing(self):
+        layouts = [
+            ("lower", "roadmap.md", "roadmap"),
+            ("plural", "docs/roadmaps.md", "docs/roadmap"),
+            ("docs", "docs/roadmap.md", "docs/roadmap"),
+            ("upper", "docs/ROADMAP.md", "roadmap"),
+            ("tasks", "tasks/roadmap.md", "tasks/roadmap"),
+            ("planning", "planning/Roadmap.md", "planning/roadmap"),
+            ("mixed", "Docs/roadmap.md", "Docs/Roadmap"),
+            ("root-briefs", "Docs/roadmap.md", "Roadmap"),
+        ]
+        for name, index, brief_dir in layouts:
+            self.make_roadmap(f"repos/{name}", {
+                name: (f"title: Working on {name}\nstatus: active", ""),
+            }, index=index, brief_dir=brief_dir)
+
+        for paths in [(str(self.home / "repos"),),
+                      tuple(str(self.home / "repos" / name) for name, _, _ in layouts)]:
+            with self.subTest(paths=paths):
+                result = self.run_roadmaps(*paths)
+                self.assertEqual(result.returncode, 0, result.stdout)
+                for name, _, _ in layouts:
+                    self.assertIn(f"─ {name}  ~/repos/{name} ", result.stdout)
+                    self.assertIn(f"    {name}: Working on {name}", result.stdout)
+                self.assertNotIn("error(s)", result.stdout)
+
+    def test_collection_is_not_mistaken_for_repository(self):
+        for name in ("docs", "tasks", "planning"):
+            self.make_roadmap(f"repos/{name}", {
+                name: (f"title: Working on {name}\nstatus: active", ""),
+            })
+        self.make_roadmap("repos/app", {"broken": ("title: Broken\nstatus: bogus", "")})
+        result = self.run_roadmaps(str(self.home / "repos"))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        for name in ("docs", "tasks", "planning", "app"):
+            self.assertIn(f"─ {name}  ~/repos/{name} ", result.stdout)
+        self.assertIn("error(s); run the roadmap skill's `check`", result.stdout)
+        self.assertNotIn("─ repos ", result.stdout)
+
+    def test_symlinked_index_alias_is_checked_only_once(self):
+        self.make_roadmap("repos/project", {"ship": ("title: Ship\nstatus: active", "")})
+        docs = self.home / "repos/project/docs"
+        docs.mkdir()
+        (docs / "roadmap.md").symlink_to("../ROADMAP.md")
+        result = self.run_roadmaps(str(self.home / "repos"))
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(result.stdout.count("    ship: Ship"), 1, result.stdout)
+
+    def test_nested_roadmap_is_deduplicated_and_still_requires_marker(self):
+        self.make_roadmap("repos/project", {
+            "review": ("title: Review\nstatus: verifying", "\n## Acceptance\n"),
+        }, index="docs/roadmap.md", brief_dir="docs/roadmap")
+        (self.home / "repos/project/ROADMAP.md").write_text("# See docs/roadmap.md\n")
+        (self.home / "repos/foreign/docs").mkdir(parents=True)
+        (self.home / "repos/foreign/docs/roadmaps.md").write_text("# Other layout\n")
+
+        result = self.run_roadmaps(config="~/repos\n~/repos/project\n~/repos/project/docs\n")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(result.stdout.count("    review: Review"), 1, result.stdout)
+        self.assertIn("─ project  ~/repos/project ", result.stdout)
+        self.assertNotIn("foreign", result.stdout)
+
+    def test_missing_nested_briefs_are_reported(self):
+        self.make_roadmap("repos/project", {}, index="docs/roadmap.md", brief_dir="docs/roadmap")
+        (self.home / "repos/project/docs/roadmap").rename(
+            self.home / "repos/project/docs/moved")
+        result = self.run_roadmaps(str(self.home / "repos"))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("─ project  ~/repos/project ", result.stdout)
+        self.assertIn("error(s); run the roadmap skill's `check`", result.stdout)
 
     def test_summarises_roadmaps_in_a_folder(self):
         self.make_roadmap("repos/busy", {
