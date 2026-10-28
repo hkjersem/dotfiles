@@ -6,7 +6,7 @@ CLEAN_DIR_TARGETS=(
     .next .nuxt .output .turbo .cache .parcel-cache .vite .svelte-kit
     .docusaurus .vinext storybook-static
     test-results playwright-report blob-report .nyc_output
-    __pycache__ .venv venv
+    __pycache__ .pytest_cache .venv venv
 )
 
 CLEAN_FILE_TARGETS=(

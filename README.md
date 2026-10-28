@@ -171,29 +171,12 @@ global packages, and installs and enables corepack if the Node version does not
 bundle it; `npm_globals_diff <version_a> [version_b]` compares globals;
 `npm_release_age <package>[@version]` shows release ages.
 
-## Clean and copy projects
-
-`wipe_clean` previews generated directories and cache files, then asks before
-deleting them. Git metadata and submodule directories are preserved.
-`copy_clean` copies a project without the same generated artifacts, using
-macOS clone-on-write copies where supported. Existing destinations are never
-overwritten.
-
-```sh
-wipe_clean
-copy_clean ../project-copy
-copy_clean --ignore-git --keep-name ../copies
-copy_clean --zip
-copy_clean --zip ../project ../project-clean.zip
-```
-
-A single copy argument is the destination; the source defaults to the current
 ## Inspect files and folders
 
 `files <command> [options] [path]` reports on the current folder by default.
-Every command supports `-r`/`--recursive` and repeatable `--exclude GLOB`
+Except for the global `caches` report, commands support `-r`/`--recursive` and repeatable `--exclude GLOB`
 (matching an entry name or relative path). Hidden and Git-ignored entries are
-included unless explicitly excluded. Symlinks are never followed, including
+included unless explicitly excluded (`leftovers` always excludes `.git`). Symlinks are never followed, including
 the target folder itself. Nothing is deleted or modified. Zsh completes
 subcommand names and flags from the command's help.
 Folder names use the shell's BSD `ls` colours (`LSCOLORS`), without trailing
@@ -201,7 +184,7 @@ slashes. Mixed empty-entry results keep explicit `File` and `Folder` labels;
 redirected output and `NO_COLOR` remain plain. Colours use the terminal palette,
 so light and dark themes apply just as they do to `ls`.
 
-Add `--clean` to any subcommand to exclude the generated directories and file
+Add `--clean` to a folder-report subcommand to exclude the generated directories and file
 patterns shared with `wipe_clean` and `copy_clean` (such as `node_modules`,
 `dist`, `.venv` and `*.tsbuildinfo`). The report marks when this filter is active.
 It does not exclude Git metadata or apply `.gitignore`.
@@ -218,6 +201,30 @@ directories and worktree pointer files at every depth. It does not hide
 | `files empty -r` | Zero-byte files and genuinely empty folders, not folders made empty by exclusions |
 | `files types -r` | Counts and bytes by final extension, case-insensitive; dotfiles without a suffix have no extension |
 | `files duplicates -r` | SHA-256 content matches, grouped by size first; skips empty files and counts hard links once |
+| `files caches` | Rank existing developer cache folders by allocated bytes, including all nested contents; read-only, with `--limit 0` for every result |
+| `files leftovers -r` | Rank possible agent/temporary leftovers by allocated bytes, with File/Folder, latest descendant modification and match reason; never deletes |
+
+`files leftovers` matches agent configuration/session names (`.claude`,
+`.cursor`, `.gemini`, `.copilot`, `.cursorrules`, `.aider*`), agent logs
+(`*.agent.log`) and broad temporary/workspace names (`tmp.*`, `wt-*`,
+`agent-workspace*`, `agent-work-*`, `nav-pilot-e2e-bin*`). These are candidates
+for inspection, not proof that anything is disposable. Only the requested
+directory is searched; `-r` discovers nested candidates. Matching folders are
+shown once with their full included subtree size. Git metadata is excluded;
+symlink candidates are omitted and destinations never followed. File contents
+are never read. Add `--older-than 7d` to require
+no modification in the included subtree, or use the usual exclusions and
+`--limit 0`. Last modification includes descendants, so this report performs
+an additional metadata traversal beyond native sizing. Unreadable ages do
+not qualify for an age filter and produce warnings.
+
+`files caches` checks known default locations for npm, pnpm, Bun, Homebrew,
+pip, uv (honouring `XDG_CACHE_HOME`), Go, Gradle, Cargo, Playwright and Xcode
+DerivedData. It always scans recursively and does not use the size snapshot
+cache. Missing folders are omitted; inaccessible folders show `Unknown` with
+warnings, and symlink roots are reported but not followed. Custom tool cache
+locations are not discovered, and no package managers or cleanup tools run.
+This subcommand accepts only `--limit` and `--help`, not a target path.
 
 Listings show up to 20 rows or duplicate groups; `--limit 0` shows all.
 `sizes` always scans nested contents for totals unless `--direct` is set;
@@ -259,6 +266,41 @@ files duplicates -r --limit 0 ~/Downloads
 files changed --help
 ```
 
+## Clean and copy projects
+
+`wipe_clean` previews generated directories and cache files with allocated
+sizes and an estimated total, then asks before deleting them. Hard links and
+shared APFS blocks may overstate reclaimed space. If sizing fails, cleanup
+stops without deleting anything. Git metadata and submodule directories are preserved.
+Use `--dry-run` to preview without prompting or deleting.
+Use `wipe_clean --sort size` to preview largest targets first; the default is
+alphabetical path order. After deletion, fast filesystem queries show available
+space before and after, without rescanning. This measures only the current
+filesystem; concurrent activity and APFS snapshots mean it is not an exact
+measurement of space reclaimed by cleanup.
+Add `--older-than 7d` to select only targets whose own modification time and
+every descendant's modification time are older than that threshold
+(`m`, `h`, `d`, `w`). Symlink destinations are not inspected. Unreadable
+metadata aborts cleanup, and selected ages are rechecked after confirmation.
+This needs additional metadata scans. Age does not prove a target is unused;
+stop builds and other writers first, since the scan and deletion are not atomic.
+The shared artifact list includes Python's `.pytest_cache`, also excluded by
+`copy_clean` and `files --clean`.
+`copy_clean` copies a project without the same generated artifacts, using
+macOS clone-on-write copies where supported. Existing destinations are never
+overwritten.
+
+```sh
+wipe_clean
+wipe_clean --sort size
+wipe_clean --older-than 7d --sort size
+copy_clean ../project-copy
+copy_clean --ignore-git --keep-name ../copies
+copy_clean --zip
+copy_clean --zip ../project ../project-clean.zip
+```
+
+A single copy argument is the destination; the source defaults to the current
 directory. `--keep-name` requires an existing destination directory.
 ZIP archives always include the source folder name; without a destination,
 the archive is created inside the source. `--ignore-git` excludes `.git`

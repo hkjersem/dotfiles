@@ -252,8 +252,8 @@ zpty -d z
                 self.assertEqual(offered & {"personal", "work"}, expected)
 
     def test_files_subcommands_and_flags_are_completed(self):
-        names = {"count", "large", "changed", "sizes", "empty", "types", "duplicates"}
-        for suffix, expected in ((" ", names), (" c", {"count", "changed"})):
+        names = {"count", "large", "changed", "sizes", "empty", "types", "duplicates", "caches", "leftovers"}
+        for suffix, expected in ((" ", names), (" c", {"count", "changed", "caches"})):
             with self.subTest(suffix=suffix):
                 self.assertEqual(self.complete(["files"], suffix)["files"] & names, expected)
         flags = self.complete(["files"], " large --")["files"]
@@ -266,10 +266,19 @@ zpty -d z
         self.assertIn("--direct", self.complete(["files"], " sizes --")["files"])
         self.assertIn("--logical", self.complete(["files"], " sizes --")["files"])
         self.assertIn("--cached", self.complete(["files"], " sizes --")["files"])
+        self.assertEqual(self.complete(["files"], " caches --")["files"], {"--help", "--limit"})
+        self.assertIn("--older-than", self.complete(["files"], " leftovers --")["files"])
 
     def test_files_exclude_flag_can_be_completed_repeatedly(self):
         offered = self.complete(["files"], " sizes --exclude Library --ex")["files"]
         self.assertIn("--exclude", offered)
+
+    def test_wipe_clean_sort_flag_and_values_are_completed(self):
+        self.assertIn("--sort", self.complete(["wipe_clean"], " --")["wipe_clean"])
+        self.assertIn("--older-than", self.complete(["wipe_clean"], " --")["wipe_clean"])
+        self.assertEqual(self.complete(["wipe_clean"], " --sort ")["wipe_clean"] & {"path", "size"},
+                         {"path", "size"})
+
 
     def test_flags_are_completed_from_help(self):
         offered = self.complete(script_commands())

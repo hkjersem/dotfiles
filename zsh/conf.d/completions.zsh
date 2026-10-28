@@ -11,6 +11,18 @@ typeset -ga dotfiles_commands=(
 )
 compdef _gnu_generic $dotfiles_commands
 
+_dotfiles_age() {
+  local number=$PREFIX
+  local -a ages
+  if [[ -n $number && $number != *[^0-9]* ]]; then
+    ages=("$number""m:Minutes" "$number""h:Hours" "$number""d:Days" "$number""w:Weeks")
+  else
+    ages=('30m:30 minutes' '1h:1 hour' '24h:24 hours' '7d:7 days'
+          '14d:14 days' '30d:30 days' '90d:90 days' '2w:2 weeks')
+  fi
+  _describe 'duration (m minutes, h hours, d days, w weeks)' ages
+}
+
 _dotfiles_files() {
   if (( CURRENT == 2 )) && [[ ${words[CURRENT]} != -* ]]; then
     local -a commands=(
@@ -21,8 +33,15 @@ _dotfiles_files() {
       'empty:Find empty files and folders'
       'types:Summarise file extensions'
       'duplicates:Find duplicate content'
+      'caches:Show developer cache sizes'
+      'leftovers:List possible agent and temporary leftovers'
     )
     _describe 'report' commands
+  elif [[ $words[2] == caches ]]; then
+    _arguments \
+      '(-h --help)'{-h,--help}'[Show help]' \
+      '--limit[Maximum rows; 0 shows all]:limit:' \
+      '1:report:'
   elif (( CURRENT > 2 )); then
     local -a options=(
       '(-h --help)'{-h,--help}'[Show help]'
@@ -34,7 +53,8 @@ _dotfiles_files() {
     [[ $words[2] != count ]] && options+=('--limit[Maximum rows or groups; 0 shows all]:limit:')
     case $words[2] in
       large) options+=('--min[Minimum file size]:size:') ;;
-      changed) options+=('--since[Modified within this age]:age:') ;;
+      changed) options+=('--since[Modified within this age]:age:_dotfiles_age') ;;
+      leftovers) options+=('--older-than[No modification within this age, including descendants]:age:_dotfiles_age') ;;
       sizes) options+=(
         '--direct[Count direct files only]'
         '--logical[Count logical rather than allocated file bytes]'
@@ -47,6 +67,15 @@ _dotfiles_files() {
   fi
 }
 compdef _dotfiles_files files
+
+_dotfiles_wipe_clean() {
+  _arguments \
+    '(-h --help)'{-h,--help}'[Show help]' \
+    '(-n --dry-run)'{-n,--dry-run}'[Preview without prompting or deleting]' \
+    '--sort[Preview order]:order:(path size)' \
+    '--older-than[No modification within this age, including descendants]:age:_dotfiles_age'
+}
+compdef _dotfiles_wipe_clean wipe_clean
 
 _dotfiles_profile() {
   _arguments \

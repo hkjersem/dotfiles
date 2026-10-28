@@ -32,6 +32,8 @@ COMMANDS = {
     "empty": "Find zero-byte files and truly empty folders",
     "types": "Group files by extension, with counts and bytes",
     "duplicates": "Find nonempty files with identical content; never delete",
+    "caches": "Rank common developer caches by allocated file bytes; never delete",
+    "leftovers": "List possible agent and temporary leftovers with sizes; never delete",
 }
 MONTHS = (
     "januar", "februar", "mars", "april", "mai", "juni",
@@ -73,7 +75,7 @@ def parser():
         prog="files", usage="files <command> [options] [path]",
         allow_abbrev=False, formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Read-only folder reports. Defaults to the current folder; includes hidden entries.\n"
-                    "Never follows symlinks. No Git or generated-file exclusions are implicit.",
+                    "Never follows symlinks. No exclusions are implicit except .git in leftovers.",
         epilog="Options (after the command; see files <command> --help):\n"
                "  -r, --recursive  Descend into subfolders\n"
                "  --clean  Exclude wipe_clean's shared generated-artifact targets\n"
@@ -84,11 +86,16 @@ def parser():
                "  --direct  Count direct files only for sizes (default includes all subfolders)\n"
                "  --logical  Count logical file bytes instead of allocated bytes for sizes\n"
                "  --cached  Reuse the last sizes snapshot (expires after 24 hours); never rescan\n"
-               "  --since AGE  Modification age for changed (m, h, d, w)\n",
+               "  --since AGE  Modification age for changed (m, h, d, w)\n"
+               "  --older-than AGE  No modification within AGE for leftovers, including descendants\n",
     )
     commands = result.add_subparsers(dest="command", required=True)
     for name, description in COMMANDS.items():
         command = commands.add_parser(name, help=description, description=description, allow_abbrev=False)
+        if name == "caches":
+            command.add_argument("--limit", type=limit_arg, default=20, metavar="N",
+                                 help="maximum rows (default: 20; 0 shows all)")
+            continue
         command.add_argument("path", nargs="?", default=".", help="folder to inspect (default: .)")
         command.add_argument("-r", "--recursive", action="store_true",
                              help="also list nested folders" if name == "sizes" else "descend into subfolders")
@@ -106,6 +113,9 @@ def parser():
                                  help="minimum bytes, or e.g. 100M or 1.5GiB")
         if name == "changed":
             command.add_argument("--since", type=age_arg, metavar="AGE", help="modified within e.g. 24h or 7d")
+        if name == "leftovers":
+            command.add_argument("--older-than", type=age_arg, metavar="AGE",
+                                 help="no modification within e.g. 24h or 7d, including descendants")
         if name == "sizes":
             command.add_argument("--direct", action="store_true",
                                  help="count only files directly inside each listed folder")
@@ -119,6 +129,11 @@ def parser():
 def display(value):
     text = str(value)
     return "".join(char if char.isprintable() else repr(char)[1:-1] for char in text)
+
+
+def modified_time(timestamp):
+    stamp = datetime.fromtimestamp(timestamp)
+    return f"{stamp.day}. {MONTHS[stamp.month - 1]} {stamp.year}, kl. {stamp:%H.%M.%S}"
 
 
 def human_size(value):
@@ -173,7 +188,7 @@ class ScanProgress:
             output.progress_done()
 
 
-def scan(root, recursive, excludes, *, clean=False, warnings=None, progress=None):
+def scan(root, recursive, excludes, *, clean=False, warnings=None, progress=None, prune_matches=None):
     entries = []
     inspected = 0
     warnings = warnings if warnings is not None else {}
@@ -202,7 +217,8 @@ def scan(root, recursive, excludes, *, clean=False, warnings=None, progress=None
                     if any(fnmatch.fnmatchcase(child.name, pattern) for pattern in targets.get(kind, [])):
                         continue
                     entries.append(Entry(Path(child.path), relative, info))
-                    if stat.S_ISDIR(info.st_mode) and recursive:
+                    if (stat.S_ISDIR(info.st_mode) and recursive
+                            and not (prune_matches and prune_matches(relative))):
                         pending.append(Path(child.path))
         except PermissionError as exc:
             if folder == root:
@@ -211,13 +227,125 @@ def scan(root, recursive, excludes, *, clean=False, warnings=None, progress=None
     return entries
 
 
-def scan_sizes(root, recursive, direct, excludes, *, logical=False, clean=False, warnings=None, progress=None):
+def latest_mtime(path, *, excludes=(), clean=False, progress=None):
+    """Inspect all included descendants; unreadable entries fail rather than appear old."""
+    info = path.lstat()
+    newest = info.st_mtime
+    targets = clean_targets() if clean else {}
+    pending = [path] if stat.S_ISDIR(info.st_mode) else []
+    inspected = 0
+    while pending:
+        folder = pending.pop()
+        with os.scandir(folder) as children:
+            for child in children:
+                relative = Path(child.path).relative_to(path).as_posix()
+                if any(fnmatch.fnmatchcase(child.name, pattern)
+                       or fnmatch.fnmatchcase(relative, pattern) for pattern in excludes):
+                    continue
+                info = child.stat(follow_symlinks=False)
+                kind = "d" if stat.S_ISDIR(info.st_mode) else "f"
+                if any(fnmatch.fnmatchcase(child.name, pattern) for pattern in targets.get(kind, [])):
+                    continue
+                newest = max(newest, info.st_mtime)
+                inspected += 1
+                if progress:
+                    progress.update(folder, inspected)
+                if stat.S_ISDIR(info.st_mode):
+                    pending.append(Path(child.path))
+    return newest
+
+
+def leftover_reason(relative):
+    name = relative.name
+    if name in (".claude", ".cursor", ".gemini", ".copilot", ".cursorrules") or name.startswith(".aider"):
+        return "Agent configuration/session data"
+    if fnmatch.fnmatchcase(name, "*.agent.log"):
+        return "Agent log"
+    if any(fnmatch.fnmatchcase(name, pattern) for pattern in
+           ("tmp.*", "wt-*", "agent-workspace*", "agent-work-*", "nav-pilot-e2e-bin*")):
+        return "Temporary/workspace name match"
+    return None
+
+
+def report_leftovers(args, root):
+    excludes = args.exclude + [".git"]
+    warnings = {}
+    rows = []
+    cutoff = time.time() - args.older_than if args.older_than is not None else None
+    progress = ScanProgress(root, True)
+    try:
+        entries = scan(root, args.recursive, excludes, clean=args.clean or args.clean_git,
+                       warnings=warnings, progress=progress, prune_matches=leftover_reason)
+        for entry in entries:
+            reason = leftover_reason(entry.relative)
+            if not reason or not (stat.S_ISREG(entry.info.st_mode) or stat.S_ISDIR(entry.info.st_mode)):
+                continue
+            denied = {}
+            size = None
+            newest = None
+            folder = stat.S_ISDIR(entry.info.st_mode)
+            try:
+                # Translate root-relative exclusions for a separately scanned candidate.
+                local_excludes = excludes + [pattern[len(entry.relative.as_posix()) + 1:]
+                                             for pattern in excludes
+                                             if pattern.startswith(entry.relative.as_posix() + "/")]
+                newest = latest_mtime(entry.path, excludes=local_excludes,
+                                      clean=args.clean or args.clean_git, progress=progress)
+                if cutoff is not None and newest > cutoff:
+                    continue
+                if folder:
+                    size = scan_sizes(entry.path, False, False, local_excludes, include_root=True,
+                                      clean=args.clean or args.clean_git, warnings=denied,
+                                      progress=progress)[Path(".")]
+                    if denied:
+                        size = None
+                else:
+                    size = entry.info.st_blocks * 512
+            except PermissionError as exc:
+                denied[entry.path] = exc
+            warnings.update(denied)
+            # Unknown ages cannot satisfy an explicit age filter.
+            if cutoff is None or (newest is not None and not denied):
+                rows.append((size, newest, entry.relative, folder, reason))
+    finally:
+        progress.close()
+    context = [display(root), "recursive" if args.recursive else "non-recursive"]
+    if args.clean or args.clean_git:
+        context.append("clean: generated artifacts excluded")
+    if args.clean_git:
+        context.append("clean-git: .git entries excluded")
+    if warnings:
+        context.append("incomplete")
+    output.context(*context)
+    output.section("Possible leftovers")
+    output.note("Name matches only, not a deletion recommendation. Git metadata is excluded.")
+    for size, newest, name, folder, reason in sorted(
+            rows, key=lambda row: (row[0] is None, -(row[0] or 0), row[2]))[:args.limit or None]:
+        print(f"  {human_size(size) if size is not None else 'Unknown':>12}  "
+              f"{'Folder' if folder else 'File':6}  "
+              f"{output.listing_name(display(name), 'folder' if folder else 'file')}")
+        modified = modified_time(newest) if newest is not None else "Unknown"
+        output.note(f"{reason} │ Last modified: {modified}")
+    if not rows:
+        output.note("No matches.")
+    if args.limit and len(rows) > args.limit:
+        output.note(f"Showing {args.limit} of {len(rows)}; use --limit 0 to show all.")
+    if warnings:
+        output.section("Warnings")
+        output.row("warn", "Incomplete report", "Permission-denied entries were skipped.")
+        for path, exc in sorted(warnings.items()):
+            output.row("warn", display(path.relative_to(root)), display(exc.strerror or str(exc)))
+
+
+def scan_sizes(root, recursive, direct, excludes, *, logical=False, clean=False, warnings=None,
+               progress=None, include_root=False):
     """Keep only folder totals; macOS supplies names, types and sizes in batches."""
     warnings = warnings if warnings is not None else {}
     targets = clean_targets() if clean else {}
     pending = [("", 0)]
     totals = {}
     inspected = 0
+    root_bytes = 0
     while pending:
         relative_folder, depth = pending.pop()
         folder = root / relative_folder
@@ -253,12 +381,91 @@ def scan_sizes(root, recursive, direct, excludes, *, logical=False, clean=False,
             warnings[folder] = exc
         if relative_folder:
             totals[relative_folder] = subtotal
+        else:
+            root_bytes = subtotal
     if not direct:
         for folder in sorted(totals, key=lambda name: name.count("/"), reverse=True):
             parent = folder.rpartition("/")[0]
             if parent:
                 totals[parent] += totals[folder]
+    if include_root:
+        return {Path("."): root_bytes + sum(size for name, size in totals.items() if "/" not in name)}
     return {Path(name): size for name, size in totals.items() if recursive or "/" not in name}
+
+
+def cache_locations():
+    home = Path.home()
+    xdg_cache = Path(os.environ.get("XDG_CACHE_HOME", str(home / ".cache")))
+    return [
+        ("npm", home / ".npm"),
+        ("pnpm store", home / "Library/pnpm/store"),
+        ("pnpm cache", home / "Library/Caches/pnpm"),
+        ("Bun", home / ".bun/install/cache"),
+        ("Homebrew", home / "Library/Caches/Homebrew"),
+        ("pip", home / "Library/Caches/pip"),
+        ("uv", xdg_cache / "uv"),
+        ("Go build", home / "Library/Caches/go-build"),
+        ("Go modules", home / "go/pkg/mod"),
+        ("Gradle", home / ".gradle/caches"),
+        ("Cargo registry", home / ".cargo/registry"),
+        ("Cargo Git", home / ".cargo/git"),
+        ("Playwright", home / "Library/Caches/ms-playwright"),
+        ("Xcode DerivedData", home / "Library/Developer/Xcode/DerivedData"),
+    ]
+
+
+def report_caches(args):
+    results = []
+    warnings = {}
+    progress = ScanProgress(Path("/"), True)
+    home = Path.home()
+    try:
+        for label, path in cache_locations():
+            try:
+                info = path.lstat()
+            except FileNotFoundError:
+                continue
+            except PermissionError as exc:
+                warnings[path] = exc
+                results.append((label, path, None))
+                continue
+            if not stat.S_ISDIR(info.st_mode):
+                if stat.S_ISLNK(info.st_mode):
+                    warnings[path] = OSError("Symlink cache skipped; links are never followed")
+                    results.append((label, path, None))
+                continue
+            denied = {}
+            try:
+                totals = scan_sizes(path, False, False, [], warnings=denied, progress=progress,
+                                    include_root=True)
+                size = None if denied else totals[Path(".")]
+            except PermissionError as exc:
+                denied[path] = exc
+                size = None
+            warnings.update(denied)
+            results.append((label, path, size))
+    finally:
+        progress.close()
+    results.sort(key=lambda item: (item[2] is None, -(item[2] or 0), item[0]))
+    output.context(display(home), "known developer caches", *(['incomplete'] if warnings else []))
+    output.section("Caches")
+    output.note("Allocated file bytes, including nested contents. Nothing is deleted.")
+    output.note("Known default locations only; custom tool paths may not be listed.")
+    output.note("Hard links and shared APFS blocks can be counted more than once.")
+    output.table_header("%12s  %-18s  %s", "Bytes", "Cache", "Folder")
+    for label, path, size in results[:args.limit or None]:
+        name = "~/" + str(path.relative_to(home)) if path.is_relative_to(home) else str(path)
+        print(f"  {human_size(size) if size is not None else 'Unknown':>12}  {label:<18}  "
+              f"{output.listing_name(display(name), 'folder')}")
+    if not results:
+        output.note("No known cache folders found.")
+    if args.limit and len(results) > args.limit:
+        output.note(f"Showing {args.limit} of {len(results)}; use --limit 0 to show all.")
+    if warnings:
+        output.section("Warnings")
+        output.row("warn", "Incomplete report", "Some cache folders could not be inspected.")
+        for path, exc in sorted(warnings.items()):
+            output.row("warn", display(path), display(exc.strerror or str(exc)))
 
 
 def signature(info):
@@ -380,11 +587,17 @@ def load_size_cache(path):
 
 
 def report(args):
+    if args.command == "caches":
+        report_caches(args)
+        return
     root = Path(os.path.abspath(os.path.expanduser(args.path)))
     sizes = args.command == "sizes"
     cached = sizes and args.cached
     if not cached and (root.is_symlink() or not root.is_dir()):
         raise OSError(f"not a real directory (symlink roots are not followed): {display(root)}")
+    if args.command == "leftovers":
+        report_leftovers(args, root)
+        return
     excludes = args.exclude + ([".git"] if args.clean_git else [])
     warnings = {}
     cache_path = size_cache_path(root, args) if sizes else None
@@ -422,9 +635,7 @@ def report(args):
         for entry in sorted(files, key=lambda entry: (-entry.info.st_mtime_ns, entry.relative.as_posix())):
             if cutoff is not None and entry.info.st_mtime < cutoff:
                 continue
-            stamp = datetime.fromtimestamp(entry.info.st_mtime)
-            formatted = f"{stamp.day}. {MONTHS[stamp.month - 1]} {stamp.year}, kl. {stamp:%H.%M.%S}"
-            rows.append((formatted, display(entry.relative)))
+            rows.append((modified_time(entry.info.st_mtime), display(entry.relative)))
     elif args.command == "sizes":
         incomplete = set()
         for path in warnings:

@@ -1,11 +1,17 @@
 """Fixture-only checks for clean copies and cleanup target selection."""
 
 import os
+import contextlib
+import importlib.util
+import io
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
+import time
 import unittest
 import zipfile
+from unittest.mock import patch
 
 
 REPO = Path(__file__).resolve().parents[2]
@@ -71,7 +77,7 @@ fi
 
     def test_copy_excludes_shared_artifacts_and_preserves_source(self):
         for path in ("node_modules/module/file", ".output/file", "nested/build/file",
-                     "playwright-report/file", "types.tsbuildinfo", ".eslintcache"):
+                     "playwright-report/file", "types.tsbuildinfo", ".eslintcache", ".pytest_cache/cache"):
             self.write(path)
         self.write(".git/config", "metadata")
         self.write("nested/source.txt", "nested")
@@ -84,7 +90,7 @@ fi
         self.assertTrue((destination / "source-link").is_symlink())
         self.assertTrue((destination / "nested/source.txt").exists())
         for relative in ("node_modules", ".output", "nested/build", "playwright-report",
-                         "types.tsbuildinfo", ".eslintcache"):
+                         "types.tsbuildinfo", ".eslintcache", ".pytest_cache"):
             self.assertFalse((destination / relative).exists(), relative)
             self.assertTrue((self.source / relative).exists(), relative)
 
@@ -180,6 +186,147 @@ fi
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(self.selected_targets())
         self.assertTrue((self.source / "build/file").exists())
+        self.assertNotIn("Available on current filesystem", result.stdout)
+
+    def test_wipe_dry_run_never_prompts_or_deletes_even_with_yes_input(self):
+        self.mock_deletion()
+        self.write("build/file")
+        result = self.run_script("wipe-clean.sh", "--dry-run", answers="y\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(result.stdout.startswith("Dry run"))
+        self.assertIn("build", result.stdout)
+        self.assertNotIn("Proceed?", result.stdout)
+        self.assertFalse(self.selected_targets())
+        self.assertTrue((self.source / "build/file").exists())
+
+    def test_wipe_sort_changes_preview_only_and_reports_disk_space(self):
+        self.mock_deletion()
+        self.write("build/file", "small")
+        self.write("dist/file", "x" * 100_000)
+        default = self.run_script("wipe-clean.sh", answers="n\n")
+        self.assertEqual(default.returncode, 0, default.stderr)
+        self.assertLess(default.stdout.index("build"), default.stdout.index("dist"))
+        sorted_result = self.run_script("wipe-clean.sh", "--sort", "size", answers="y\n")
+        self.assertEqual(sorted_result.returncode, 0, sorted_result.stderr)
+        self.assertLess(sorted_result.stdout.index("dist"), sorted_result.stdout.index("build"))
+        self.assertEqual(self.selected_targets(), {"./build", "./dist"})
+        self.assertIn("Available on current filesystem", sorted_result.stdout)
+        self.assertIn("Observed change:", sorted_result.stdout)
+        for args in (("--sort",), ("--sort", "invalid")):
+            with self.subTest(args=args):
+                result = self.run_script("wipe-clean.sh", *args, answers="y\n")
+                self.assertEqual(result.returncode, 2)
+
+    def test_wipe_older_than_checks_every_descendant_and_preserves_links(self):
+        self.mock_deletion()
+        old = self.write("build/deep/file")
+        recent = self.write("dist/deep/file")
+        link = self.source / "build/external"
+        link.symlink_to(self.source / "source.txt")
+        stamp = time.time() - 10 * 86400
+        for base in ("build", "dist"):
+            for path in sorted((self.source / base).rglob("*"), reverse=True):
+                os.utime(path, (stamp, stamp), follow_symlinks=False)
+            os.utime(self.source / base, (stamp, stamp))
+        os.utime(recent, None)
+        result = self.run_script("wipe-clean.sh", "--older-than", "7d", "--sort", "size", answers="y\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.selected_targets(), {"./build"})
+        self.assertIn("build", result.stdout)
+        self.assertNotIn("dist", result.stdout)
+        self.assertTrue(old.exists())  # rm is mocked.
+        self.assertTrue((self.source / "source.txt").exists())
+
+    def test_wipe_age_recheck_aborts_if_target_changes_after_preview(self):
+        self.mock_deletion()
+        self.write("build/file")
+        stamp = time.time() - 10 * 86400
+        for path in (self.source / "build/file", self.source / "build"):
+            os.utime(path, (stamp, stamp))
+        self.mock("python3", f'''case "$*" in *--check-age*) touch build/file ;; esac
+exec "{sys.executable}" "$@"
+''')
+        result = self.run_script("wipe-clean.sh", "--older-than", "7d", answers="y\n")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("target was modified recently", result.stderr)
+        self.assertFalse(self.selected_targets())
+
+    def test_wipe_age_empty_selection_cancellation_and_invalid_age(self):
+        self.mock_deletion()
+        self.write("build/file")
+        result = self.run_script("wipe-clean.sh", "--older-than", "7d", answers="y\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Nothing to clean.", result.stdout)
+        self.assertNotIn("Estimated total", result.stdout)
+        for path in (self.source / "build/file", self.source / "build"):
+            os.utime(path, (0, 0))
+        cancelled = self.run_script("wipe-clean.sh", "--older-than", "7d", answers="n\n")
+        self.assertEqual(cancelled.returncode, 0, cancelled.stderr)
+        self.assertIn("build", cancelled.stdout)
+        for args in (("--older-than",), ("--older-than", "-7d"), ("--older-than", "garbage")):
+            result = self.run_script("wipe-clean.sh", *args, answers="y\n")
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("Error:", result.stderr)
+        self.assertFalse(self.selected_targets())
+        self.assertFalse(list(self.temp.iterdir()))
+
+    def test_age_preview_permission_failure_does_not_write_a_deletion_plan(self):
+        target = self.write("build/file")
+        spec = importlib.util.spec_from_file_location("wipe_age_preview", REPO / "scripts/wipe-clean-preview.py")
+        module = importlib.util.module_from_spec(spec)
+        with patch.object(sys, "path", [str(REPO / "scripts"), *sys.path]):
+            spec.loader.exec_module(module)
+        selected = self.root / "selected"
+        stream = io.TextIOWrapper(io.BytesIO(os.fsencode(target.parent) + b"\0"))
+        with patch.object(module.sys, "stdin", stream), \
+                patch.object(module, "latest_mtime", side_effect=PermissionError("age unreadable")), \
+                contextlib.redirect_stderr(io.StringIO()) as stderr:
+            code = module.main(["--older-than", "7d", "--targets-output", str(selected)])
+        self.assertEqual(code, 1)
+        self.assertIn("age unreadable", stderr.getvalue())
+        self.assertFalse(selected.exists())
+        self.assertTrue(target.exists())
+
+    def test_disk_space_comparison_uses_metadata_only_and_handles_decreases(self):
+        spec = importlib.util.spec_from_file_location("wipe_preview", REPO / "scripts/wipe-clean-preview.py")
+        module = importlib.util.module_from_spec(spec)
+        with patch.object(sys, "path", [str(REPO / "scripts"), *sys.path]):
+            spec.loader.exec_module(module)
+        for available, expected in ((3072, "+2.0 KiB"), (0, "-1.0 KiB")):
+            with self.subTest(available=available), \
+                    patch.object(module.shutil, "disk_usage", return_value=type("Usage", (), {"free": available})()), \
+                    patch.object(module, "scan_sizes", side_effect=AssertionError("rescan")), \
+                    contextlib.redirect_stdout(io.StringIO()) as stdout:
+                self.assertEqual(module.main(["--space-after", "1024"]), 0)
+            self.assertIn(expected, stdout.getvalue())
+        with patch.object(module.shutil, "disk_usage", side_effect=OSError("disk query failed")), \
+                contextlib.redirect_stderr(io.StringIO()) as stderr:
+            self.assertEqual(module.main(["--available-bytes"]), 1)
+        self.assertIn("disk query failed", stderr.getvalue())
+
+    def test_wipe_previews_allocations_and_pytest_before_confirmation(self):
+        self.mock_deletion()
+        build = self.write("build/file", "x" * 100_000)
+        cache = self.write(".pytest_cache/nested/cache", "cache")
+        total = (build.stat().st_blocks + cache.stat().st_blocks) * 512
+        result = self.run_script("wipe-clean.sh", answers="n\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"{total / 1024:.1f} KiB", result.stdout)
+        self.assertIn("Estimated total", result.stdout)
+        self.assertIn(".pytest_cache", result.stdout)
+        self.assertFalse(self.selected_targets())
+        result = self.run_script("wipe-clean.sh", answers="y\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.selected_targets(), {"./build", "./.pytest_cache"})
+
+    def test_preview_failure_aborts_deletion(self):
+        self.mock_deletion()
+        self.write("build/file")
+        self.mock("python3", "printf 'Simulated sizing failure\\n' >&2\nexit 1\n")
+        result = self.run_script("wipe-clean.sh", answers="y\n")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("nothing was deleted", result.stderr)
+        self.assertFalse(self.selected_targets())
 
     def test_wipe_with_no_targets_is_a_successful_noop(self):
         self.mock_deletion()

@@ -7,6 +7,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import stat
@@ -54,6 +55,147 @@ class FilesTests(unittest.TestCase):
         self.assertEqual(code, 0, stderr.getvalue())
         self.assertEqual(stderr.getvalue(), "")
         return stdout.getvalue()
+
+    def run_caches(self, *args):
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with patch.object(Path, "home", return_value=self.root), \
+                contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            code = FILES.main(["caches", *args])
+        self.assertEqual(code, 0, stderr.getvalue())
+        self.assertEqual(stderr.getvalue(), "")
+        return stdout.getvalue()
+
+    def test_leftovers_lists_sizes_categories_without_duplicate_subtrees_or_symlinks(self):
+        config = self.root / ".claude"
+        (config / "tmp.inner").mkdir(parents=True)
+        payload = config / "tmp.inner/data"
+        payload.write_bytes(b"x" * 100_000)
+        log = self.root / "task.agent.log"
+        log.write_text("log")
+        nested = self.root / "sub/wt-old"
+        nested.mkdir()
+        (nested / "data").write_text("workspace")
+        (self.root / ".git").mkdir()
+        (self.root / ".git/tmp.hidden").write_text("metadata")
+        (self.root / "tmp.link").symlink_to(config)
+        before = payload.read_bytes()
+        with patch.object(Path, "open", side_effect=AssertionError("file contents read")), \
+                patch.object(FILES.subprocess, "run", side_effect=AssertionError("tool executed")):
+            text = self.run_report("leftovers", "--limit", "0")
+        self.assertIn("Agent configuration/session data", text)
+        self.assertIn("Agent log", text)
+        self.assertIn("Folder", text)
+        self.assertIn("File", text)
+        self.assertIn(f"{payload.stat().st_blocks * 512 / 1024:.1f} KiB", text)
+        self.assertLess(text.index(".claude"), text.index("task.agent.log"))
+        for absent in ("tmp.inner", "tmp.link", "wt-old", "tmp.hidden", "a.txt"):
+            self.assertNotIn(absent, text)
+        recursive = self.run_report("leftovers", "-r", "--limit", "0")
+        self.assertIn("sub/wt-old", recursive)
+        self.assertIn("Temporary/workspace name match", recursive)
+        self.assertNotIn("tmp.hidden", recursive)
+        self.assertEqual(payload.read_bytes(), before)
+        self.assertTrue((self.root / "tmp.link").is_symlink())
+
+    def test_leftovers_age_checks_descendants_and_honours_exclusions(self):
+        candidate = self.root / "tmp.old"
+        (candidate / "deep").mkdir(parents=True)
+        recent = candidate / "deep/recent"
+        recent.write_text("new")
+        for path in (recent, candidate / "deep", candidate):
+            os.utime(path, (0, 0))
+        os.utime(recent, (1_700_000_000, 1_700_000_000))
+        with patch.object(FILES.time, "time", return_value=1_700_000_001):
+            self.assertNotIn("tmp.old", self.run_report("leftovers", "--older-than", "7d"))
+            text = self.run_report("leftovers", "--older-than", "7d",
+                                   "--exclude", "tmp.old/deep/recent")
+        self.assertIn("tmp.old", text)
+        self.assertIn("1970", text)
+        self.assertNotIn("tmp.old", self.run_report("leftovers", "--exclude", "tmp.*"))
+
+    def test_leftovers_warns_unknown_age_and_does_not_treat_permission_failure_as_old(self):
+        (self.root / "tmp.denied").mkdir()
+        with patch.object(FILES, "latest_mtime", side_effect=PermissionError("denied")):
+            text = self.run_report("leftovers")
+            self.assertIn("Unknown", text)
+            self.assertIn("Warnings", text)
+            self.assertIn("denied", text)
+            filtered = self.run_report("leftovers", "--older-than", "7d")
+        self.assertIn("No matches.", filtered)
+        self.assertIn("Warnings", filtered)
+
+    def test_caches_counts_root_and_nested_allocations_and_sorts(self):
+        npm = self.root / ".npm"
+        npm.mkdir()
+        (npm / "root").write_bytes(b"x" * 100_000)
+        (npm / "nested").mkdir()
+        (npm / "nested" / "data").write_bytes(b"nested")
+        bun = self.root / ".bun/install/cache"
+        bun.mkdir(parents=True)
+        (bun / "small").write_bytes(b"x")
+        expected = sum(path.lstat().st_blocks * 512 for path in
+                       [npm / "root", npm / "nested/data"])
+        before = {path: path.read_bytes() for path in [npm / "root", npm / "nested/data", bun / "small"]}
+        with patch.object(FILES.subprocess, "run", side_effect=AssertionError("external command")):
+            text = self.run_caches()
+        self.assertRegex(text, rf"{re.escape(FILES.human_size(expected))}\s+npm\s+~/\.npm")
+        self.assertLess(text.index("npm"), text.index("Bun"))
+        self.assertNotIn("Gradle", text)
+        self.assertEqual({path: path.read_bytes() for path in before}, before)
+        text = self.run_caches("--limit", "1")
+        self.assertIn("Showing 1 of 2", text)
+        self.assertNotIn("Bun", text)
+        self.assertNotIn("Showing", self.run_caches("--limit", "0"))
+
+    def test_caches_warns_for_denied_folders_and_symlinks(self):
+        npm = self.root / ".npm"
+        (npm / "nested").mkdir(parents=True)
+        (npm / "kept").write_bytes(b"keep")
+        (self.root / ".gradle/caches").mkdir(parents=True)
+        (self.root / ".bun/install").mkdir(parents=True)
+        (self.root / ".bun/install/cache").symlink_to(self.root / ".gradle/caches")
+        original = FILES.directory_entries
+
+        def denied(path):
+            if Path(path) in (npm / "nested", self.root / ".gradle/caches"):
+                raise PermissionError(13, "Permission denied", str(path))
+            return original(path)
+
+        with patch.object(FILES, "directory_entries", side_effect=denied):
+            text = self.run_caches()
+        self.assertRegex(text, r"Unknown\s+npm")
+        self.assertRegex(text, r"Unknown\s+Gradle")
+        self.assertRegex(text, r"Unknown\s+Bun")
+        self.assertIn("Incomplete report", text)
+        self.assertIn("Permission denied", text)
+        self.assertIn("Symlink cache skipped", text)
+
+    def test_caches_honours_xdg_uv_location_and_empty_report(self):
+        self.assertIn("No known cache folders found", self.run_caches())
+        uv = Path(self.cache.name) / "uv"
+        uv.mkdir()
+        (uv / "cached").write_bytes(b"cache")
+        text = self.run_caches()
+        self.assertIn(str(uv), text)
+        self.assertIn("uv", text)
+
+    def test_caches_help_does_not_inspect_or_run_tools(self):
+        with patch.object(FILES, "cache_locations", side_effect=AssertionError("scan")), \
+                contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(SystemExit) as caught:
+                FILES.main(["caches", "--help"])
+        self.assertEqual(caught.exception.code, 0)
+        for args in (["caches", "."], ["caches", "--clean"], ["caches", "-r"]):
+            with self.subTest(args=args), contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as caught:
+                    FILES.main(args)
+                self.assertEqual(caught.exception.code, 2)
+
+    def test_clean_excludes_nested_pytest_cache(self):
+        (self.root / "sub/.pytest_cache").mkdir()
+        (self.root / "sub/.pytest_cache/marker").write_bytes(b"cache")
+        self.assertIn(".pytest_cache/marker", self.run_report("large", "-r", "--limit", "0"))
+        self.assertNotIn(".pytest_cache/marker", self.run_report("large", "-r", "--clean", "--limit", "0"))
 
     def test_counts_include_hidden_and_links_without_following_them(self):
         for args, files, folders in (((), 5, 2), (("-r",), 7, 3)):
@@ -273,7 +415,7 @@ class FilesTests(unittest.TestCase):
         text = self.run_report("count", "-r", "--clean", "--exclude", ".git")
         self.assertRegex(text, r"Files\s+8\b")
         self.assertRegex(text, r"Folders\s+4\b")
-        for command in FILES.COMMANDS:
+        for command in FILES.COMMANDS.keys() - {"caches"}:
             with self.subTest(command=command):
                 self.assertIn("clean: generated artifacts excluded",
                               self.run_report(command, "-r", "--clean"))
@@ -321,7 +463,7 @@ class FilesTests(unittest.TestCase):
         text = self.run_report("count", "--clean-git")
         self.assertRegex(text, r"Files\s+7\b")
         self.assertRegex(text, r"Folders\s+3\b")
-        for command in FILES.COMMANDS:
+        for command in FILES.COMMANDS.keys() - {"caches"}:
             with self.subTest(command=command):
                 self.assertIn("clean-git: .git entries excluded",
                               self.run_report(command, "-r", "--clean-git"))
@@ -495,7 +637,7 @@ class FilesTests(unittest.TestCase):
                 raise PermissionError(13, "Permission denied", str(path))
             return original_native(path)
 
-        for command in FILES.COMMANDS:
+        for command in FILES.COMMANDS.keys() - {"caches"}:
             with self.subTest(command=command), \
                     patch.object(FILES.os, "scandir", side_effect=denied), \
                     patch.object(FILES, "directory_entries", side_effect=denied_native):
