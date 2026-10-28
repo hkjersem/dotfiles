@@ -43,7 +43,10 @@ reset.
 
 The cap follows Codex's reported five-hour reset: all three slots become
 available together when it resets, regardless of when earlier chats were
-resumed. There is no separate cooldown per chat or send. If the limits cannot
+resumed. Codex starts its window when the app takes the first message, a
+little after the check records the send, so resumes up to 15 minutes before
+the reported start still count toward it. There is no separate cooldown per
+chat or send. If the limits cannot
 be read, the check reports the error and sends nothing.
 
 Each usage window holds up to three chats of one tier. Unmarked chats come

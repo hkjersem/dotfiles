@@ -126,6 +126,8 @@ LATE_SLACK = timedelta(hours=1)
 PLAN_HORIZON = timedelta(days=2)
 # Codex keeps session logs uncompressed for over a week, longer than a weekly limit stays used up.
 RECURRING_SCAN = timedelta(days=8)
+# Codex starts a usage window when the app takes the first message, a little after the send is recorded.
+WINDOW_START_SLACK = timedelta(minutes=15)
 USAGE_LIMIT_ERROR = "usage_limit_exceeded"
 SCRIPT_PATH = Path(__file__).resolve()
 TIME_PATTERN = re.compile(r"([01][0-9]|2[0-3])[:.]?([0-5][0-9])\Z")
@@ -911,7 +913,7 @@ def align_limit_window(window, limit_end, now):
     if limit_end <= now:
         return {**window, "end": limit_end} if window["start"] < limit_end else window
     start = limit_end - RECURRING_PERIOD
-    if window.get("end") == limit_end or start <= window["start"] < limit_end:
+    if window.get("end") == limit_end or start - WINDOW_START_SLACK <= window["start"] < limit_end:
         return {**window, "end": limit_end}
     return None
 
@@ -936,8 +938,11 @@ def plan_resumes(chats, now, sends, window, morning=None, passed=None, limit_end
     """
     window = align_limit_window(window, limit_end, now)
     active = window_active(window, now)
-    start = (limit_end - RECURRING_PERIOD if limit_end is not None and limit_end > now
-             else window["start"] if active else now)
+    start = limit_end - RECURRING_PERIOD if limit_end is not None and limit_end > now else None
+    if active:
+        start = window["start"] if start is None else min(start, window["start"])
+    elif start is None:
+        start = now
     room = RECURRING_CHATS - sum(start <= at <= now for at in sends)
     if room <= 0 or not chats:
         return [], window

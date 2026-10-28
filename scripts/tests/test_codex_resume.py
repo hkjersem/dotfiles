@@ -936,6 +936,30 @@ class CodexResumeTests(unittest.TestCase):
             stopped="2026-10-28T09:25:00+01:00", limit_end="2026-10-28T23:08:00+01:00")
         self.assertEqual(resumed, ["d"])
 
+    def test_window_codex_starts_seconds_after_the_sends_keeps_them(self):
+        state = {
+            "resumed": {},
+            "sends": ["2026-10-28T08:09:00+01:00", "2026-10-28T09:08:00+01:00",
+                      "2026-10-28T09:08:00+01:00"],
+            "window": {"start": "2026-10-28T08:09:00+01:00", "tier": 0, "early": False},
+            "passed": {"kill": "2026-10-28T08:09:00+01:00"},
+            "tiers": {"kill": {"tier": 1, "marks": 0}},
+        }
+        resumed, _, state = self.recurring(
+            ["a", "b", "c", ("kill", "Kill")], state=state, now="2026-10-28T13:00:00+01:00",
+            stopped="2026-10-28T09:25:00+01:00", resets="2026-10-28T13:08:00+01:00",
+            sent="2026-10-28T13:09:35+01:00", allowed=[True])
+        self.assertEqual(resumed, ["a", "b", "c"])
+        # Codex starts its window when it takes the first message, seconds after the sends were recorded.
+        resumed, _, state = self.recurring(
+            [("kill", "Kill")], state=state, now="2026-10-28T13:25:00+01:00",
+            stopped="2026-10-28T09:25:00+01:00", limit_end="2026-10-28T18:09:46+01:00")
+        self.assertEqual(resumed, [])
+        resumed, _, _ = self.recurring(
+            [("kill", "Kill")], state=state, now="2026-10-28T18:10:00+01:00",
+            stopped="2026-10-28T09:25:00+01:00", limit_end="2026-10-28T23:10:00+01:00")
+        self.assertEqual(resumed, ["kill"])
+
     def test_recurring_reports_unreadable_or_missing_five_hour_limits(self):
         with patch.object(codex_resume, "five_hour_reset",
                           side_effect=RuntimeError("Codex reported no 5-hour usage window")):
