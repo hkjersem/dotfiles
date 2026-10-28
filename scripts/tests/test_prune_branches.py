@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import time
 import unittest
 
 
@@ -74,13 +75,13 @@ class PruneBranchesTests(unittest.TestCase):
         self.pushed_branch("merged")
         self.delete_on_remote("merged")
 
-        dry = self.run_prune()
+        dry = self.run_prune("--dry-run")
         self.assertEqual(dry.returncode, 0, dry.stderr)
         self.assertIn("already in origin/main", dry.stdout)
-        self.assertTrue(dry.stdout.startswith("Dry run — nothing will be changed. Run prune_branches --apply"), dry.stdout)
+        self.assertTrue(dry.stdout.startswith("Dry run — nothing will be changed."), dry.stdout)
         self.assertIn("merged", self.branches())
 
-        applied = self.run_prune("--apply", "--yes")
+        applied = self.run_prune("--yes")
         self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
         self.assertNotIn("merged", self.branches())
         config = subprocess.run(["git", "config", "--get-regexp", "^branch\\.merged\\."], cwd=self.work,
@@ -88,6 +89,193 @@ class PruneBranchesTests(unittest.TestCase):
         self.assertEqual(config.stdout, "")
         log = (self.work / ".git" / "prune-branches.log").read_text()
         self.assertIn("merged", log)
+
+    def test_detached_removal_is_opt_in_and_fetches_untracked_remotes(self):
+        detached = self.root / "detached"
+        sha = self.git(self.work, "rev-parse", "origin/main")
+        self.git(self.work, "worktree", "add", "-q", "--detach", str(detached), sha)
+        self.git(self.work, "branch", "--unset-upstream", "main")
+        default = self.run_prune("--yes")
+        self.assertEqual(default.returncode, 0, default.stdout + default.stderr)
+        self.assertTrue(detached.exists())
+        dry = self.run_prune("--include-detached", "--dry-run")
+        self.assertEqual(dry.returncode, 0, dry.stdout + dry.stderr)
+        self.assertIn("Detached to remove", dry.stdout)
+        self.assertTrue(detached.exists())
+        refs = self.git(self.work, "for-each-ref")
+        no_fetch = self.run_prune("--include-detached", "--no-fetch", "--dry-run")
+        self.assertEqual(no_fetch.returncode, 0, no_fetch.stdout + no_fetch.stderr)
+        self.assertIn("Detached to remove", no_fetch.stdout)
+        self.assertEqual(refs, self.git(self.work, "for-each-ref"))
+        refused = self.run_prune("--include-detached", answers="n\n")
+        self.assertEqual(refused.returncode, 0)
+        self.assertTrue(detached.exists())
+        result = self.run_prune("--include-detached", "--yes")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(detached.exists())
+        self.assertEqual(self.branches(), {"main"})
+        self.assertIn("worktree:" + str(detached), (self.work / ".git/prune-branches.log").read_text())
+
+    def test_detached_worktree_protections_and_head_history(self):
+        locations = {}
+        for name in ("dirty", "ignored", "locked", "history", "refs", "busy", "hidden"):
+            path = self.root / name
+            self.git(self.work, "worktree", "add", "-q", "--detach", str(path), "origin/main")
+            locations[name] = path
+        (self.work / ".git/info/exclude").write_text("secret\n")
+        (locations["dirty"] / "local").write_text("keep")
+        (locations["ignored"] / "secret").write_text("keep")
+        self.git(self.work, "worktree", "lock", str(locations["locked"]))
+        self.commit(locations["history"], "unpushed")
+        self.git(locations["history"], "reset", "--hard", "origin/main")
+        self.git(locations["refs"], "update-ref", "refs/worktree/keep", "HEAD")
+        admin = Path(self.git(locations["busy"], "rev-parse", "--absolute-git-dir"))
+        (admin / "rebase-merge").mkdir()
+        self.git(locations["hidden"], "update-index", "--assume-unchanged", "base")
+        (locations["hidden"] / "base").write_text("edit")
+        result = self.run_prune("--include-detached", "--yes")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for path in locations.values():
+            self.assertTrue(path.exists(), result.stdout)
+        for reason in ("uncommitted", "ignored local files", "locked", "HEAD history",
+                       "ref(s) only in this worktree", "unfinished Git operation", "assume-unchanged"):
+            self.assertIn(reason, result.stdout)
+
+    def test_detached_unconfirmed_and_failed_fetch_are_kept(self):
+        path = self.root / "detached"
+        self.git(self.work, "worktree", "add", "-q", "--detach", str(path), "origin/main")
+        self.commit(path, "unpushed")
+        result = self.run_prune("--include-detached", "--yes")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("not confirmed on a remote", result.stdout)
+        self.assertTrue(path.exists())
+        self.git(path, "reset", "--hard", "origin/main")
+        self.git(self.work, "remote", "set-url", "origin", str(self.root / "missing.git"))
+        failed = self.run_prune("--include-detached", "--yes")
+        self.assertEqual(failed.returncode, 1, failed.stdout + failed.stderr)
+        self.assertTrue(path.exists())
+
+    def test_detached_apply_rechecks_identity_and_lock(self):
+        path = self.root / "detached"
+        sha = self.git(self.work, "rev-parse", "origin/main")
+        self.git(self.work, "worktree", "add", "-q", "--detach", str(path), sha)
+        script = (
+            'source "$1/scripts/lib/clean-targets.sh"; source "$1/scripts/lib/stale-branches.sh"; '
+            'SB_GIT_DIR=$2; SB_TMP=$3; sb_apply_detached "$5" "$4" test ""'
+        )
+        for lock in (False, True):
+            if lock:
+                self.git(path, "switch", "--detach", sha)
+                self.git(self.work, "worktree", "lock", str(path))
+            else:
+                self.commit(path, "changed")
+            result = subprocess.run(
+                ["/bin/bash", "-c", script, "test", str(REPO), str(self.work / ".git"),
+                 str(self.root / "tmp"), sha, str(path)],
+                env=self.env, text=True, capture_output=True, timeout=30)
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertTrue(path.exists())
+            self.assertIn("locked" if lock else "no longer detached", result.stdout)
+
+    def test_older_than_retains_recent_tips_and_scans_worktree_descendants(self):
+        self.env.update(GIT_AUTHOR_DATE="2020-01-01T00:00:00", GIT_COMMITTER_DATE="2020-01-01T00:00:00")
+        self.pushed_branch("old")
+        self.pushed_branch("old-with-worktree")
+        del self.env["GIT_AUTHOR_DATE"], self.env["GIT_COMMITTER_DATE"]
+        self.pushed_branch("recent")
+        path = self.root / "old-worktree"
+        self.git(self.work, "worktree", "add", "-q", str(path), "old-with-worktree")
+        self.delete_on_remote("old", "old-with-worktree", "recent")
+        result = self.run_prune("--older-than", "7d", "--yes")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.branches(), {"main", "old-with-worktree", "recent"})
+        self.assertIn("retained by --older-than", result.stdout)
+        stamp = time.time() - 10 * 86400
+        for child in path.iterdir():
+            if child.name != ".git":
+                os.utime(child, (stamp, stamp))
+        os.utime(path, (stamp, stamp))
+        applied = self.run_prune("--older-than", "7d", "--yes")
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        self.assertFalse(path.exists())
+        self.assertEqual(self.branches(), {"main", "recent"})
+
+    def test_detached_age_guard_and_invoking_worktree(self):
+        self.env.update(GIT_AUTHOR_DATE="2020-01-01T00:00:00", GIT_COMMITTER_DATE="2020-01-01T00:00:00")
+        sha = self.commit(self.work, "old-tip")
+        self.git(self.work, "push", "-q", "origin", "main")
+        del self.env["GIT_AUTHOR_DATE"], self.env["GIT_COMMITTER_DATE"]
+        path = self.root / "detached"
+        self.git(self.work, "worktree", "add", "-q", "--detach", str(path), sha)
+        recent = self.run_prune("--include-detached", "--older-than", "7d", "--yes")
+        self.assertEqual(recent.returncode, 0, recent.stdout + recent.stderr)
+        self.assertIn("retained by --older-than", recent.stdout)
+        self.assertTrue(path.exists())
+        stamp = time.time() - 10 * 86400
+        for child in path.iterdir():
+            if child.name != ".git":
+                os.utime(child, (stamp, stamp))
+        os.utime(path, (stamp, stamp))
+        invoked = self.run_prune("--include-detached", "--yes", cwd=path)
+        self.assertEqual(invoked.returncode, 0, invoked.stdout + invoked.stderr)
+        self.assertTrue(path.exists())
+        old = self.run_prune("--include-detached", "--older-than", "7d", "--yes")
+        self.assertEqual(old.returncode, 0, old.stdout + old.stderr)
+        self.assertFalse(path.exists())
+
+    def test_detached_stale_remote_ref_and_newline_path_are_never_removed(self):
+        sha = self.pushed_branch("only-copy")
+        path = self.root / "detached"
+        odd = self.root / "line\nbreak"
+        self.git(self.work, "worktree", "add", "-q", "--detach", str(path), sha)
+        self.git(self.work, "worktree", "add", "-q", "--detach", str(odd), "origin/main")
+        self.git(self.work, "config", "remote.origin.fetch", "+refs/heads/main:refs/remotes/origin/main")
+        self.git(self.other, "push", "-q", "origin", "--delete", "only-copy")
+        self.git(self.work, "branch", "-D", "only-copy")
+        result = self.run_prune("--include-detached", "--yes")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue(path.exists())
+        self.assertTrue(odd.exists())
+        self.assertIn("not confirmed on a remote branch", result.stdout)
+        self.assertIn("path cannot be represented", result.stdout)
+
+    def test_age_check_failure_retains_candidate_and_invalid_age_fails_before_fetch(self):
+        self.pushed_branch("candidate")
+        self.delete_on_remote("candidate")
+        bin_path = self.root / "bin"
+        bin_path.mkdir()
+        python = bin_path / "python3"
+        python.write_text("#!/bin/sh\nprintf 'age metadata unreadable\\n'\nexit 2\n")
+        python.chmod(0o755)
+        self.env["PATH"] = str(bin_path) + os.pathsep + self.env["PATH"]
+        result = self.run_prune("--older-than", "7d", "--yes")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("age metadata unreadable", result.stdout)
+        self.assertIn("candidate", self.branches())
+        for args in (("--older-than",), ("--older-than", "-7d"), ("--older-than", "bad")):
+            result = self.run_prune(*args)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("Error:", result.stderr)
+
+    def test_branch_age_is_rechecked_before_apply(self):
+        self.env.update(GIT_AUTHOR_DATE="2020-01-01T00:00:00", GIT_COMMITTER_DATE="2020-01-01T00:00:00")
+        sha = self.pushed_branch("planned-old")
+        del self.env["GIT_AUTHOR_DATE"], self.env["GIT_COMMITTER_DATE"]
+        path = self.root / "planned-worktree"
+        self.git(self.work, "worktree", "add", "-q", str(path), "planned-old")
+        script = (
+            'source "$1/scripts/lib/clean-targets.sh"; source "$1/scripts/lib/stale-branches.sh"; '
+            'SB_GIT_DIR=$2; SB_TMP=$3; SB_OLDER_THAN=7d; '
+            'sb_apply_delete planned-old "$4" "$5" test'
+        )
+        result = subprocess.run(
+            ["/bin/bash", "-c", script, "test", str(REPO), str(self.work / ".git"),
+             str(self.root / "tmp"), sha, str(path)],
+            env=self.env, text=True, capture_output=True, timeout=30)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("retained by --older-than", result.stdout)
+        self.assertTrue(path.exists())
+        self.assertIn("planned-old", self.branches())
 
     def test_never_pushed_unconfirmed_and_protected_branches_are_kept(self):
         self.git(self.work, "switch", "-q", "-c", "local-only", "main")
@@ -100,7 +288,7 @@ class PruneBranchesTests(unittest.TestCase):
         self.pushed_branch("develop")
         self.delete_on_remote("extra", "develop")
 
-        result = self.run_prune("--apply", "--yes")
+        result = self.run_prune("--yes")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(self.branches(), {"main", "local-only", "extra", "develop"})
         self.assertIn("not found on any remote", result.stdout)
@@ -122,7 +310,7 @@ class PruneBranchesTests(unittest.TestCase):
         # Deleting through this clone also removes its remote-tracking refs, so no snapshot exists.
         self.git(self.work, "push", "-q", "origin", "--delete", "squashed", "reviewed")
 
-        result = self.run_prune("--apply", "--yes")
+        result = self.run_prune("--yes")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("squash-merged into origin/main", result.stdout)
         self.assertIn("pushed as pull/7 on origin", result.stdout)
@@ -143,7 +331,7 @@ class PruneBranchesTests(unittest.TestCase):
         self.git(self.other, "fetch", "-q")
         self.delete_on_remote("clean", "dirty", "secret", "generated")
 
-        result = self.run_prune("--apply", "--yes")
+        result = self.run_prune("--yes")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(self.branches(), {"main", "dirty", "secret"}, result.stdout)
         self.assertFalse(locations["clean"].exists())
@@ -171,7 +359,7 @@ class PruneBranchesTests(unittest.TestCase):
         self.git(self.work, "switch", "-q", "main")
         self.delete_on_remote("feat")
 
-        result = self.run_prune("--apply", "--yes")
+        result = self.run_prune("--yes")
         self.assertNotIn("rebased into", result.stdout)
         self.assertIn("feat", self.branches())
 
@@ -199,7 +387,7 @@ class PruneBranchesTests(unittest.TestCase):
         self.git(self.work, "switch", "-q", "main")
         self.git(self.work, "push", "-q", "origin", "--delete", "picked", "amended", "squashy")
 
-        result = self.run_prune("--apply", "--yes")
+        result = self.run_prune("--yes")
         self.assertIn("rebased into origin/main", result.stdout)
         self.assertEqual(self.branches(), {"main", "amended", "squashy"})
 
@@ -219,7 +407,7 @@ class PruneBranchesTests(unittest.TestCase):
         self.git(self.work, "switch", "-q", "main")
         self.git(self.work, "push", "-q", "origin", "--delete", "linked")
 
-        result = self.run_prune("--apply", "--yes")
+        result = self.run_prune("--yes")
         self.assertNotIn("squash-merged", result.stdout)
         self.assertIn("linked", self.branches())
 
@@ -233,9 +421,9 @@ class PruneBranchesTests(unittest.TestCase):
                                  cwd=location, env=self.env, capture_output=True, text=True)
         self.assertNotEqual(stopped.returncode, 0)
 
-        planned = self.run_prune()
+        planned = self.run_prune("--dry-run")
         self.assertIn("rebase in progress in", planned.stdout)
-        result = self.run_prune("--apply", "--yes")
+        result = self.run_prune("--yes")
         self.assertIn("rebase in progress in", result.stdout)
         self.assertIn("rebasing", self.branches())
         script = (
@@ -267,7 +455,7 @@ class PruneBranchesTests(unittest.TestCase):
         subprocess.run(["rm", "-rf", str(fork)], check=True)
         self.git(self.origin, "update-ref", "-d", "refs/heads/feat")
 
-        result = self.run_prune("--apply", "--yes")
+        result = self.run_prune("--yes")
         self.assertNotIn("already in fork/feat", result.stdout)
         self.assertIn("feat", self.branches())
 
@@ -284,7 +472,7 @@ class PruneBranchesTests(unittest.TestCase):
         self.git(self.other, "push", "-q", "origin", "main")
         self.git(self.work, "push", "-q", "origin", "--delete", "bump")
 
-        result = self.run_prune("--apply", "--yes")
+        result = self.run_prune("--yes")
         self.assertIn("squash-merged into origin/main", result.stdout)
         self.assertEqual(self.branches(), {"main"})
 
@@ -308,7 +496,7 @@ class PruneBranchesTests(unittest.TestCase):
         self.git(self.other, "push", "-q", "origin", "main")
         self.git(self.work, "push", "-q", "origin", "--delete", "feat")
 
-        result = self.run_prune("--apply", "--yes")
+        result = self.run_prune("--yes")
         self.assertNotIn("rebased into", result.stdout)
         self.assertIn("feat", self.branches())
 
@@ -334,7 +522,7 @@ class PruneBranchesTests(unittest.TestCase):
         self.git(self.other, "push", "-q", "origin", "main")
         self.git(self.work, "push", "-q", "origin", "--delete", "feat")
 
-        result = self.run_prune("--apply", "--yes")
+        result = self.run_prune("--yes")
         self.assertNotIn("squash-merged into", result.stdout)
         self.assertIn("feat", self.branches())
 
@@ -349,7 +537,7 @@ class PruneBranchesTests(unittest.TestCase):
         (location / "build" / "release.keystore").write_text("secret")
         self.git(self.origin, "update-ref", "-d", "refs/heads/signed")
 
-        result = self.run_prune("--apply", "--yes")
+        result = self.run_prune("--yes")
         self.assertIn("ignored local files: build/release.keystore", result.stdout)
         self.assertEqual((location / "build" / "release.keystore").read_text(), "secret")
         self.assertIn("signed", self.branches())
@@ -370,7 +558,7 @@ class PruneBranchesTests(unittest.TestCase):
         self.git(self.other, "fetch", "-q")
         self.delete_on_remote("detached", "pinned", "amended")
 
-        result = self.run_prune("--apply", "--yes")
+        result = self.run_prune("--yes")
         self.assertIn("1 commit(s) only in its HEAD history", result.stdout)
         self.assertIn("1 ref(s) only in this worktree", result.stdout)
         self.assertTrue(locations["detached"].exists())
@@ -389,7 +577,7 @@ class PruneBranchesTests(unittest.TestCase):
         self.git(self.work, "fetch", "-q")
         self.git(self.work, "branch", "--unset-upstream", "legacy")
 
-        result = self.run_prune()
+        result = self.run_prune("--dry-run")
         self.assertIn("not tracking origin/legacy (0 ahead, 1 behind)", result.stdout)
         self.assertNotIn("never pushed", result.stdout)
         self.assertIn("legacy", self.branches())
@@ -400,7 +588,7 @@ class PruneBranchesTests(unittest.TestCase):
         self.git(self.other, "push", "-q", "origin", "main:aaa-later-work")
         self.git(self.work, "fetch", "-q", "origin", "aaa-later-work:refs/remotes/origin/aaa-later-work")
 
-        for args in ((), ("--no-fetch",)):
+        for args in (("--dry-run",), ("--dry-run", "--no-fetch")):
             result = self.run_prune(*args)
             self.assertIn("already in origin/main", result.stdout, args)
 
@@ -411,7 +599,7 @@ class PruneBranchesTests(unittest.TestCase):
         self.git(self.other, "merge", "-q", "--no-edit", "origin/merged-kept")
         self.git(self.other, "push", "-q", "origin", "main")
 
-        result = self.run_prune("--apply", "--yes")
+        result = self.run_prune("--yes")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("merged into origin/main, but origin/merged-kept still exists", result.stdout)
         self.assertNotIn("open", result.stdout.split("─ Summary")[0])
@@ -421,12 +609,12 @@ class PruneBranchesTests(unittest.TestCase):
 
         worktree = self.root / "wt-merged-kept"
         self.git(self.work, "worktree", "add", "-q", str(worktree), "merged-kept")
-        dry = self.run_prune("--include-merged")
+        dry = self.run_prune("--include-merged", "--dry-run")
         self.assertIn("merged into origin/main; origin/merged-kept is kept", dry.stdout)
-        self.assertIn("prune_branches --apply --include-merged", dry.stdout)
+        self.assertTrue(dry.stdout.startswith("Dry run"))
         self.assertEqual(self.branches(), {"main", "merged-kept", "open"})
 
-        applied = self.run_prune("--apply", "--yes", "--include-merged")
+        applied = self.run_prune("--yes", "--include-merged")
         self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
         self.assertEqual(self.branches(), {"main", "open"})
         self.assertFalse(worktree.exists())
@@ -443,7 +631,7 @@ class PruneBranchesTests(unittest.TestCase):
         self.git(self.other, "push", "-q", "-f", "origin", base + ":refs/heads/main", base + ":refs/heads/feature")
         self.git(self.work, "config", "remote.origin.fetch", "+refs/heads/feature:refs/remotes/origin/feature")
 
-        result = self.run_prune("--apply", "--yes", "--include-merged")
+        result = self.run_prune("--yes", "--include-merged")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("origin/main does not match the remote", result.stdout)
         self.assertIn("feature", self.branches())
@@ -451,10 +639,10 @@ class PruneBranchesTests(unittest.TestCase):
     def test_pushed_but_unmerged_branch_is_kept_for_review(self):
         self.pushed_branch("abandoned")
         self.pushed_branch("moved")
-        self.run_prune()
+        self.run_prune("--dry-run")
         self.delete_on_remote("abandoned", merge=False)
 
-        result = self.run_prune("--apply", "--yes")
+        result = self.run_prune("--yes")
         self.assertIn("was pushed to origin/abandoned, but is not merged", result.stdout)
         self.assertIn("abandoned", self.branches())
 
@@ -463,7 +651,7 @@ class PruneBranchesTests(unittest.TestCase):
         self.git(self.root, "init", "--bare", "-q", str(moved_to))
         self.git(self.work, "push", "-q", str(moved_to), "main")
         self.git(self.work, "remote", "set-url", "origin", str(moved_to))
-        result = self.run_prune("--apply", "--yes")
+        result = self.run_prune("--yes")
         self.assertNotIn("was pushed to origin/moved", result.stdout)
         self.assertIn("moved", self.branches())
 
@@ -479,7 +667,7 @@ class PruneBranchesTests(unittest.TestCase):
         self.git(self.other, "fetch", "-q")
         self.delete_on_remote("flagged")
 
-        result = self.run_prune("--apply", "--yes")
+        result = self.run_prune("--yes")
         self.assertIn("assume-unchanged or skip-worktree", result.stdout)
         self.assertEqual((location / "config.ini").read_text(), "local edit")
         self.assertIn("flagged", self.branches())
@@ -511,7 +699,7 @@ class PruneBranchesTests(unittest.TestCase):
         self.git(self.other, "fetch", "-q")
         self.delete_on_remote("current")
 
-        result = self.run_prune("--apply", "--yes")
+        result = self.run_prune("--yes")
         self.assertIn("checked out", result.stdout)
         self.assertIn("current", self.branches())
 
@@ -520,7 +708,7 @@ class PruneBranchesTests(unittest.TestCase):
         self.git(self.other, "fetch", "-q")
         self.delete_on_remote("merged")
 
-        result = self.run_prune("--apply", answers="n")
+        result = self.run_prune(answers="n")
         self.assertIn("Aborted", result.stdout)
         self.assertIn("merged", self.branches())
 
@@ -531,7 +719,7 @@ class PruneBranchesTests(unittest.TestCase):
         self.git(self.work, "fetch", "-q", "--prune")
         self.git(self.work, "remote", "set-url", "origin", str(self.root / "missing.git"))
 
-        result = self.run_prune("--apply", "--yes")
+        result = self.run_prune("--yes")
         self.assertEqual(result.returncode, 1)
         self.assertIn("Fetch failed", result.stdout)
         self.assertIn("could not fetch origin", result.stdout)
@@ -551,7 +739,7 @@ class PruneBranchesTests(unittest.TestCase):
         nested.mkdir(parents=True)
         self.git(nested, "init", "-q")
 
-        result = self.run_prune("--apply", "--yes", cwd=self.root / "dev")
+        result = self.run_prune("--yes", cwd=self.root / "dev")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("2 repositories", result.stdout)
         self.assertIn("No remote (skipped)", result.stdout)
@@ -559,9 +747,38 @@ class PruneBranchesTests(unittest.TestCase):
         self.assertEqual(self.branches(local), {"main", "feature"})
 
     def test_invalid_arguments(self):
-        for args in (("--apply", "--no-fetch"), ("--yes",), ("--depth", "0"), ("--bogus",), ("a", "b")):
+        for args in (("--no-fetch",), ("--yes", "--dry-run"), ("--depth", "0"), ("--bogus",),
+                     ("--apply",), ("--stale-days", "7"), ("a", "b")):
             result = self.run_prune(*args)
             self.assertEqual(result.returncode, 1, args)
+
+    def test_default_confirmation_and_explicit_dry_run(self):
+        self.pushed_branch("merged")
+        self.delete_on_remote("merged")
+        dry = self.run_prune("--dry-run", answers="y\n")
+        self.assertEqual(dry.returncode, 0, dry.stdout + dry.stderr)
+        self.assertNotIn("[y/N]", dry.stdout)
+        self.assertIn("merged", self.branches())
+        closed = self.run_prune()
+        self.assertEqual(closed.returncode, 0, closed.stdout + closed.stderr)
+        self.assertIn("Aborted: no answer.", closed.stdout)
+        self.assertIn("merged", self.branches())
+        accepted = self.run_prune(answers="y")
+        self.assertEqual(accepted.returncode, 0, accepted.stdout + accepted.stderr)
+        self.assertIn("[y/N]", accepted.stdout)
+        self.assertNotIn("merged", self.branches())
+
+    def test_stale_after_uses_duration_not_implicit_days(self):
+        self.env.update(GIT_AUTHOR_DATE="2020-01-01T00:00:00", GIT_COMMITTER_DATE="2020-01-01T00:00:00")
+        self.git(self.work, "switch", "-q", "-c", "old-local")
+        self.commit(self.work, "local")
+        del self.env["GIT_AUTHOR_DATE"], self.env["GIT_COMMITTER_DATE"]
+        self.git(self.work, "switch", "-q", "main")
+        result = self.run_prune("--dry-run", "--stale-after", "1m")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("never pushed, last commit", result.stdout)
+        invalid = self.run_prune("--dry-run", "--stale-after", "90")
+        self.assertEqual(invalid.returncode, 2)
 
     def test_audit_repo_reports_candidates_without_changing_anything(self):
         self.pushed_branch("merged")

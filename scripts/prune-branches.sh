@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
 # prune-branches.sh — remove local branches whose remote branch was deleted,
-# together with their clean linked worktrees. Dry run unless --apply is given.
+# together with their clean linked worktrees, after confirmation.
 #
-# Usage: prune_branches [--apply [--yes]] [--include-merged] [--no-fetch] [--depth N] [path]
+# Usage: prune_branches [--dry-run | --yes] [--include-merged] [--no-fetch] [--depth N] [path]
 
 set -uo pipefail
 
@@ -25,28 +25,30 @@ merged, rebased, or squash-merged). Clean linked worktrees for those branches
 are removed first, wherever they are on disk. Branches that were never pushed
 and repositories without a remote are never changed.
 
-Without --apply nothing is deleted. Fetching (git fetch --prune) still updates
-remote-tracking refs unless --no-fetch is given.
+Shows a plan and asks [y/N] before deleting. --dry-run shows the plan only.
+Fetching (git fetch --prune) still updates remote-tracking refs unless --no-fetch is given.
 
 path defaults to the current directory. Inside a repository or worktree, only
 that repository is checked; otherwise repositories are found recursively.
 
 Options:
-  --apply          Delete after showing the plan and asking for confirmation
-  --yes, -y        With --apply, skip the confirmation prompt
+  -n, --dry-run    Show the plan without prompting or deleting
+  --yes, -y        Skip the confirmation prompt
   --include-merged Also delete local branches already merged into the remote's
                    default branch whose remote branch still exists (the remote
                    branch is kept)
-  --no-fetch       Use existing remote-tracking refs (read-only; not with --apply)
+  --include-detached Also remove clean detached linked worktrees with remotely confirmed commits
+  --older-than AGE Retain recent tips/worktrees (e.g. 24h, 7d); includes descendants outside .git
+  --no-fetch       Use existing remote-tracking refs (requires --dry-run)
   --depth N        Directory depth to search for repositories (default: 4)
-  --stale-days N   Report never-pushed or untracked branches older than N days (default: 90)
+  --stale-after AGE Report never-pushed or untracked branches older than AGE (default: 90d)
   --jobs N         Repositories to fetch in parallel (default: 6)
   --timeout N      Seconds allowed per remote fetch (default: 60)
   -h, --help       Show this help
 EOF
 }
 
-APPLY=false
+DRY_RUN=false
 AUTO_YES=false
 FETCH=true
 DEPTH=4
@@ -59,17 +61,30 @@ need_number() {
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --apply) APPLY=true; shift ;;
+    --dry-run|-n) DRY_RUN=true; shift ;;
     --yes|-y) AUTO_YES=true; shift ;;
     --include-merged) SB_INCLUDE_MERGED=true; shift ;;
+    --include-detached)
+      # shellcheck disable=SC2034  # read by lib/stale-branches.sh
+      SB_INCLUDE_DETACHED=true
+      shift ;;
+    --older-than)
+      [[ $# -ge 2 && "$2" =~ ^[0-9]+[mhdw]$ ]] || { echo "Error: --older-than requires e.g. 24h, 7d or 2w." >&2; exit 2; }
+      # shellcheck disable=SC2034  # read by lib/stale-branches.sh
+      SB_OLDER_THAN=$2
+      shift 2 ;;
     --no-fetch) FETCH=false; shift ;;
-    --depth|--stale-days|--jobs|--timeout)
+    --stale-after)
+      [[ $# -ge 2 ]] || { echo "Error: --stale-after requires a duration." >&2; exit 2; }
+      # shellcheck disable=SC2034  # read by lib/stale-branches.sh
+      SB_STALE_SECONDS=$(parse_age_seconds "$2") || { echo "Error: --stale-after requires e.g. 7d or 2w." >&2; exit 2; }
+      shift 2 ;;
+    --depth|--jobs|--timeout)
       [[ $# -ge 2 ]] || { echo "Missing value for $1" >&2; exit 1; }
       need_number "$1" "$2"
       # shellcheck disable=SC2034  # SB_* settings are read by lib/stale-branches.sh
       case "$1" in
         --depth) DEPTH=$2 ;;
-        --stale-days) SB_STALE_DAYS=$2 ;;
         --jobs) JOBS=$2 ;;
         --timeout) SB_FETCH_TIMEOUT=$2 ;;
       esac
@@ -82,12 +97,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if $APPLY && ! $FETCH; then
-  echo "--apply requires fresh remote data; remove --no-fetch" >&2
+if ! $DRY_RUN && ! $FETCH; then
+  echo "--no-fetch requires --dry-run; deletion needs fresh remote data" >&2
   exit 1
 fi
-if $AUTO_YES && ! $APPLY; then
-  echo "--yes only applies together with --apply" >&2
+if $AUTO_YES && $DRY_RUN; then
+  echo "--yes cannot be combined with --dry-run" >&2
   exit 1
 fi
 TARGET=${TARGET:-$PWD}
@@ -139,11 +154,7 @@ if [[ ${#REPOS[@]} -eq 0 ]]; then
   exit 0
 fi
 
-if ! $APPLY; then
-  apply_cmd="prune_branches --apply"
-  [[ "$SB_INCLUDE_MERGED" == true ]] && apply_cmd+=" --include-merged"
-  out_dry_run "Run ${BOLD}${apply_cmd}${RESET} to delete."
-fi
+$DRY_RUN && out_dry_run
 context=("$(sb_short_path "$TARGET")" "${#REPOS[@]} repositor$( [[ ${#REPOS[@]} -eq 1 ]] && echo y || echo ies)")
 $FETCH || context+=("No fetch: using remote-tracking refs from the last fetch")
 out_context "${context[@]}"
@@ -188,13 +199,15 @@ for i in "${!REPOS[@]}"; do
   [[ "${STATUS[$i]}" == ok ]] || continue
   SB_GIT_DIR=${REPOS[$i]}
   SB_TMP=$TMP/scratch
-  sb_classify "$TMP/$i.snapshot" "$TMP/$i.failed" "$TMP/$i.requests" > "$TMP/$i.plan"
+  request_heads=""
+  $FETCH && request_heads=$TMP/$i.requests
+  sb_classify "$TMP/$i.snapshot" "$TMP/$i.failed" "$request_heads" > "$TMP/$i.plan"
   N_CHECKED=$((N_CHECKED + $(sb_git for-each-ref --format=x refs/heads 2>/dev/null | wc -l)))
 done
 
 # ── Report ────────────────────────────────────────────────────────────────────
 
-N_DELETE=0; N_DELETE_WT=0; N_BLOCKED=0; N_REVIEW=0; N_UNVERIFIED=0; N_HINT=0
+N_DELETE=0; N_DELETE_WT=0; N_DETACHED=0; N_BLOCKED=0; N_REVIEW=0; N_UNVERIFIED=0; N_HINT=0
 N_CLEAN=0; N_FETCH_FAILED=0; NO_REMOTE=()
 
 print_kind() {
@@ -233,11 +246,13 @@ for i in "${!REPOS[@]}"; do
     [[ -s "$TMP/$i.errors" ]] && sed -n '1,2s/^/    /p' "$TMP/$i.errors"
   fi
   print_kind "$plan" delete "${RED}−${RESET}"
+  print_kind "$plan" delete-worktree "${RED}−${RESET}"
   print_kind "$plan" blocked "$OUT_WARN"
   print_kind "$plan" review "$OUT_WARN"
   print_kind "$plan" unverified "$OUT_WARN"
   print_kind "$plan" hint "$OUT_INFO"
   N_DELETE=$((N_DELETE + $(count_kind "$plan" delete)))
+  N_DETACHED=$((N_DETACHED + $(count_kind "$plan" delete-worktree)))
   N_DELETE_WT=$((N_DELETE_WT + $(awk -F "$SB_SEP" '$1 == "delete" && $5 != "" { n++ } END { print n + 0 }' "$plan")))
   N_BLOCKED=$((N_BLOCKED + $(count_kind "$plan" blocked)))
   N_REVIEW=$((N_REVIEW + $(count_kind "$plan" review)))
@@ -253,9 +268,10 @@ if [[ "$N_DELETE" -gt 0 ]]; then
   [[ "$N_DELETE_WT" -gt 0 ]] && detail+=", $N_DELETE_WT with a worktree"
   out_row "${RED}−${RESET}" "To delete" "$detail"
 fi
-[[ "$N_BLOCKED" -gt 0 ]] && out_row "$OUT_WARN" "Blocked by worktree" "$N_BLOCKED (uncommitted changes, ignored local files, locked, or checked out)"
+[[ "$N_DETACHED" -gt 0 ]] && out_row "${RED}−${RESET}" "Detached to remove" "$N_DETACHED worktree(s)"
+[[ "$N_BLOCKED" -gt 0 ]] && out_row "$OUT_WARN" "Retained" "$N_BLOCKED (worktree safeguards or --older-than)"
 [[ "$N_REVIEW" -gt 0 ]] && out_row "$OUT_WARN" "Needs review" "$N_REVIEW (upstream gone, but commits not confirmed on a remote)"
-[[ "$N_UNVERIFIED" -gt 0 ]] && out_row "$OUT_WARN" "Unverified" "$N_UNVERIFIED (remote could not be fetched)"
+[[ "$N_UNVERIFIED" -gt 0 ]] && out_row "$OUT_WARN" "Unverified" "$N_UNVERIFIED (commits or remote data not confirmed)"
 [[ "$N_HINT" -gt 0 ]] && out_row "$OUT_INFO" "Kept, looks stale" "$N_HINT (merged or old, but not prunable; see above)"
 [[ "$N_CLEAN" -gt 0 ]] && out_row "$OUT_OK" "Nothing to report" "$N_CLEAN repositor$( [[ "$N_CLEAN" -eq 1 ]] && echo y || echo ies)"
 if [[ ${#NO_REMOTE[@]} -gt 0 ]]; then
@@ -269,7 +285,7 @@ fi
 STATUS_CODE=0
 [[ "$N_FETCH_FAILED" -gt 0 ]] && STATUS_CODE=1
 
-if [[ "$N_DELETE" -eq 0 ]]; then
+if [[ $((N_DELETE + N_DETACHED)) -eq 0 ]]; then
   echo ""
   if [[ "$SB_INCLUDE_MERGED" == true ]]; then
     out_note "Nothing to delete."
@@ -278,12 +294,12 @@ if [[ "$N_DELETE" -eq 0 ]]; then
   fi
   exit "$STATUS_CODE"
 fi
-$APPLY || exit "$STATUS_CODE"
+$DRY_RUN && exit "$STATUS_CODE"
 
 # ── Apply ─────────────────────────────────────────────────────────────────────
 
 echo ""
-confirm_apply "Delete $N_DELETE branch(es) and remove $N_DELETE_WT worktree(s)?" "$AUTO_YES" false || exit "$STATUS_CODE"
+confirm_apply "Delete $N_DELETE branch(es) and remove $((N_DELETE_WT + N_DETACHED)) worktree(s)?" "$AUTO_YES" false || exit "$STATUS_CODE"
 
 DELETED=0; REMOVED_WT=0; FAILED=0
 for i in "${!REPOS[@]}"; do
@@ -293,9 +309,13 @@ for i in "${!REPOS[@]}"; do
   SB_TMP=$TMP/scratch
   name=$(repo_name "${REPOS[$i]}")
   while IFS="$SB_SEP" read -r kind branch sha detail wt; do
-    [[ "$kind" == delete ]] || continue
-    if error=$(sb_apply_delete "$branch" "$sha" "$wt" "$detail" </dev/null); then
-      DELETED=$((DELETED + 1))
+    case "$kind" in
+      delete) action=(sb_apply_delete "$branch" "$sha" "$wt" "$detail") ;;
+      delete-worktree) action=(sb_apply_detached "$wt" "$sha" "$detail" "$TMP/$i.requests") ;;
+      *) continue ;;
+    esac
+    if error=$("${action[@]}" </dev/null); then
+      [[ "$kind" != delete ]] || DELETED=$((DELETED + 1))
       [[ -n "$wt" ]] && REMOVED_WT=$((REMOVED_WT + 1))
       printf '  %s %s: %s %s(%s)%s\n' "$OUT_OK" "$name" "$branch" "$DIM" "${sha:0:12}" "$RESET"
     else

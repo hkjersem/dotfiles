@@ -314,10 +314,12 @@ worktree it checks that repository; elsewhere it searches subdirectories
 (`--depth`, default 4), skipping generated folders and submodules.
 
 ```sh
-prune_branches                    # dry run: fetch, then show the plan
-prune_branches --apply            # show the plan, ask, then delete
-prune_branches --include-merged   # also merged branches whose remote branch still exists
-prune_branches --no-fetch ~/Developer   # read-only, uses the last fetch
+prune_branches --dry-run          # fetch, then show the plan without prompting
+prune_branches                    # show the plan, ask [y/N], then delete
+prune_branches --dry-run --include-merged   # preview merged branches whose remote branch still exists
+prune_branches --dry-run --include-detached # preview eligible detached linked worktrees
+prune_branches --dry-run --older-than 7d    # retain recent tips and worktree contents
+prune_branches --dry-run --no-fetch ~/Developer   # read-only, uses the last fetch
 ```
 
 A branch is deleted only when its remote branch is gone and its commits are
@@ -332,6 +334,13 @@ uncommitted changes or unique commits; ignored generated artifacts such as
 `node_modules/` are discarded with it.
 Deleted branches are logged in `.git/prune-branches.log` for recovery. Exit
 status is 1 when a fetch or deletion fails.
+`--include-detached` optionally removes clean detached linked worktrees
+whose HEAD is contained in a freshly confirmed remote branch. Main/invoking
+worktrees, locks, unfinished Git operations and worktree-only history/refs
+are protected. `--older-than 7d` adds a retention guard to all removal
+candidates: the tip commit and, for worktrees, every modification outside
+`.git` must be older. It scans metadata and rechecks before removal; it is
+not proof that an agent or process has stopped using the worktree.
 
 See [docs/prune-branches.md](docs/prune-branches.md) for the exact deletion
 rules, worktree handling, and recovery.

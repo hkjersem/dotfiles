@@ -2,6 +2,12 @@
 
 [README](../README.md#prune-stale-branches)
 
+The command shows its plan and asks `[y/N]` before deleting. Enter, Escape,
+no, or closed input cancels. Use `--dry-run` to preview without prompting;
+`--yes` skips confirmation and cannot be combined with `--dry-run`.
+Previews still fetch and update Git metadata unless `--no-fetch` is added.
+`--no-fetch` requires `--dry-run`; deletion always needs fresh remote data.
+
 ## What gets deleted
 
 A branch is deleted only when its upstream was its own same-named remote
@@ -35,13 +41,47 @@ such as an ignored `node_modules/` folder, and no commits or refs that only
 that worktree holds. Otherwise it is listed, as are locked, missing, and
 checked-out worktrees, and branches with a rebase or bisect in progress.
 
-Detached worktrees are never removed; clean ones whose commit is already on a
+Detached worktrees are report-only by default; clean ones whose commit is already on a
 remote are reported as looking stale, together with never-pushed or untracked
-branches older than `--stale-days` (default 90), and branches already merged
+branches older than `--stale-after` (default `90d`), and branches already merged
 into the default branch whose remote branch still exists (pass
 `--include-merged` or delete the remote branch to prune them). A branch
 without an upstream that exists on a remote under the same name is shown as
 not tracking it, with how far it is ahead or behind.
+
+### Opt-in detached worktree removal
+
+`--include-detached` also plans removal of detached linked worktrees.
+It fetches all configured remotes, even if no local branch tracks them.
+HEAD must be contained in a remote-tracking branch matching the branch
+and commit advertised after a successful fetch; patch equivalence alone
+does not qualify. Unconfirmed commits are kept. As elsewhere, `--no-fetch`
+is allowed only for a preview, based on existing refs.
+
+Main and invoking worktrees are never removed. Locked, missing, dirty
+worktrees, non-regenerable ignored files, hidden index flags, worktree-only
+refs and commits held only in HEAD history all block removal. Unfinished
+rebases, bisects, merges, cherry-picks and reverts also block removal.
+Identity, detached HEAD, remote evidence and local safeguards are rechecked
+before `git worktree remove`, without `--force`. No local branch is deleted
+for this action.
+
+Stop agent sessions before removal or lock worktrees you want preserved:
+clean contents and remote backup do not prove a worktree is inactive.
+
+### Optional retention window
+
+`--older-than 7d` applies to eligible normal branches, `--include-merged`
+branches and `--include-detached` worktrees. It requires an older tip
+**committer** timestamp and, when removing a worktree, older modification
+times for its root and all descendants except `.git` metadata. Supported
+units are `m`, `h`, `d`, `w`. It reuses `wipe_clean`'s modification scanner
+and does not follow symlink destinations. Unreadable metadata retains the
+candidate with a reason; ages are rechecked immediately before removal.
+Scanning large worktrees costs time. Filesystem scans and removal are not
+atomic; stop writers first. This guard only retains more candidates—it
+never makes an otherwise unsafe candidate eligible. Without the flag,
+existing eligibility is unchanged.
 
 ## Records and recovery
 
@@ -54,3 +94,6 @@ repointed.
 
 Deleted branches are logged in `.git/prune-branches.log`; restore one with
 `git branch <name> <commit>` until Git garbage-collects the commits.
+Detached removals are logged there as `worktree:<path>`, with their HEAD
+commit. Recreate one with `git worktree add --detach <path> <commit>`;
+ignored generated output is not backed up.

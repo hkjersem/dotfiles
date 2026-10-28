@@ -452,7 +452,7 @@ else
   STALE_REVIEW=$(( $(stale_count review) + $(stale_count unverified) ))
   STALE_HINTS=$(stale_count hint)
   if [[ "$STALE_DELETE" -gt 0 ]]; then
-    warn "${STALE_DELETE} branch(es) whose remote branch was deleted can be pruned (run prune_branches)"
+    warn "${STALE_DELETE} branch(es) whose remote branch was deleted can be pruned (preview: prune_branches --dry-run)"
     stale_rows delete
   fi
   if [[ "$STALE_BLOCKED" -gt 0 ]]; then

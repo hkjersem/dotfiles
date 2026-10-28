@@ -23,6 +23,22 @@ _dotfiles_age() {
   _describe 'duration (m minutes, h hours, d days, w weeks)' ages
 }
 
+_dotfiles_duration_flags() {
+  local previous=${words[CURRENT-1]}
+  case "$words[1]:$previous" in
+    prune_branches:--older-than|prune_branches:--stale-after|pmu:--cooldown|audit-repo:--since)
+      _dotfiles_age
+      return ;;
+  esac
+  if [[ $words[1] == pmu && $PREFIX == --cooldown=* ]]; then
+    compset -P '*='
+    _dotfiles_age
+    return
+  fi
+  _gnu_generic
+}
+compdef _dotfiles_duration_flags prune_branches pmu audit-repo
+
 _dotfiles_files() {
   if (( CURRENT == 2 )) && [[ ${words[CURRENT]} != -* ]]; then
     local -a commands=(

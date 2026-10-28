@@ -189,8 +189,8 @@ files() { python3 "$HOME/.dotfiles/scripts/files.py" "$@"; }
 # Usage: audit-repo [--dir PATH] [--since PERIOD] [--skip-security]
 audit-repo() { bash "$HOME/.dotfiles/scripts/audit-repo.sh" "$@"; }
 
-# Delete local branches whose remote branch was deleted, with their clean worktrees (dry run by default)
-# Usage: prune_branches [--apply [--yes]] [--no-fetch] [--depth N] [path]
+# Preview stale branches and clean worktrees, then ask before deleting (--dry-run skips the prompt)
+# Usage: prune_branches [--dry-run | --yes] [--no-fetch] [--depth N] [path]
 prune_branches() { bash "$HOME/.dotfiles/scripts/prune-branches.sh" "$@"; }
 
 # Delete all known build artifacts and dependency folders from the current directory.

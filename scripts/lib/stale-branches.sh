@@ -7,12 +7,15 @@
 # directory), then call sb_classify. Records are written to stdout, one per
 # line, with fields separated by $SB_SEP:
 #   kind  branch-or-path  commit  detail  worktree
-# Kinds: delete, review, blocked, unverified, hint.
+# Kinds: delete, delete-worktree, review, blocked, unverified, hint.
 
 SB_SEP=$'\x1f'
 SB_PROTECTED="main master develop development trunk"
-SB_STALE_DAYS="${SB_STALE_DAYS:-90}"
+SB_STALE_SECONDS=$((90 * 86400))
 SB_INCLUDE_MERGED="${SB_INCLUDE_MERGED:-false}"
+SB_INCLUDE_DETACHED="${SB_INCLUDE_DETACHED:-false}"
+SB_OLDER_THAN="${SB_OLDER_THAN:-}"
+SB_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SB_FETCH_TIMEOUT="${SB_FETCH_TIMEOUT:-60}"
 SB_PATCH_ID_LIMIT=1000
 SB_INVOKING_TOP=""
@@ -92,9 +95,10 @@ sb_with_timeout() {
 # into $1, which is the only proof that a commit is still on that remote.
 # Prints failed remote names; Git errors go to stderr.
 sb_fetch() {
-  local remote remotes status url advertised=$1 remotes_file="$SB_GIT_DIR/$SB_REMOTES_FILE"
+  local remote remotes status url heads advertised=$1 remotes_file="$SB_GIT_DIR/$SB_REMOTES_FILE"
   : > "$advertised"
   remotes=$(sb_git for-each-ref --format='%(upstream:remotename)' refs/heads | sort -u)
+  [[ "$SB_INCLUDE_DETACHED" != true ]] || remotes=$(sb_git remote)
   for remote in $remotes; do
     url=$(sb_git config --get "remote.$remote.url" 2>/dev/null) || continue
     status=0
@@ -108,10 +112,13 @@ sb_fetch() {
     { [[ -f "$remotes_file" ]] && awk -F "$SB_SEP" -v r="$remote" '$1 != r' "$remotes_file"
       printf '%s%s%s\n' "$remote" "$SB_SEP" "$url"; } > "$remotes_file.tmp" 2>/dev/null \
       && mv "$remotes_file.tmp" "$remotes_file"
-    GIT_TERMINAL_PROMPT=0 sb_with_timeout git --git-dir="$SB_GIT_DIR" ls-remote "$remote" </dev/null 2>/dev/null \
-      | awk -v r="$remote" -v s="$SB_SEP" \
+    if ! heads=$(GIT_TERMINAL_PROMPT=0 sb_with_timeout git --git-dir="$SB_GIT_DIR" ls-remote "$remote" </dev/null); then
+      printf '%s\n' "$remote"
+      continue
+    fi
+    awk -v r="$remote" -v s="$SB_SEP" \
         '$2 ~ /^refs\/heads\// || $2 ~ /^refs\/(pull|merge-requests)\/[^\/]+\/head$/ { print r s $1 s $2 }' \
-      >> "$advertised"
+      <<< "$heads" >> "$advertised"
   done
 }
 
@@ -223,14 +230,23 @@ sb_regenerable() {
 sb_worktree_history() {
   local refs wt_oids branch_oids lost detail=""
   refs=$(GIT_OPTIONAL_LOCKS=0 git -C "$1" for-each-ref --format='%(refname)' \
-    refs/worktree/ refs/bisect/ refs/rewritten/ 2>/dev/null | grep -c .)
+    refs/worktree/ refs/bisect/ refs/rewritten/ 2>/dev/null) \
+    || { printf 'worktree refs could not be read\n'; return 0; }
+  refs=$(printf '%s\n' "$refs" | grep -c .)
   [[ "$refs" -gt 0 ]] && detail="$refs ref(s) only in this worktree"
-  wt_oids=$(GIT_OPTIONAL_LOCKS=0 git -C "$1" reflog show --format=%H HEAD 2>/dev/null | sort -u)
-  branch_oids=$(sb_git reflog show --format=%H "refs/heads/$2" 2>/dev/null | sort -u)
+  wt_oids=$(GIT_OPTIONAL_LOCKS=0 git -C "$1" reflog show --format=%H HEAD 2>/dev/null) \
+    || { printf 'HEAD history could not be read\n'; return 0; }
+  wt_oids=$(printf '%s\n' "$wt_oids" | sort -u)
+  branch_oids=""
+  if [[ -n "$2" ]]; then
+    branch_oids=$(sb_git reflog show --format=%H "refs/heads/$2" 2>/dev/null) \
+      || { printf 'branch history could not be read\n'; return 0; }
+    branch_oids=$(printf '%s\n' "$branch_oids" | sort -u)
+  fi
   if [[ -n "$wt_oids" ]]; then
     # Object IDs never contain whitespace, so word splitting is safe here.
     # shellcheck disable=SC2086,SC2048
-    lost=$(sb_git rev-list --count --ignore-missing $wt_oids --not --all ${SB_WT_HEAD[*]} $branch_oids 2>/dev/null) \
+    lost=$(sb_git rev-list --count $wt_oids --not --all ${SB_WT_HEAD[*]} $branch_oids 2>/dev/null) \
       || lost="?"
     if [[ "$lost" != 0 ]]; then
       [[ -n "$detail" ]] && detail+=", "
@@ -286,7 +302,7 @@ sb_worktree_dirt() {
     [[ ${#ignored[@]} -gt 1 ]] && detail+=", ${ignored[1]}"
     [[ ${#ignored[@]} -gt 2 ]] && detail+=" (+$((${#ignored[@]} - 2)) more)"
   fi
-  if [[ -n "${2:-}" ]]; then
+  if [[ $# -ge 2 ]]; then
     history=$(sb_worktree_history "$1" "$2")
     if [[ -n "$history" ]]; then
       [[ -n "$detail" ]] && detail+=", "
@@ -333,11 +349,69 @@ sb_was_pushed() {
   return 1
 }
 
+# Prints a containing remote branch, requiring advertised ref/commit equality
+# when fresh fetch results are supplied. An empty remote searches all remotes.
+sb_containing_remote() {
+  local sha=$1 remote=$2 advertised=$3 default="" ref pattern=refs/remotes/
+  if [[ -n "$remote" ]]; then
+    default=$(sb_default_ref "$remote" 2>/dev/null) || default=""
+    pattern+="$remote/"
+  fi
+  if [[ -n "$advertised" ]]; then
+    [[ -f "$advertised" ]] || return 1
+    ref=$(sb_git for-each-ref --contains "$sha" --format="%(refname)$SB_SEP%(objectname)" refs/remotes/ 2>/dev/null \
+      | awk -F "$SB_SEP" -v s="$SB_SEP" -v d="$default" '
+          NR == FNR { if ($3 ~ /^refs\/heads\//) ok["refs/remotes/" $1 "/" substr($3, 12) s $2] = 1; next }
+          ($1 s $2) in ok { if ($1 == d) { print substr($1, 14); found = 1; exit } if (first == "") first = substr($1, 14) }
+          END { if (!found && first != "") print first }' "$advertised" -) || return 1
+  else
+    ref=$(sb_git for-each-ref --contains "$sha" --format='%(refname:lstrip=2)' "$pattern" 2>/dev/null \
+      | grep -v '/HEAD$' | awk -v d="${default#refs/remotes/}" '
+          $0 == d { print; found = 1; exit } first == "" { first = $0 } END { if (!found && first != "") print first }') || return 1
+  fi
+  [[ -n "$ref" ]] || return 1
+  printf '%s\n' "$ref"
+}
+
+# Prints a retention reason; no output means the optional age guard passed.
+sb_age_reason() {
+  [[ -n "$SB_OLDER_THAN" ]] || return 0
+  local stamp detail args
+  stamp=$(sb_git show -s --format=%ct "$1" 2>/dev/null) \
+    || { printf 'commit age could not be read\n'; return 0; }
+  args=(--older-than "$SB_OLDER_THAN" --commit-time "$stamp")
+  [[ -z "${2:-}" ]] || args+=(--path "$2")
+  if detail=$(python3 -B "$SB_LIB_DIR/../prune-age.py" "${args[@]}" 2>&1); then
+    return 0
+  fi
+  printf '%s\n' "${detail:-age could not be verified}"
+}
+
+# Detached worktrees must also retain HEAD history and unfinished operations.
+sb_detached_reason() {
+  local i=$1 path admin state dirt
+  path=${SB_WT_PATH[$i]}
+  if [[ "$i" -eq 0 || "$path" == "$SB_INVOKING_TOP" ]]; then
+    printf 'main or invoking worktree\n'; return 0
+  fi
+  case "${SB_WT_FLAGS[$i]}" in
+    *" locked "*) printf 'worktree is locked\n'; return 0 ;;
+    *" prunable "*) printf 'worktree directory is missing\n'; return 0 ;;
+  esac
+  [[ -d "$path" && ! -L "$path" ]] || { printf 'not a real worktree directory\n'; return 0; }
+  admin=$(GIT_OPTIONAL_LOCKS=0 git -C "$path" rev-parse --absolute-git-dir 2>/dev/null) \
+    || { printf 'worktree Git directory could not be read\n'; return 0; }
+  for state in rebase-merge rebase-apply BISECT_LOG MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD sequencer; do
+    [[ ! -e "$admin/$state" ]] || { printf 'unfinished Git operation: %s\n' "$state"; return 0; }
+  done
+  dirt=$(sb_worktree_dirt "$path" "")
+  [[ -z "$dirt" ]] || { printf '%s\n' "$dirt"; return 0; }
+  sb_age_reason "${SB_WT_HEAD[$i]}" "$path"
+}
+
 # Prints evidence that a branch's commits still exist on a remote; fails when none is found.
 sb_safe_evidence() {
-  local sha=$1 remote=$2 advertised=$3 ref base mb pid commits commit newest line default
-  # The default branch is preferred when several remote branches contain the commit.
-  default=$(sb_default_ref "$remote" 2>/dev/null) || default=""
+  local sha=$1 remote=$2 advertised=$3 ref base mb pid commits commit newest line
   if [[ -n "$advertised" && -f "$advertised" ]]; then
     ref=$(awk -F "$SB_SEP" -v r="$remote" -v s="$sha" \
       '$1 == r && $2 == s && $3 !~ /^refs\/heads\// { print $3; exit }' "$advertised")
@@ -348,16 +422,10 @@ sb_safe_evidence() {
     fi
     # Only remote-tracking refs that match what a remote advertised after this
     # run's fetch count; others may be stale copies of deleted branches.
-    ref=$(sb_git for-each-ref --contains "$sha" --format="%(refname)$SB_SEP%(objectname)" refs/remotes/ 2>/dev/null \
-      | awk -F "$SB_SEP" -v s="$SB_SEP" -v d="$default" '
-          NR == FNR { if ($3 ~ /^refs\/heads\//) ok["refs/remotes/" $1 "/" substr($3, 12) s $2] = 1; next }
-          ($1 s $2) in ok { if ($1 == d) { print substr($1, 14); found = 1; exit } if (first == "") first = substr($1, 14) }
-          END { if (!found && first != "") print first }' "$advertised" -)
+    ref=$(sb_containing_remote "$sha" "$remote" "$advertised") || ref=""
   else
     # Without a fetch, only the branch's own remote counts, as of the last fetch.
-    ref=$(sb_git for-each-ref --contains "$sha" --format='%(refname:lstrip=2)' "refs/remotes/$remote/" 2>/dev/null \
-      | grep -v '/HEAD$' | awk -v d="${default#refs/remotes/}" '
-          $0 == d { print; found = 1; exit } first == "" { first = $0 } END { if (!found && first != "") print first }')
+    ref=$(sb_containing_remote "$sha" "$remote" "") || ref=""
   fi
   [[ -n "$ref" ]] && { printf 'already in %s\n' "$ref"; return 0; }
   base=$(sb_default_ref "$remote") || return 1
@@ -421,7 +489,7 @@ sb_classify() {
         read -r ahead behind < <(sb_git rev-list --left-right --count "$sha...refs/remotes/$ref" 2>/dev/null)
         state="not tracking $ref (${ahead:-?} ahead, ${behind:-?} behind)"
       fi
-      if [[ -n "$date" && $(( (now - date) / 86400 )) -ge "$SB_STALE_DAYS" ]]; then
+      if [[ -n "$date" && $((now - date)) -ge "$SB_STALE_SECONDS" ]]; then
         sb_record hint "$branch" "$sha" "$state, last commit $(( (now - date) / 86400 )) days ago" "$wt_path"
       else
         if [[ -n "$default_ref" ]] && ! sb_is_protected "$branch" \
@@ -512,20 +580,43 @@ sb_classify() {
         continue
       fi
     fi
-    sb_record delete "$branch" "$sha" "$evidence" "$wt_path"
+    detail=$(sb_age_reason "$sha" "$wt_path")
+    if [[ -n "$detail" ]]; then
+      sb_record blocked "$branch" "$sha" "$detail" "$wt_path"
+    else
+      sb_record delete "$branch" "$sha" "$evidence" "$wt_path"
+    fi
   done < <(sb_git for-each-ref --format='%(refname:lstrip=2)%1f%(objectname)%1f%(upstream)%1f%(upstream:track,nobracket)%1f%(upstream:remotename)%1f%(upstream:remoteref)%1f%(committerdate:unix)' refs/heads 2>/dev/null)
 
-  # Detached worktrees (as some agent tools create) are never removed, only reported.
+  # Detached worktrees remain report-only unless explicitly included.
   for ((i = 1; i < ${#SB_WT_PATH[@]}; i++)); do
     case "${SB_WT_FLAGS[$i]}" in *" detached "*) ;; *) continue ;; esac
     [[ "${SB_WT_PATH[$i]}" == "$SB_INVOKING_TOP" ]] && continue
+    if [[ "${SB_WT_PATH[$i]}" == *$'\n'* || "${SB_WT_PATH[$i]}" == *"$SB_SEP"* ]]; then
+      printf -v detail '%q' "${SB_WT_PATH[$i]}"
+      sb_record hint "$detail" "${SB_WT_HEAD[$i]}" "kept: path cannot be represented in the pruning plan"
+      continue
+    fi
     case "${SB_WT_FLAGS[$i]}" in
       *" prunable "*)
         sb_record hint "${SB_WT_PATH[$i]}" "${SB_WT_HEAD[$i]}" "detached worktree directory is missing (git worktree prune)"
         continue ;;
     esac
-    ref=$(sb_git for-each-ref --contains "${SB_WT_HEAD[$i]}" --format='%(refname:lstrip=2)' refs/remotes/ 2>/dev/null \
-      | grep -v '/HEAD$' | head -1)
+    if [[ "$SB_INCLUDE_DETACHED" == true ]]; then
+      ref=$(sb_containing_remote "${SB_WT_HEAD[$i]}" "" "$request_file") || ref=""
+      if [[ -z "$ref" ]]; then
+        sb_record unverified "${SB_WT_PATH[$i]}" "${SB_WT_HEAD[$i]}" "detached HEAD not confirmed on a remote branch" "${SB_WT_PATH[$i]}"
+        continue
+      fi
+      dirt=$(sb_detached_reason "$i")
+      if [[ -n "$dirt" ]]; then
+        sb_record blocked "${SB_WT_PATH[$i]}" "${SB_WT_HEAD[$i]}" "$dirt" "${SB_WT_PATH[$i]}"
+      else
+        sb_record delete-worktree "${SB_WT_PATH[$i]}" "${SB_WT_HEAD[$i]}" "detached HEAD already in $ref" "${SB_WT_PATH[$i]}"
+      fi
+      continue
+    fi
+    ref=$(sb_containing_remote "${SB_WT_HEAD[$i]}" "" "") || ref=""
     [[ -n "$ref" ]] || continue
     dirt=$(sb_worktree_dirt "${SB_WT_PATH[$i]}")
     if [[ -n "$dirt" ]]; then
@@ -544,6 +635,8 @@ sb_apply_delete() {
     printf '%s\n' "$busy"
     return 1
   fi
+  dirt=$(sb_age_reason "$sha" "$wt_path")
+  if [[ -n "$dirt" ]]; then printf '%s\n' "$dirt"; return 1; fi
   if [[ -n "$wt_path" ]]; then
     # The worktree must still have the planned branch at the planned commit;
     # a detached or advanced checkout may hold commits nothing else references.
@@ -576,4 +669,23 @@ sb_apply_delete() {
   printf '%s\t%s\t%s\t%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$branch" "$sha" "$detail" \
     >> "$SB_GIT_DIR/prune-branches.log" 2>/dev/null
   return 0
+}
+
+sb_apply_detached() {
+  local path=$1 sha=$2 detail=$3 advertised=$4 i reason found=false
+  sb_load_worktrees
+  for ((i = 1; i < ${#SB_WT_PATH[@]}; i++)); do
+    [[ "${SB_WT_PATH[$i]}" == "$path" ]] || continue
+    [[ "${SB_WT_HEAD[$i]}" == "$sha" && "${SB_WT_FLAGS[$i]}" == *" detached "* ]] || break
+    reason=$(sb_detached_reason "$i")
+    [[ -z "$reason" ]] || { printf '%s\n' "$reason"; return 1; }
+    found=true
+    break
+  done
+  $found || { printf 'worktree no longer detached at planned commit\n'; return 1; }
+  [[ -f "$advertised" ]] && sb_containing_remote "$sha" "" "$advertised" >/dev/null \
+    || { printf 'detached HEAD no longer confirmed on a remote branch\n'; return 1; }
+  sb_git worktree remove "$path" 2>&1 || return 1
+  printf '%s\tworktree:%s\t%s\t%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$path" "$sha" "$detail" \
+    >> "$SB_GIT_DIR/prune-branches.log"
 }

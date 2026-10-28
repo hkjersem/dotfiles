@@ -280,6 +280,23 @@ zpty -d z
                          {"path", "size"})
 
 
+    def test_duration_values_offer_examples_and_units_for_typed_numbers(self):
+        cases = (("prune_branches", " --stale-after "),
+                 ("prune_branches", " --older-than "),
+                 ("wipe_clean", " --older-than "),
+                 ("files", " leftovers --older-than "),
+                 ("files", " changed --since "),
+                 ("pmu", " --cooldown "),
+                 ("pmu", " --cooldown="),
+                 ("audit-repo", " --since "))
+        for command, suffix in cases:
+            with self.subTest(command=command, suffix=suffix):
+                offered = self.complete([command], suffix)[command]
+                self.assertTrue({"24h", "7d", "2w"}.issubset(offered), offered)
+                numbered = self.complete([command], suffix + "14")[command]
+                self.assertTrue({"14m", "14h", "14d", "14w"}.issubset(numbered), numbered)
+
+
     def test_flags_are_completed_from_help(self):
         offered = self.complete(script_commands())
         self.assertEqual(
@@ -343,7 +360,7 @@ done
 
     def test_flags_missing_from_help_are_marked(self):
         self.assertEqual(self.marked(
-            "pmu --dry-run -x --cooldown=3 --nope",
+            "pmu --dry-run -x --cooldown=3d --nope",
             "pmu -ny",
             "wipe build --dirs",
             "X=1 nocorrect pmu -n --zz",
@@ -355,7 +372,7 @@ done
             "dotfiles-audit --nope",
             "dotfiles-profile --choose --nope",
         ), {
-            "pmu --dry-run -x --cooldown=3 --nope": ["-x", "--nope"],
+            "pmu --dry-run -x --cooldown=3d --nope": ["-x", "--nope"],
             "pmu -ny": ["-ny"],
             "wipe build --dirs": ["--dirs"],
             "X=1 nocorrect pmu -n --zz": ["--zz"],
