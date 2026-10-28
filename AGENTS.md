@@ -70,6 +70,8 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 | `scripts/copy-clean.sh` | Clone-copy or ZIP a source directory, defaulting to the current directory, excluding the same artifacts as `wipe_clean`; supports `--ignore-git` and `--keep-name`. Aliased as `copy_clean` |
 | `scripts/lib/command-line-tools.sh` | Command Line Tools check (via `brew doctor`) and update through Software Update; used by `update.sh` and `audit.sh` |
 | `scripts/lib/output.sh`, `scripts/lib/output.py` | Shared terminal output style for Bash and Python scripts — colours (only on a terminal without `NO_COLOR`), status marks `✓` `!` `✗` `•` (with `ERR_*` variants for stderr), and helpers for the report title, `─` sections, notes, label rows, table headers and audit summaries; `scripts/tests/test_output.py` checks both print the same bytes |
+| `scripts/files.py` | Read-only `files` reports: count, large, changed, sizes, empty, types and duplicates; optional recursion and exclusions, without following symlinks. `--clean` uses `scripts/lib/clean-targets.sh`; `--clean-git` adds `.git` exclusions to those targets. Reuses the shared Python output style |
+| `scripts/lib/file_sizes.py` | Native macOS `getattrlistbulk` directory reader used by `files sizes`; batches file-byte metadata without per-file stat calls or compiled helpers |
 | `scripts/lib/pm-utils.sh` | Shared package-manager duration and configuration parsing helpers, also used by repository audit |
 | `macos/applications.sh` | Bootstrap script — installs brew formulae and tools |
 | `macos/install.sh` | Full machine setup entry point (calls applications.sh etc.) |

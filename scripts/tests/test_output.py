@@ -119,6 +119,45 @@ def python_output(terminal, no_color):
 
 
 class OutputTests(unittest.TestCase):
+    def test_listing_names_match_shell_palette_in_bash_and_python(self):
+        palettes = {
+            "Gxfxcxdxbxegedabagacad": ("\033[1;36m", "\033[35m"),
+            "Exfxcxdxbxegedabagacad": ("\033[1;34m", "\033[35m"),
+            "agBx": ("\033[30;46m", "\033[1;31m"),
+            "xxxx": ("", ""),
+            "invalid": ("", ""),
+        }
+        for palette, prefixes in palettes.items():
+            for terminal, no_color in ((True, ""), (True, "1"), (False, "")):
+                with self.subTest(palette=palette, terminal=terminal, no_color=no_color):
+                    stream = Terminal() if terminal else io.StringIO()
+                    env = {"LSCOLORS": palette, "NO_COLOR": no_color}
+                    with patch.dict(os.environ, env):
+                        names = [output.listing_name("name", kind, stream)
+                                 for kind in ("folder", "symlink", "file")]
+                    active = terminal and not no_color
+                    expected = [
+                        f"{prefix}name\033[0m" if active and prefix else "name"
+                        for prefix in (*prefixes, "")
+                    ]
+                    self.assertEqual(names, expected)
+                    script = f"""
+source {str(LIB / "output.sh")!r}
+for kind in folder symlink file; do out_listing_name name "$kind"; printf '\\n'; done
+"""
+                    with patch.dict(os.environ, env):
+                        if terminal:
+                            main, follower = pty.openpty()
+                            process = subprocess.Popen(["/bin/bash", "-c", script], stdout=follower)
+                            os.close(follower)
+                            actual = read_terminal(main)
+                            self.assertEqual(process.wait(), 0)
+                        else:
+                            actual = subprocess.run(
+                                ["/bin/bash", "-c", script], capture_output=True, text=True, check=True,
+                            ).stdout
+                    self.assertEqual(actual, "\n".join(expected) + "\n")
+
     def test_bash_and_python_print_the_same_bytes(self):
         for terminal, no_color in ((True, ""), (True, "1"), (False, "")):
             with self.subTest(terminal=terminal, no_color=no_color):

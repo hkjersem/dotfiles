@@ -185,6 +185,77 @@ copy_clean --zip ../project ../project-clean.zip
 ```
 
 A single copy argument is the destination; the source defaults to the current
+## Inspect files and folders
+
+`files <command> [options] [path]` reports on the current folder by default.
+Every command supports `-r`/`--recursive` and repeatable `--exclude GLOB`
+(matching an entry name or relative path). Hidden and Git-ignored entries are
+included unless explicitly excluded. Symlinks are never followed, including
+the target folder itself. Nothing is deleted or modified. Zsh completes
+subcommand names and flags from the command's help.
+Folder names use the shell's BSD `ls` colours (`LSCOLORS`), without trailing
+slashes. Mixed empty-entry results keep explicit `File` and `Folder` labels;
+redirected output and `NO_COLOR` remain plain. Colours use the terminal palette,
+so light and dark themes apply just as they do to `ls`.
+
+Add `--clean` to any subcommand to exclude the generated directories and file
+patterns shared with `wipe_clean` and `copy_clean` (such as `node_modules`,
+`dist`, `.venv` and `*.tsbuildinfo`). The report marks when this filter is active.
+It does not exclude Git metadata or apply `.gitignore`.
+Use `--clean-git` for the same generated-artifact exclusions plus `.git`
+directories and worktree pointer files at every depth. It does not hide
+`.gitignore`, `.github`, or other Git-ignored project files.
+
+| Command | What it does |
+|---|---|
+| `files count -r` | Separate totals for files, folders, symlinks and other entries; excludes the root itself |
+| `files large -r --min 100M` | Largest files first; size suffixes use powers of 1024 |
+| `files changed -r --since 7d` | Files by modification time, newest first, with local timestamps; ages accept `m`, `h`, `d`, `w` |
+| `files sizes` | Allocated file bytes per immediate child folder, including all its subfolders; `-r` also lists nested folders, `--direct` counts only direct files per listed folder, and `--logical` reports file lengths instead |
+| `files empty -r` | Zero-byte files and genuinely empty folders, not folders made empty by exclusions |
+| `files types -r` | Counts and bytes by final extension, case-insensitive; dotfiles without a suffix have no extension |
+| `files duplicates -r` | SHA-256 content matches, grouped by size first; skips empty files and counts hard links once |
+
+Listings show up to 20 rows or duplicate groups; `--limit 0` shows all.
+`sizes` always scans nested contents for totals unless `--direct` is set;
+its `-r` flag expands the listing rather than changing how totals are calculated.
+Parent and nested folder totals overlap, so do not sum rows from `sizes -r`.
+Size scans use macOS's bulk metadata API and retain folder totals rather than
+the whole file list. No compiler or additional dependency is needed; normal
+runs read current metadata.
+Fresh size runs atomically save the full snapshot, including warnings, under
+`${XDG_CACHE_HOME:-~/.cache}/dotfiles/files-sizes/`. Use `files sizes --cached`
+to reuse it with a different `--limit` without inspecting the target folder.
+Cached output shows its age; snapshots expire after 24 hours and are replaced
+by fresh runs with the same folder and scan options (including recursion,
+direct mode and exclusions). Missing, invalid or expired caches produce an
+error, never an automatic rescan. Each `files sizes` invocation, including
+`--cached`, deletes snapshot files last written at least 24 hours ago from this
+cache directory. No background service runs; files remain while the command
+is unused. Cached results do not reflect added, removed or changed files.
+On a terminal, size scans lasting over two seconds show an updating progress
+line with the current folder and entry count. It clears before the report or
+on interruption; redirected output stays plain.
+`count` always shows all totals. `sizes` reports allocated file-data bytes by
+default, so sparse files count only their allocated data. Use `--logical` to
+report full file lengths instead. Shared APFS blocks can be counted more than
+once; outside duplicate detection, hard-linked paths count separately.
+Duplicate savings are estimates excluding hard-linked copies; APFS sharing may
+reduce actual savings. Permission-denied entries are skipped with path-specific
+warnings and an incomplete-report marker; affected child folder sizes show
+`Unknown`, not zero. An unreadable target folder, other I/O errors, or detected
+changes during duplicate hashing still fail explicitly. Filesystem reports are snapshots, not a
+transactional view of concurrently changing folders.
+
+```sh
+files large -r --exclude node_modules --exclude .git ~/Developer
+files count -r --clean
+files sizes -r --clean-git
+files sizes -r --clean-git --cached --limit 0
+files duplicates -r --limit 0 ~/Downloads
+files changed --help
+```
+
 directory. `--keep-name` requires an existing destination directory.
 ZIP archives always include the source folder name; without a destination,
 the archive is created inside the source. `--ignore-git` excludes `.git`

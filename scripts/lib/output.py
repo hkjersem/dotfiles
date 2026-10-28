@@ -24,6 +24,22 @@ def paint(text, color, stream=None):
     return f"{CODES[color]}{text}{CODES['reset']}" if colored(stream) else text
 
 
+def listing_name(text, kind, stream=None):
+    """Use BSD ls's LSCOLORS for folder and symlink names; leave files plain."""
+    if not colored(stream) or kind not in ("folder", "symlink"):
+        return text
+    palette = os.environ.get("LSCOLORS") or "Exfxcxdxbxegedabagacad"
+    offset = 0 if kind == "folder" else 2
+    pair = palette[offset:offset + 2]
+    if len(pair) != 2 or any(char not in "abcdefghABCDEFGHx" for char in pair):
+        return text
+    codes = ["1"] if any(char.isupper() for char in pair) else []
+    for char, base in zip(pair, (30, 40)):
+        if char != "x":
+            codes.append(str(base + ord(char.lower()) - ord("a")))
+    return f"\033[{';'.join(codes)}m{text}{CODES['reset']}" if codes else text
+
+
 def mark(kind, stream=None):
     color, symbol = MARKS[kind]
     return paint(symbol, color, stream)

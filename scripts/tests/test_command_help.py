@@ -251,6 +251,26 @@ zpty -d z
                 offered = self.complete(["dotfiles-profile"], suffix)["dotfiles-profile"]
                 self.assertEqual(offered & {"personal", "work"}, expected)
 
+    def test_files_subcommands_and_flags_are_completed(self):
+        names = {"count", "large", "changed", "sizes", "empty", "types", "duplicates"}
+        for suffix, expected in ((" ", names), (" c", {"count", "changed"})):
+            with self.subTest(suffix=suffix):
+                self.assertEqual(self.complete(["files"], suffix)["files"] & names, expected)
+        flags = self.complete(["files"], " large --")["files"]
+        self.assertIn("--recursive", flags)
+        self.assertIn("--min", flags)
+        self.assertIn("--clean", flags)
+        self.assertIn("--clean-git", flags)
+        self.assertIn("--help", flags)
+        self.assertFalse(flags & names)
+        self.assertIn("--direct", self.complete(["files"], " sizes --")["files"])
+        self.assertIn("--logical", self.complete(["files"], " sizes --")["files"])
+        self.assertIn("--cached", self.complete(["files"], " sizes --")["files"])
+
+    def test_files_exclude_flag_can_be_completed_repeatedly(self):
+        offered = self.complete(["files"], " sizes --exclude Library --ex")["files"]
+        self.assertIn("--exclude", offered)
+
     def test_flags_are_completed_from_help(self):
         offered = self.complete(script_commands())
         self.assertEqual(

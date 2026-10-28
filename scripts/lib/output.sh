@@ -96,6 +96,32 @@ out_note() {
   printf '    %s\n' "$1"
 }
 
+out_listing_name() {
+  local LC_ALL=C
+  local text=$1 kind=$2 palette=${LSCOLORS:-Exfxcxdxbxegedabagacad} pair codes="" char index base
+  if [[ ! -t 1 || -n "${NO_COLOR:-}" || ( "$kind" != folder && "$kind" != symlink ) ]]; then
+    printf '%s' "$text"
+    return
+  fi
+  if [[ "$kind" == folder ]]; then pair=${palette:0:2}; else pair=${palette:2:2}; fi
+  if [[ ${#pair} -ne 2 || "$pair" == *[!abcdefghABCDEFGHx]* ]]; then
+    printf '%s' "$text"
+    return
+  fi
+  [[ "$pair" == *[A-H]* ]] && codes=1
+  for index in 0 1; do
+    char=${pair:index:1}
+    [[ "$char" == x ]] && continue
+    case "$char" in
+      a|A) base=0 ;; b|B) base=1 ;; c|C) base=2 ;; d|D) base=3 ;;
+      e|E) base=4 ;; f|F) base=5 ;; g|G) base=6 ;; h|H) base=7 ;;
+    esac
+    base=$((30 + 10 * index + base))
+    codes="${codes:+$codes;}$base"
+  done
+  if [[ -n "$codes" ]]; then printf '\033[%sm%s\033[0m' "$codes" "$text"; else printf '%s' "$text"; fi
+}
+
 out_row() {
   printf '  %s %-22s %s\n' "$1" "$2" "$3"
 }
