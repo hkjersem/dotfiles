@@ -279,6 +279,13 @@ zpty -d z
         self.assertEqual(self.complete(["wipe_clean"], " --sort ")["wipe_clean"] & {"path", "size"},
                          {"path", "size"})
 
+    def test_cache_cleaner_names_and_pruning_flags_are_completed(self):
+        self.assertEqual(self.complete(["clean_caches"], " --")["clean_caches"],
+                         {"--only", "--deep", "--dry-run", "--help"})
+        names = self.complete(["clean_caches"], " --only ")["clean_caches"]
+        self.assertTrue({"npm", "uv", "gradle", "go-modules"}.issubset(names), names)
+        flags = self.complete(["prune_branches"], " --")["prune_branches"]
+        self.assertTrue({"--include-detached", "--older-than"}.issubset(flags), flags)
 
     def test_duration_values_offer_examples_and_units_for_typed_numbers(self):
         cases = (("prune_branches", " --stale-after "),
@@ -295,7 +302,6 @@ zpty -d z
                 self.assertTrue({"24h", "7d", "2w"}.issubset(offered), offered)
                 numbered = self.complete([command], suffix + "14")[command]
                 self.assertTrue({"14m", "14h", "14d", "14w"}.issubset(numbered), numbered)
-
 
     def test_flags_are_completed_from_help(self):
         offered = self.complete(script_commands())

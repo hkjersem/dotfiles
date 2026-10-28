@@ -306,6 +306,50 @@ ZIP archives always include the source folder name; without a destination,
 the archive is created inside the source. `--ignore-git` excludes `.git`
 directories; otherwise Git metadata is copied too.
 
+## Clean global caches
+
+`clean_caches` previews supported global developer caches. It runs from HOME
+regardless of your current folder; use `wipe_clean` for project-local output.
+Cleaning requires explicit `--only` selection and single-key `[y/N]`
+confirmation. `--dry-run` previews without prompting or cleaning.
+`--deep` permits expensive cleaners but does not select them.
+
+```sh
+clean_caches --dry-run
+clean_caches --only uv,pip
+clean_caches --only go-modules,playwright --deep
+```
+
+Native cleaners: npm (`cache clean --force`), pnpm (`store prune`),
+Homebrew (`cleanup`), Bun (`pm cache rm`), Yarn (`cache clean`),
+pip3 (`cache purge`), uv (`cache clean`), Go (`clean -cache` or
+`clean -modcache`). Locations are queried from the installed tool before
+preview and again after confirmation; Yarn uses its version-specific query.
+These queries run tools and may invoke a tool-manager shim. Missing tools,
+invalid locations and incomplete size scans are errors; failed preflight
+checks prevent all cleaning. Failed cleaners are reported and make the
+command exit nonzero, while remaining selected cleaners are still attempted.
+
+Xcode's default `~/Library/Developer/Xcode/DerivedData` is removed directly;
+custom DerivedData locations are not discovered. Deep cleaners also allow
+direct deletion of Gradle's `caches` under `GRADLE_USER_HOME` (default
+`~/.gradle`) and Playwright's global browser directory
+(`PLAYWRIGHT_BROWSERS_PATH`, or `~/Library/Caches/ms-playwright`).
+Project-local Playwright mode (`0`) and relative paths are refused.
+Symlink cache paths and ancestors, home/root/working-directory ancestors,
+and non-directory targets are refused.
+
+Cleared downloads need downloading again; build caches need rebuilding.
+Close builds and cache users first. Preview sizes are allocated bytes, not a
+promise of reclaimed space: native cleaners may preserve cache contents or,
+as with Homebrew, clean old installations outside the displayed cache.
+Observed free-space changes are measured on each cache's filesystem and
+can include concurrent activity and APFS effects.
+
+`dotfiles-update` keeps its existing npm verification, `_npx` removal, pnpm
+pruning and Homebrew cleanup; no aggressive cleaners were added there.
+Docker, agent sessions, temporary directories and Cargo storage are excluded.
+
 ## Prune stale branches
 
 `prune_branches` finds local branches whose upstream branch was deleted on its

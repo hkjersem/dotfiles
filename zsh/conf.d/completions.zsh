@@ -4,7 +4,7 @@
 # flags as indented "  -x, --flag  description" lines. flag-highlight.zsh reads
 # the same list.
 typeset -ga dotfiles_commands=(
-  agent-sessions audit-repo codex-resume copy_clean
+  agent-sessions audit-repo clean_caches codex-resume copy_clean
   dotfiles-audit dotfiles-defaults dotfiles-install dotfiles-profile dotfiles-update
   files install_node nosync npm_globals_diff npm_release_age
   pma pmc pmi pml pmr pmu prune_branches roadmaps wipe wipe_clean
@@ -92,6 +92,18 @@ _dotfiles_wipe_clean() {
     '--older-than[No modification within this age, including descendants]:age:_dotfiles_age'
 }
 compdef _dotfiles_wipe_clean wipe_clean
+
+_dotfiles_cache_names() {
+  _values -s , 'cleaner' npm pnpm brew bun yarn pip uv go-build go-modules gradle playwright xcode
+}
+_dotfiles_clean_caches() {
+  _arguments \
+    '(-h --help)'{-h,--help}'[Show help]' \
+    '--only[Select comma-separated cleaners]:cleaners:_dotfiles_cache_names' \
+    '--deep[Allow expensive download and build cache cleaners]' \
+    '(-n --dry-run)'{-n,--dry-run}'[Preview without prompting or cleaning]'
+}
+compdef _dotfiles_clean_caches clean_caches
 
 _dotfiles_profile() {
   _arguments \
