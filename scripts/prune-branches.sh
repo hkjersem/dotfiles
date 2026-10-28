@@ -207,7 +207,7 @@ done
 
 # ── Report ────────────────────────────────────────────────────────────────────
 
-N_DELETE=0; N_DELETE_WT=0; N_DETACHED=0; N_BLOCKED=0; N_REVIEW=0; N_UNVERIFIED=0; N_HINT=0
+N_DELETE=0; N_DELETE_WT=0; N_DETACHED=0; N_BLOCKED=0; N_REVIEW=0; N_UNVERIFIED=0; N_HINT=0; N_RECENT=0; N_UNPUSHED_WT=0
 N_CLEAN=0; N_FETCH_FAILED=0; NO_REMOTE=()
 
 print_kind() {
@@ -218,7 +218,12 @@ print_kind() {
       printf '  %s %s\n    %s%s%s\n' "$icon" "$(sb_short_path "$name")" "$DIM" "$detail" "$RESET"
       continue
     fi
-    printf '  %s %-32s %s%s%s  %s\n' "$icon" "$name" "$DIM" "${sha:0:7}" "$RESET" "$detail"
+    if [[ "$detail" == *" (prune with "*")" ]]; then
+      printf '  %s %-32s %s%s%s  %s %s%s%s\n' "$icon" "$name" "$DIM" "${sha:0:7}" "$RESET" \
+        "${detail%% (prune with *}" "$DIM" "(prune with ${detail##* (prune with }" "$RESET"
+    else
+      printf '  %s %-32s %s%s%s  %s\n' "$icon" "$name" "$DIM" "${sha:0:7}" "$RESET" "$detail"
+    fi
     [[ -n "$wt" ]] && printf '    %s└ worktree %s%s\n' "$DIM" "$(sb_short_path "$wt")" "$RESET"
   done < "$file"
 }
@@ -235,6 +240,11 @@ for i in "${!REPOS[@]}"; do
   plan=$TMP/$i.plan
   failed=""
   [[ -s "$TMP/$i.failed" ]] && failed=$(tr '\n' ' ' < "$TMP/$i.failed")
+  if [[ -s "$plan" ]]; then
+    N_RECENT=$((N_RECENT + $(count_kind "$plan" recent)))
+    N_UNPUSHED_WT=$((N_UNPUSHED_WT + $(count_kind "$plan" unpushed-detached)))
+    awk -F "$SB_SEP" '$1 != "recent" && $1 != "unpushed-detached"' "$plan" > "$plan.kept" && mv "$plan.kept" "$plan"
+  fi
   if [[ ! -s "$plan" && -z "$failed" ]]; then
     N_CLEAN=$((N_CLEAN + 1))
     continue
@@ -272,7 +282,9 @@ fi
 [[ "$N_BLOCKED" -gt 0 ]] && out_row "$OUT_WARN" "Retained" "$N_BLOCKED (worktree safeguards or --older-than)"
 [[ "$N_REVIEW" -gt 0 ]] && out_row "$OUT_WARN" "Needs review" "$N_REVIEW (upstream gone, but commits not confirmed on a remote)"
 [[ "$N_UNVERIFIED" -gt 0 ]] && out_row "$OUT_WARN" "Unverified" "$N_UNVERIFIED (commits or remote data not confirmed)"
-[[ "$N_HINT" -gt 0 ]] && out_row "$OUT_INFO" "Kept, looks stale" "$N_HINT (merged or old, but not prunable; see above)"
+[[ "$N_HINT" -gt 0 ]] && out_row "$OUT_INFO" "Kept, looks stale" "$N_HINT (merged or old; see above)"
+[[ "$N_RECENT" -gt 0 ]] && out_row "$OUT_INFO" "Not reported" "$N_RECENT unpushed branch(es) ${DIM}(lower --stale-after to list)${RESET}"
+[[ "$N_UNPUSHED_WT" -gt 0 ]] && out_row "$OUT_INFO" "Not reported" "$N_UNPUSHED_WT detached worktree(s) with unpushed commits ${DIM}(--include-detached lists)${RESET}"
 [[ "$N_CLEAN" -gt 0 ]] && out_row "$OUT_OK" "Nothing to report" "$N_CLEAN repositor$( [[ "$N_CLEAN" -eq 1 ]] && echo y || echo ies)"
 if [[ ${#NO_REMOTE[@]} -gt 0 ]]; then
   list="${NO_REMOTE[0]}"
@@ -290,7 +302,7 @@ if [[ $((N_DELETE + N_DETACHED)) -eq 0 ]]; then
   if [[ "$SB_INCLUDE_MERGED" == true ]]; then
     out_note "Nothing to delete."
   else
-    out_note "Nothing to delete. ${DIM}Only branches whose remote branch was deleted are pruned, unless --include-merged is given.${RESET}"
+    out_note "Nothing to delete. ${DIM}Only branches with a deleted remote branch are pruned; see --include-merged.${RESET}"
   fi
   exit "$STATUS_CODE"
 fi
@@ -299,7 +311,9 @@ $DRY_RUN && exit "$STATUS_CODE"
 # ── Apply ─────────────────────────────────────────────────────────────────────
 
 echo ""
-confirm_apply "Delete $N_DELETE branch(es) and remove $((N_DELETE_WT + N_DETACHED)) worktree(s)?" "$AUTO_YES" false || exit "$STATUS_CODE"
+prompt="Delete $N_DELETE branch(es)"
+[[ $((N_DELETE_WT + N_DETACHED)) -gt 0 ]] && prompt+=" and remove $((N_DELETE_WT + N_DETACHED)) worktree(s)"
+confirm_apply "$prompt?" "$AUTO_YES" false || exit "$STATUS_CODE"
 
 DELETED=0; REMOVED_WT=0; FAILED=0
 for i in "${!REPOS[@]}"; do
@@ -328,7 +342,10 @@ done
 echo ""
 done_mark=$OUT_OK
 [[ "$FAILED" -gt 0 ]] && done_mark=$OUT_FAIL
-echo "  $done_mark Deleted $DELETED branch(es), removed $REMOVED_WT worktree(s), $FAILED failed."
+result="Deleted $DELETED branch(es)"
+[[ "$REMOVED_WT" -gt 0 ]] && result+=", removed $REMOVED_WT worktree(s)"
+[[ "$FAILED" -gt 0 ]] && result+=", $FAILED failed"
+echo "  $done_mark $result."
 if [[ "$DELETED" -gt 0 ]]; then
   out_note "${DIM}Restore a branch with: git branch <name> <commit> (each repository logs them in .git/prune-branches.log)${RESET}"
 fi

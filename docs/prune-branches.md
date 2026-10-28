@@ -24,6 +24,12 @@ the local branch (and its clean worktree) is removed; the remote branch is
 kept. Squash-merged or rebased branches whose remote branch still exists are
 not detected this way.
 
+A branch that tracks another local branch (`git checkout -b x main`) has no
+remote branch of its own. It is reported as looking stale when its commits are
+on the remote (already in the default branch, a pull request head, or rebased or
+squash-merged), and `--include-merged` deletes it. Without that flag it is never
+deleted.
+
 Anything else is listed for review, including branches that were pushed but
 then deleted on the remote without being merged, since your copy may be the
 last one. Branches that were never pushed, repositories without a remote,
@@ -47,7 +53,10 @@ branches older than `--stale-after` (default `90d`), and branches already merged
 into the default branch whose remote branch still exists (pass
 `--include-merged` or delete the remote branch to prune them). A branch
 without an upstream that exists on a remote under the same name is shown as
-not tracking it, with how far it is ahead or behind.
+not tracking it, with how far it is ahead or behind. Unpushed branches newer
+than `--stale-after` and detached worktrees whose commit is on no remote are
+not listed, only counted in the summary as `Not reported`; lower `--stale-after`
+or pass `--include-detached` to list them.
 
 ### Opt-in detached worktree removal
 

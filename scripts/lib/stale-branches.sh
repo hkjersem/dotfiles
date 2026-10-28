@@ -7,7 +7,7 @@
 # directory), then call sb_classify. Records are written to stdout, one per
 # line, with fields separated by $SB_SEP:
 #   kind  branch-or-path  commit  detail  worktree
-# Kinds: delete, delete-worktree, review, blocked, unverified, hint.
+# Kinds: delete, delete-worktree, review, blocked, unverified, hint, recent and unpushed-detached (counted, not listed).
 
 SB_SEP=$'\x1f'
 SB_PROTECTED="main master develop development trunk"
@@ -467,23 +467,44 @@ sb_safe_evidence() {
 sb_classify() {
   local snapshot_file=${1:-} failed_file=${2:-} request_file=${3:-} now remote ref i detail
   local branch sha upstream track remotename remoteref date evidence wt wt_path dirt unique default_ref busy
-  local state ahead behind
+  local state ahead behind local_tracking default_remote
   now=$(date +%s)
   sb_load_worktrees
   SB_DEFAULT_NAMES=""
   for remote in $(sb_git remote 2>/dev/null); do
     ref=$(sb_default_ref "$remote") && SB_DEFAULT_NAMES+=" ${ref#refs/remotes/"$remote"/}"
   done
-  default_ref=$(sb_default_ref "$(sb_git remote 2>/dev/null | head -1)") || default_ref=""
+  default_remote=$(sb_git remote 2>/dev/null | head -1)
+  default_ref=$(sb_default_ref "$default_remote") || default_ref=""
 
   while IFS="$SB_SEP" read -r branch sha upstream track remotename remoteref date; do
     wt=$(sb_worktree_for_branch "$branch") || wt=""
     wt_path=""
     [[ -n "$wt" ]] && wt_path=${SB_WT_PATH[$wt]}
 
-    if [[ -z "$upstream" ]]; then
+    # A branch tracking another local branch (git checkout -b x main) has no
+    # remote branch of its own; it is deleted only when its commits are
+    # confirmed on the default remote, and only with --include-merged.
+    local_tracking=false
+    evidence=""
+    if [[ "$upstream" == refs/heads/* ]] && ! sb_is_protected "$branch" && [[ -n "$default_remote" ]] \
+        && evidence=$(sb_safe_evidence "$sha" "$default_remote" "$request_file"); then
+      if [[ "$SB_INCLUDE_MERGED" != true ]]; then
+        sb_record hint "$branch" "$sha" \
+          "tracks local ${upstream#refs/heads/}; $evidence (prune with --include-merged)" "$wt_path"
+        continue
+      fi
+      if [[ -n "$failed_file" && -f "$failed_file" ]] && grep -qxF "$default_remote" "$failed_file"; then
+        sb_record unverified "$branch" "$sha" "could not fetch $default_remote" "$wt_path"
+        continue
+      fi
+      local_tracking=true
+    fi
+
+    if [[ "$local_tracking" != true && ( -z "$upstream" || "$upstream" == refs/heads/* ) ]]; then
       # A branch created without tracking may still exist on a remote under the same name.
       state="never pushed"
+      [[ -z "$upstream" ]] || state="tracks local ${upstream#refs/heads/}, not pushed"
       ref=$(sb_git for-each-ref --count=1 --format='%(refname:lstrip=2)' "refs/remotes/*/$branch" 2>/dev/null)
       if [[ -n "$ref" ]]; then
         read -r ahead behind < <(sb_git rev-list --left-right --count "$sha...refs/remotes/$ref" 2>/dev/null)
@@ -495,19 +516,24 @@ sb_classify() {
         if [[ -n "$default_ref" ]] && ! sb_is_protected "$branch" \
             && sb_git merge-base --is-ancestor "$sha" "$default_ref" 2>/dev/null; then
           sb_record hint "$branch" "$sha" "$state, no commits beyond ${default_ref#refs/remotes/}" "$wt_path"
+        elif ! sb_is_protected "$branch"; then
+          sb_record recent "$branch" "$sha" "$state, newer than --stale-after" "$wt_path"
         fi
       fi
       continue
     fi
-    [[ "$upstream" == refs/remotes/* ]] || continue
-    if [[ "$track" != gone ]]; then
+    if [[ "$local_tracking" == true ]]; then
+      evidence="$evidence; tracks local ${upstream#refs/heads/}"
+    elif [[ "$upstream" != refs/remotes/* ]]; then
+      continue
+    elif [[ "$track" != gone ]]; then
       # Merged pull requests whose remote branch was not deleted are only deleted with --include-merged.
       [[ "${remoteref#refs/heads/}" == "$branch" ]] && ! sb_is_protected "$branch" \
         && ref=$(sb_default_ref "$remotename" 2>/dev/null) \
         && sb_git merge-base --is-ancestor "$sha" "$ref" 2>/dev/null || continue
       if [[ "$SB_INCLUDE_MERGED" != true ]]; then
         sb_record hint "$branch" "$sha" \
-          "merged into ${ref#refs/remotes/}, but ${upstream#refs/remotes/} still exists (prune_branches --include-merged deletes the local branch)" \
+          "merged into ${ref#refs/remotes/}, but ${upstream#refs/remotes/} still exists (prune with --include-merged)" \
           "$wt_path"
         continue
       fi
@@ -617,7 +643,10 @@ sb_classify() {
       continue
     fi
     ref=$(sb_containing_remote "${SB_WT_HEAD[$i]}" "" "") || ref=""
-    [[ -n "$ref" ]] || continue
+    if [[ -z "$ref" ]]; then
+      sb_record unpushed-detached "${SB_WT_PATH[$i]}" "${SB_WT_HEAD[$i]}" "detached HEAD not on a remote"
+      continue
+    fi
     dirt=$(sb_worktree_dirt "${SB_WT_PATH[$i]}")
     if [[ -n "$dirt" ]]; then
       sb_record hint "${SB_WT_PATH[$i]}" "${SB_WT_HEAD[$i]}" "detached worktree, commit already in $ref, but has $dirt"

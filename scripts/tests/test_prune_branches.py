@@ -1,6 +1,7 @@
 """Regression tests for prune-branches.sh and its audit-repo section, using
 real Git repositories with local bare remotes."""
 
+from datetime import datetime, timedelta
 import os
 from pathlib import Path
 import subprocess
@@ -620,6 +621,30 @@ class PruneBranchesTests(unittest.TestCase):
         self.assertFalse(worktree.exists())
         self.assertIn("merged-kept", self.git(self.root, "--git-dir", str(self.origin), "branch"))
 
+    def test_branch_tracking_a_local_branch_is_deleted_only_when_merged_and_included(self):
+        self.pushed_branch("merged-local")
+        self.git(self.other, "fetch", "-q")
+        self.git(self.other, "merge", "-q", "--no-edit", "origin/merged-local")
+        self.git(self.other, "push", "-q", "origin", "main")
+        self.git(self.work, "push", "-q", "origin", "--delete", "merged-local")
+        self.git(self.work, "switch", "-q", "-c", "local-merged", "main")
+        self.git(self.work, "branch", "-q", "--set-upstream-to=main")
+        self.git(self.work, "switch", "-q", "main")
+        self.git(self.work, "switch", "-q", "-c", "local-unmerged", "main")
+        self.commit(self.work, "local-unmerged")
+        self.git(self.work, "branch", "-q", "--set-upstream-to=main")
+        self.git(self.work, "switch", "-q", "main")
+        self.git(self.work, "branch", "-q", "-D", "merged-local")
+
+        plain = self.run_prune("--yes")
+        self.assertEqual(plain.returncode, 0, plain.stdout + plain.stderr)
+        self.assertIn("tracks local main", plain.stdout)
+        self.assertEqual(self.branches(), {"main", "local-merged", "local-unmerged"})
+
+        applied = self.run_prune("--yes", "--include-merged")
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        self.assertEqual(self.branches(), {"main", "local-unmerged"})
+
     def test_include_merged_requires_default_ref_to_match_the_remote(self):
         base = self.git(self.work, "rev-parse", "main")
         self.pushed_branch("feature")
@@ -779,6 +804,32 @@ class PruneBranchesTests(unittest.TestCase):
         self.assertIn("never pushed, last commit", result.stdout)
         invalid = self.run_prune("--dry-run", "--stale-after", "90")
         self.assertEqual(invalid.returncode, 2)
+
+    def test_detached_worktree_with_unpushed_commit_is_counted_not_listed(self):
+        detached = self.root / "detached-unpushed"
+        self.git(self.work, "worktree", "add", "-q", "--detach", str(detached), "main")
+        self.commit(detached, "unpushed")
+        result = self.run_prune("--dry-run")
+        self.assertRegex(result.stdout, r"Not reported +1 detached worktree\(s\) with unpushed commits")
+        self.assertNotIn("detached-unpushed", result.stdout)
+        listed = self.run_prune("--include-detached", "--dry-run")
+        self.assertIn("detached HEAD not confirmed on a remote", listed.stdout)
+        self.assertTrue(detached.exists())
+
+    def test_recent_unpushed_branches_are_counted_not_listed(self):
+        two_days_ago = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%S")
+        self.env.update(GIT_AUTHOR_DATE=two_days_ago, GIT_COMMITTER_DATE=two_days_ago)
+        self.git(self.work, "switch", "-q", "-c", "fresh-local")
+        self.commit(self.work, "local")
+        del self.env["GIT_AUTHOR_DATE"], self.env["GIT_COMMITTER_DATE"]
+        self.git(self.work, "switch", "-q", "main")
+        result = self.run_prune("--dry-run")
+        self.assertRegex(result.stdout, r"Not reported +1 unpushed branch\(es\)")
+        self.assertNotIn("fresh-local", result.stdout)
+        self.assertRegex(result.stdout, r"Nothing to report +1 repository")
+        listed = self.run_prune("--dry-run", "--stale-after", "1d")
+        self.assertEqual(listed.returncode, 0, listed.stdout + listed.stderr)
+        self.assertIn("fresh-local", listed.stdout)
 
     def test_audit_repo_reports_candidates_without_changing_anything(self):
         self.pushed_branch("merged")
