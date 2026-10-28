@@ -32,6 +32,7 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 | `scripts/install-zsh-plugins.sh` | Clone or pull oh-my-zsh and custom plugins — called by both `applications.sh` and `update.sh` |
 | `scripts/audit.sh` | Read-only drift detection — compares repo declarations vs installed state |
 | `scripts/audit-repo.sh` | Repository triage — Git, stale-branch, file, documentation-naming, test, and build indicators; extra checks for a root `package.json`. Aliased as `audit-repo`. npm/pnpm audit and outdated queries can use the network; `--skip-security` skips only audit. See [docs/audit-repo.md](docs/audit-repo.md). |
+| `scripts/audit-workspaces.py` | Read-only size-ranked registered-worktree report for audit-repo --workspaces; consumes shared Git assessments and reuses the native allocated-size scanner |
 | `scripts/dotfiles-install.sh` | Safe-help entry point for `dotfiles-install`; checks the profile, reapplies links, then bootstraps tools without applying macOS preferences |
 | `scripts/audit-skills.sh` | Skills drift detection — read-only under `audit.sh`; explicit repair flags preserve real content and foreign links. `--clean-stale` removes only verified managed links and empty skills-only agent directories. See [docs/agent-skills.md](docs/agent-skills.md). |
 | `agents/AGENTS.md` | Personal global agent instructions — symlinked into each installed tool's global instruction file |

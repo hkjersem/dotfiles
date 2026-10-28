@@ -33,6 +33,7 @@ TARGET_DIR="$PWD"
 SINCE="1 year ago"
 SKIP_AUDIT=false
 NO_PACKAGE_MANAGER=false
+WORKSPACES=false
 
 usage() {
   cat <<EOF
@@ -46,6 +47,7 @@ Options:
   --since PERIOD         Lookback duration (e.g. 7d) or Git date expression (default: "1 year ago")
   --skip-security        Skip package manager security audit
   --no-package-manager   Skip package managers and Node execution; keep local checks
+  --workspaces           Report allocated sizes and assessments of registered worktrees
   -h, --help             Show this help
 EOF
 }
@@ -60,6 +62,7 @@ while [[ $# -gt 0 ]]; do
                 SINCE="$2"; shift 2 ;;
     --skip-security) SKIP_AUDIT=true; shift ;;
     --no-package-manager) NO_PACKAGE_MANAGER=true; shift ;;
+    --workspaces) WORKSPACES=true; shift ;;
     --help|-h)  usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
   esac
@@ -475,6 +478,66 @@ else
 fi
 
 section_end
+
+if ! SB_GIT_DIR=$(sb_common_dir "$GIT_ROOT"); then
+  echo "Error: could not resolve Git directory for workspace report." >&2
+  exit 1
+fi
+if ! GIT_OPTIONAL_LOCKS=0 GIT_NO_LAZY_FETCH=1 \
+    git --git-dir="$SB_GIT_DIR" worktree list --porcelain -z >/dev/null; then
+  echo "Error: could not list registered worktrees." >&2
+  exit 1
+fi
+sb_load_worktrees
+# Workspace sizes are opt-in: scanning generated contents can be expensive.
+if $WORKSPACES; then
+  export GIT_OPTIONAL_LOCKS=0 GIT_NO_LAZY_FETCH=1
+  workspace_records() {
+    local i path branch assessment dirt kind name _ detail wt busy
+    for ((i = 0; i < ${#SB_WT_PATH[@]}; i++)); do
+      path=${SB_WT_PATH[$i]}
+      branch=${SB_WT_BRANCH[$i]}
+      assessment="Review: not classified as eligible for pruning"
+      $NO_PACKAGE_MANAGER && assessment="Review: remote classification skipped (--no-package-manager)"
+      [[ -z "$HAS_REMOTE" ]] && assessment="Keep: repository has no remote"
+      while IFS="$SB_SEP" read -r kind name _ detail wt; do
+        if [[ "$wt" == "$path" || "$name" == "$path" ]]; then
+          case "$kind" in
+            blocked) assessment="Keep: $detail" ;;
+            delete) assessment="Review: prune_branches candidate; $detail" ;;
+            *) assessment="Review: $detail" ;;
+          esac
+          break
+        fi
+      done <<< "${STALE_PLAN:-}"
+      dirt=$(sb_worktree_dirt "$path" "$branch")
+      [[ -n "$dirt" ]] && assessment="Keep: $dirt"
+      busy=$(sb_busy_for_branch "$branch") || busy=""
+      [[ -n "$busy" ]] && assessment="Keep: $busy"
+      [[ "${SB_WT_FLAGS[$i]}" == *" detached "* ]] && assessment="Review: detached HEAD; $assessment"
+      [[ "${SB_WT_FLAGS[$i]}" == *" locked "* ]] && assessment="Keep: locked worktree; $assessment"
+      [[ "$path" == "$SB_INVOKING_TOP" ]] && assessment="Keep: audited worktree; $assessment"
+      printf '%s\0%s\0%s\0' "$path" "$branch" "$assessment"
+    done
+  }
+  workspace_status=0
+  workspace_records | python3 -B "$SCRIPT_DIR/audit-workspaces.py" || workspace_status=$?
+  if [[ "$workspace_status" -eq 2 ]]; then
+    WARNINGS=$((WARNINGS + 1))
+  elif [[ "$workspace_status" -ne 0 ]]; then
+    echo "Error: workspace report failed." >&2
+    exit 1
+  fi
+elif [[ ${#SB_WT_PATH[@]} -gt 1 ]]; then
+  section_start "Workspaces"
+  for ((WT_INDEX = 0; WT_INDEX < ${#SB_WT_PATH[@]}; WT_INDEX++)); do
+    printf -v WT_LABEL '%q' "$(sb_short_path "${SB_WT_PATH[$WT_INDEX]}")"
+    printf -v WT_BRANCH '%q' "${SB_WT_BRANCH[$WT_INDEX]:-(detached)}"
+    row "$WT_LABEL — $WT_BRANCH${SB_WT_FLAGS[$WT_INDEX]% }"
+  done
+  info "Run audit-repo --workspaces for sizes and detailed assessments."
+  section_end
+fi
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 2. SECURITY

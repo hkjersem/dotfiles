@@ -347,6 +347,12 @@ rules, worktree handling, and recovery.
 
 ## Repository triage
 
+The default audit lists registered worktrees and branches.
+Add `audit-repo --workspaces` for allocated sizes and keep/review assessments
+of this repository's registered worktrees, including linked paths outside it.
+This opt-in report reuses `prune_branches` safety checks and the native size
+scanner; it never deletes workspaces or discovers unrelated clones.
+
 `audit-repo` reports Git activity, ownership concentration, frequently changed
 files, source sizes, test-file conventions, and build configuration. Run it
 inside a repository or select one explicitly; a subdirectory is resolved to
@@ -359,6 +365,7 @@ CI and knowledge-concentration checks are skipped.
 audit-repo
 audit-repo --dir ../project --since "6 months ago"
 audit-repo --skip-security
+audit-repo --no-package-manager    # local checks without package-manager or Node execution
 ```
 
 It also checks documentation file names and link case, validates skill-managed
@@ -386,7 +393,6 @@ each check covers and how to read the results.
 
 Run from the repository root on macOS, with Python 3, Node.js, jq, and Perl
 available. Some fixtures also use `/usr/bin/python3`, `/usr/bin/ruby`, and macOS
-audit-repo --no-package-manager    # local checks without package-manager or Node execution
 copy/archive tools. No Python test packages need to be installed.
 
 ```sh

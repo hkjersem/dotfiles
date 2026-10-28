@@ -134,15 +134,91 @@ class AuditRepoTests(unittest.TestCase):
         self.assertEqual(subprocess.check_output(status_args, env=self.env), before)
         return result
 
-    def test_history_accepts_compact_duration(self):
-        result = self.run_audit("--since", "7d", "--no-package-manager")
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertTrue(any("--since=604800 seconds ago" in args for args in self.calls("git")))
-
-
     def calls(self, name):
         return [args for tool, args in map(json.loads, self.log.read_text().splitlines())
                 if tool == name]
+
+    def test_workspace_listing_hidden_without_additional_worktrees(self):
+        result = self.run_audit("--no-package-manager")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("─ Workspaces", result.stdout)
+        self.assertNotIn("Run audit-repo --workspaces", result.stdout)
+
+    def test_workspace_report_reuses_registered_worktrees_and_keeps_changes(self):
+        self.write("source.txt", "source\n")
+        git = [self.git, "-C", str(self.project)]
+        subprocess.run([*git, "add", "."], env=self.env, check=True, capture_output=True)
+        subprocess.run([*git, "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                        "commit", "-qm", "fixture"], env=self.env, check=True, capture_output=True)
+        worktree = self.root / "linked workspace"
+        subprocess.run([*git, "worktree", "add", "-qb", "experiment", str(worktree)],
+                       env=self.env, check=True, capture_output=True)
+        (worktree / "uncommitted.txt").write_text("keep\n")
+        (worktree / "node_modules").mkdir()
+        (worktree / "node_modules/blob").write_bytes(b"x" * 100_000)
+        baseline = self.run_audit("--no-package-manager", stage=False)
+        self.assertNotIn("Workspace disk usage", baseline.stdout)
+        self.assertIn("─ Workspaces", baseline.stdout)
+        self.assertIn("linked\\ workspace", baseline.stdout)
+        self.assertIn("experiment", baseline.stdout)
+        self.assertIn("Run audit-repo --workspaces for sizes and detailed assessments.", baseline.stdout)
+        self.assertFalse(any(args[:2] == ["-C", str(worktree)]
+                             for args in self.calls("git")))
+        result = self.run_audit("--no-package-manager", "--workspaces", stage=False)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Workspace disk usage", result.stdout)
+        self.assertIn(str(worktree), result.stdout)
+        self.assertIn("experiment", result.stdout)
+        self.assertIn("uncommitted change(s)", result.stdout)
+        self.assertIn("Keep: audited worktree", result.stdout)
+        allocated = sum((worktree / name).stat().st_blocks * 512
+                        for name in ("source.txt", "uncommitted.txt", "node_modules/blob"))
+        self.assertIn(f"{allocated / 1024:.1f} KiB", result.stdout)
+        usage = result.stdout.split("─ Workspace disk usage", 1)[1]
+        self.assertLess(usage.index(str(worktree)), usage.index(str(self.project)))
+        self.assertEqual((worktree / "uncommitted.txt").read_text(), "keep\n")
+        self.assertEqual((worktree / "node_modules/blob").stat().st_size, 100_000)
+        self.assertFalse(any("fetch" in args for args in self.calls("git")))
+        (worktree / "uncommitted.txt").unlink()
+        (worktree / "node_modules/blob").unlink()
+        (worktree / "node_modules").rmdir()
+        self.add_remote()
+        for args in (["update-ref", "refs/remotes/origin/master", "HEAD"],
+                     ["config", "branch.experiment.remote", "origin"],
+                     ["config", "branch.experiment.merge", "refs/heads/experiment"]):
+            subprocess.run([*git, *args], env=self.env, check=True, capture_output=True)
+        remote = self.run_audit("--workspaces", "--skip-security", stage=False)
+        self.assertEqual(remote.returncode, 0, remote.stdout + remote.stderr)
+        workspace_section = remote.stdout.split("─ Workspace disk usage", 1)[1]
+        self.assertIn("Review: prune_branches candidate;", workspace_section)
+        self.assertIn("origin/master", workspace_section)
+        self.assertFalse(any("fetch" in args for args in self.calls("git")))
+
+    def test_workspace_report_flags_locked_detached_missing_and_ignored(self):
+        self.write(".gitignore", "private/\n")
+        git = [self.git, "-C", str(self.project)]
+        subprocess.run([*git, "add", "."], env=self.env, check=True, capture_output=True)
+        subprocess.run([*git, "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                        "commit", "-qm", "fixture"], env=self.env, check=True, capture_output=True)
+        worktree = self.root / "detached\nworkspace"
+        subprocess.run([*git, "worktree", "add", "--detach", str(worktree)],
+                       env=self.env, check=True, capture_output=True)
+        subprocess.run([*git, "worktree", "lock", str(worktree)],
+                       env=self.env, check=True, capture_output=True)
+        (worktree / "private").mkdir()
+        (worktree / "private/value").write_text("local\n")
+        result = self.run_audit("--no-package-manager", "--workspaces", stage=False)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("detached\\nworkspace", result.stdout)
+        self.assertIn("(detached)", result.stdout)
+        self.assertIn("Keep: locked worktree", result.stdout)
+        self.assertIn("ignored local files: private/", result.stdout)
+        self.assertIn("repository has no remote", result.stdout)
+        worktree.rename(self.root / "moved")
+        missing = self.run_audit("--no-package-manager", "--workspaces", stage=False)
+        self.assertEqual(missing.returncode, 0, missing.stdout + missing.stderr)
+        self.assertIn("Unknown", missing.stdout)
+        self.assertIn("registered directory is missing", missing.stdout)
 
     def test_no_package_manager_skips_execution_but_keeps_local_checks(self):
         for pm in ("npm", "pnpm", "bun", "yarn"):
@@ -670,6 +746,11 @@ class AuditRepoTests(unittest.TestCase):
         for args in self.calls("git"):
             if args[:1] == ["log"]:
                 self.assertIn("--no-merges", args)
+
+    def test_history_accepts_compact_duration(self):
+        result = self.run_audit("--since", "7d", "--no-package-manager")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue(any("--since=604800 seconds ago" in args for args in self.calls("git")))
 
     def test_inactive_months_are_included_in_velocity(self):
         today = datetime.date.today()

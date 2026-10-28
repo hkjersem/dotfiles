@@ -2,6 +2,31 @@
 
 [README](../README.md#repository-triage)
 
+## Workspace disk usage
+
+When additional worktrees exist, the default audit lists registered paths and
+branches without scanning their contents, with a hint to run `--workspaces`
+for more detail. Otherwise, this section is hidden.
+
+`audit-repo --workspaces` adds a size-ranked report of all registered worktrees
+of the audited repository, including its main checkout and linked worktrees
+outside that directory. It does not discover unrelated clones or scan home
+directories. The opt-in scan includes generated artifacts but excludes `.git`
+metadata, using the same native allocated-size scanner as `files sizes`.
+
+Assessments reuse the stale-branch plan and shared worktree checks from
+`prune_branches`, including local/ignored files, hidden index flags and
+worktree-only history. The audited checkout and locked worktrees are kept;
+detached HEADs are flagged for review. Remote assessments use the last fetched
+refs, and unclassified worktrees are not described as safe to remove. With
+`--no-package-manager`, remote classification stays disabled while local
+worktree checks and sizing still run. No fetching or deletion is added.
+
+Permission-denied entries give incomplete sizes and warnings; missing
+registered paths are shown explicitly. Age is not used as evidence of safety.
+Large worktrees can take time; delayed terminal progress is shown. Existing
+`prune_branches` remains responsible for any approved cleanup.
+
 ## Package-manager execution
 
 Use `--no-package-manager` for local checks without running a package manager or
