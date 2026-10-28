@@ -106,6 +106,7 @@ _dotfiles_clean_caches() {
   _arguments \
     '(-h --help)'{-h,--help}'[Show help]' \
     '--only[Select comma-separated cleaners]:cleaners:_dotfiles_cache_names' \
+    '--sort[Show largest caches first]:order:(size)' \
     '--deep[Allow expensive download and build cache cleaners]' \
     '(-n --dry-run)'{-n,--dry-run}'[Preview without prompting or cleaning]'
 }

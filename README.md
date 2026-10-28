@@ -313,6 +313,9 @@ regardless of your current folder; use `wipe_clean` for project-local output.
 Cleaning requires explicit `--only` selection and single-key `[y/N]`
 confirmation. `--dry-run` previews without prompting or cleaning.
 `--deep` permits expensive cleaners but does not select them.
+Temporary scan progress clears before the cache/size/folder table is printed;
+paths beneath HOME use `~/`. Sizes show cache usage, not guaranteed savings.
+Add `--sort size` to list largest caches first, with missing caches last.
 
 ```sh
 clean_caches --dry-run

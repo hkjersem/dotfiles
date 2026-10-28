@@ -3,6 +3,7 @@
 import contextlib
 import importlib.util
 import io
+import itertools
 import os
 from pathlib import Path
 import subprocess
@@ -56,9 +57,59 @@ class CleanCachesTests(unittest.TestCase):
         self.assertTrue(text.startswith("Dry run"))
         allocated = (self.cache / "data").stat().st_blocks * 512
         self.assertIn(f"{allocated / 1024:.1f} KiB", text)
-        self.assertIn(str(self.cache), text)
+        self.assertIn("~/custom-uv-cache", text)
         self.assertEqual([cmd for cmd, _ in self.calls], [["uv", "cache", "dir"]])
         self.assertTrue((self.cache / "data").exists())
+
+    def test_plan_keeps_cache_size_and_folder_on_one_line(self):
+        code, text = self.run_command("--only", "uv,xcode", "--dry-run")
+        self.assertEqual(code, 0, text)
+        allocated = (self.cache / "data").stat().st_blocks * 512
+        size = f"{allocated / 1024:.1f} KiB"
+        self.assertIn(f"  {'uv':<12}  {size:>10}  ~/custom-uv-cache\n", text)
+        self.assertIn(f"  {'xcode':<12}  {'—':>10}  No cache directory\n", text)
+        self.assertNotIn("    ~/custom-uv-cache", text)
+        self.assertNotIn("• xcode", text)
+
+    def test_size_sort_orders_largest_first_and_missing_last(self):
+        sizes = iter((0, 1024, 4096))
+        with patch.object(CACHES, "cache_path", side_effect=[
+                self.cache, self.home / "missing", self.cache, self.cache]), \
+                patch.object(CACHES, "scan_sizes", side_effect=lambda *a, **kw: {
+                    Path("."): next(sizes)}):
+            code, text = self.run_command(
+                "--only", "uv,xcode,pip,npm", "--sort", "size", "--dry-run")
+        self.assertEqual(code, 0, text)
+        names = [line.split()[0] for line in text.splitlines()
+                 if line.split() and line.split()[0] in {"uv", "xcode", "pip", "npm"}]
+        self.assertEqual(names, ["npm", "pip", "uv", "xcode"])
+
+    def test_progress_is_cleared_before_the_plan_is_printed(self):
+        events = []
+
+        class Terminal(io.StringIO):
+            def isatty(self):
+                return True
+
+            def write(self, text):
+                events.append(text)
+                return super().write(text)
+
+        def scan(path, *args, **kwargs):
+            kwargs["progress"].update(path / "nested", 1)
+            return {Path("."): 1024}
+
+        with patch.object(CACHES.subprocess, "run", side_effect=self.native), \
+                patch.object(CACHES, "scan_sizes", side_effect=scan), \
+                patch("files.time.monotonic", side_effect=itertools.count(0, 3)), \
+                patch.object(CACHES.output, "progress", side_effect=lambda text: events.append("progress")), \
+                patch.object(CACHES.output, "progress_done", side_effect=lambda: events.append("cleared")), \
+                contextlib.redirect_stdout(Terminal()), contextlib.redirect_stderr(Terminal()):
+            self.assertEqual(CACHES.main(["--only", "uv", "--dry-run"]), 0)
+        self.assertIn("progress", events)
+        self.assertLess(events.index("progress"), events.index("cleared"))
+        plan = next(i for i, text in enumerate(events) if "Cache cleanup plan" in text)
+        self.assertLess(events.index("cleared"), plan)
 
     def test_apply_requires_explicit_selection_and_deep_acknowledgement(self):
         for args in ((), ("--only", "gradle"), ("--only", "unknown"),
@@ -181,7 +232,7 @@ class CleanCachesTests(unittest.TestCase):
                 return subprocess.CompletedProcess(command, 0, value, "")
             code, text = self.run_command("--only", "yarn", "--dry-run", native=native)
             self.assertEqual(code, 0, text)
-            self.assertIn(str(self.cache), text)
+            self.assertIn("~/custom-uv-cache", text)
             expected = (["yarn", "--silent", "cache", "dir"] if version.startswith("1.")
                         else ["yarn", "config", "get", "cacheFolder"])
             self.assertEqual(calls, [["yarn", "--version"], expected])

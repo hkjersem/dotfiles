@@ -93,6 +93,7 @@ def parser():
     )
     result.add_argument("--only", metavar="NAMES", help="comma-separated cleaners; required unless --dry-run")
     result.add_argument("--deep", action="store_true", help="allow Gradle, Go modules and Playwright browser cleanup")
+    result.add_argument("--sort", choices=("size",), help="show largest caches first; missing caches last")
     result.add_argument("-n", "--dry-run", action="store_true", help="preview without prompting or cleaning")
     return result
 
@@ -122,9 +123,9 @@ def main(argv=None):
     if args.dry_run:
         output.dry_run()
     output.context("Global caches")
-    output.section("Cache cleanup plan")
     progress = ScanProgress(Path("/"), True)
     rows = []
+    report = []
     failures = 0
     try:
         for name in names:
@@ -136,7 +137,7 @@ def main(argv=None):
                 try:
                     path.lstat()
                 except FileNotFoundError:
-                    output.row("info", name, "No cache directory")
+                    report.append((name, path, None, "No cache directory"))
                     continue
                 warnings = {}
                 size = scan_sizes(path, False, False, [], include_root=True, warnings=warnings,
@@ -144,13 +145,27 @@ def main(argv=None):
                 if warnings:
                     raise OSError(f"cache size incomplete: {display(next(iter(warnings)))}")
                 rows.append((cleaner, path))
-                output.row("info", name, f"{human_size(size)} | {cleaner.cost}")
-                output.note(display(path))
+                report.append((name, path, size, cleaner.cost))
             except OSError as exc:
                 failures += 1
-                output.row("fail", name, display(exc))
+                report.append((name, None, None, display(exc)))
     finally:
         progress.close()
+    if args.sort == "size":
+        report.sort(key=lambda item: (item[2] is None, -(item[2] or 0)))
+    output.section("Cache cleanup plan")
+    output.table_header("%-12s  %10s  %s", "Cache", "Size", "Folder")
+    for name, path, size, detail in report:
+        if size is None and path is None:
+            output.row("fail", name, detail)
+        else:
+            home = Path.home()
+            label = "~/" + str(path.relative_to(home)) if path.is_relative_to(home) else str(path)
+            print(f"  {name:<12}  {human_size(size) if size is not None else '—':>10}  "
+                  f"{display(label) if size is not None else detail}")
+    if rows:
+        print()
+        output.note("Cache sizes, not guaranteed savings.")
     if failures:
         if not args.dry_run:
             output.note("Nothing cleaned: resolve the failed checks first.")

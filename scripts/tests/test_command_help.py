@@ -281,7 +281,8 @@ zpty -d z
 
     def test_cache_cleaner_names_and_pruning_flags_are_completed(self):
         self.assertEqual(self.complete(["clean_caches"], " --")["clean_caches"],
-                         {"--only", "--deep", "--dry-run", "--help"})
+                         {"--only", "--deep", "--dry-run", "--sort", "--help"})
+        self.assertIn("size", self.complete(["clean_caches"], " --sort ")["clean_caches"])
         names = self.complete(["clean_caches"], " --only ")["clean_caches"]
         self.assertTrue({"npm", "uv", "gradle", "go-modules"}.issubset(names), names)
         flags = self.complete(["prune_branches"], " --")["prune_branches"]
