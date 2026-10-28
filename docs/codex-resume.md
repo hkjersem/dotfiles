@@ -48,8 +48,10 @@ and so on. Each window that runs while a marked chat waits removes one of its
 window that passed it by; this is recorded with the resumes. Marks never hold
 a chat back when no lower tier is waiting, and a chat of the window's tier or
 lower that stops meanwhile joins it while it has room. When a marked chat is
-resumed, any marks left are removed. Titles are read at each check, so you can
-rename a chat at any time; the app shows a title the check changed after it
+renamed, it stays behind waiting unmarked chats of the same tier rather than
+overtaking them because it is newer. When it is resumed, any marks left are
+removed. Titles are read at each check, so you can rename a chat at any time;
+the app shows a title the check changed after it
 restarts. Pause the check with `--recurring off` to keep a daytime window free.
 
 Add `--morning 09.00` to plan nights around that time. From ten hours before

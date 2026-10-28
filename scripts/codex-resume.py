@@ -898,6 +898,8 @@ def plan_resumes(chats, now, sends, window, morning=None, passed=None):
     if room <= 0 or not chats:
         return [], window
     passed = passed or {}
+    # Removing a ! must not let a newer deferred chat overtake unmarked chats still waiting.
+    chats = sorted(chats, key=lambda chat: (chat_tier(chat), chat["id"] in passed))
     if window_active(window, now):
         if window["early"]:
             return [], window

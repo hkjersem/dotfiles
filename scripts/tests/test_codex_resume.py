@@ -864,6 +864,23 @@ class CodexResumeTests(unittest.TestCase):
         # Two days from now is as far as it plans, however late the limit resets.
         self.assertEqual(overview("2026-10-25T19:59:00+02:00"), {"a": None, "!b": None})
 
+    def test_status_keeps_passed_marked_chats_behind_unmarked_chats(self):
+        now = datetime.fromisoformat("2026-10-28T11:04:00+01:00")
+        first = datetime.fromisoformat("2026-10-28T08:09:00+01:00")
+        later = datetime.fromisoformat("2026-10-28T09:08:00+01:00")
+        chats = [{"id": name, "name": name, "earlier": False}
+                 for name in ("!new", "!old", "a", "b", "c")]
+        window = {"start": first, "tier": 0, "early": False}
+        limits = [{"name": "5-hour", "minutes": 300, "used": 100,
+                   "resets": datetime.fromisoformat("2026-10-28T13:08:00+01:00")}]
+        with (patch.object(codex_resume, "all_stuck_chats", return_value=chats),
+              patch.object(codex_resume, "usage_limits", return_value=limits)):
+            found = codex_resume.stuck_overview(
+                now, {}, [first, later, later], window, passed={"!old": first})
+        self.assertEqual({chat["id"]: f"{at:%H.%M}" for chat, _, at in found}, {
+            "a": "13.09", "b": "14.08", "c": "14.08", "!new": "18.09", "!old": "19.08",
+        })
+
     def recurring(self, chats, allowed=True, state=None, queued=True, now="2026-10-21T10:00:00+02:00",
                   stopped="2026-10-21T01:00:00+02:00", minutes=15, resets=None, sent=None, after_wait=None,
                   morning=None, rename_error=None, scan_error=None):
@@ -1123,6 +1140,22 @@ class CodexResumeTests(unittest.TestCase):
         self.recurring(["!!"])
         self.assertEqual((self.renames, self.errors), ([], "[stamp] Could not remove the marks from chat '!!': its "
                                                             "title is only marks; rename it in the app\n"))
+
+    def test_recurring_keeps_renamed_chats_behind_waiting_unmarked_chats(self):
+        state = {
+            "resumed": {},
+            "sends": ["2026-10-21T08:09:00+02:00", "2026-10-21T09:08:00+02:00",
+                      "2026-10-21T09:08:00+02:00"],
+            "window": {"start": "2026-10-21T08:09:00+02:00", "tier": 0, "early": False},
+            "passed": {},
+        }
+        resumed, _, state = self.recurring(["!new", "a", "b", "c"], state=state,
+                                            now="2026-10-21T11:04:00+02:00")
+        self.assertEqual((resumed, self.renames), ([], [("!new", "new")]))
+        chats = [("!new", "new"), "a", "b", "c"]
+        for moment, expected in (("13:09", ["a"]), ("14:08", ["b", "c"]), ("18:09", ["!new"])):
+            resumed, _, state = self.recurring(chats, state=state, now=f"2026-10-21T{moment}:00+02:00")
+            self.assertEqual(resumed, expected)
 
     def test_at_night_chats_are_split_so_a_new_window_is_free_by_morning(self):
         with local_zone("Europe/Oslo"):
