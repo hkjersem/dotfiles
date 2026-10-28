@@ -34,14 +34,19 @@ already running or a limit is used up, it logs why and sends nothing.
 `codex-resume --recurring 15` checks every 15 minutes, at least 5, for chats on
 this Mac whose last replies stopped at a usage limit. Once no limit is used up,
 it sends `continue` through the Codex queue to up to three of them, newest
-first, and to at most three in any five hours. They are queued together, so
+first, and to at most three per Codex five-hour usage window. They are queued together, so
 the app takes them within seconds of each other. When a used-up limit resets
 before the next check, that check waits and sends a minute after the reset,
 as `--reset` does, instead of at the next check. Each chat is resumed once per
 limit stop. If its reply hits the limit again, it is resumed after the next
 reset.
 
-Each 5-hour window holds up to three chats of one tier. Unmarked chats come
+The cap follows Codex's reported five-hour reset: all three slots become
+available together when it resets, regardless of when earlier chats were
+resumed. There is no separate cooldown per chat or send. If the limits cannot
+be read, the check reports the error and sends nothing.
+
+Each usage window holds up to three chats of one tier. Unmarked chats come
 first, then chats starting with `!`, then `!!`, and so on. A lower tier finishes
 before the next tier starts its own window, even if it takes several windows
 to resume all the lower-tier chats. Different tiers never share a window.
@@ -75,8 +80,9 @@ sends or renames, when it waits for a reset, and any errors. `--status` shows
 when it last checked and lists the chats stopped by a
 usage limit: whether each continues at the next check, when it is planned to
 continue, or is left alone as an older limit stopped it. While a limit is used
-up, nothing continues before a minute after it resets; later limits are not
-foreseen. A chat the app hasn't titled yet shows as
+up, nothing continues before a minute after it resets. Later windows are
+estimates of five hours from their first resume, adjusted to the live reset
+at each check; later usage-limit exhaustion is not foreseen. A chat the app hasn't titled yet shows as
 `untitled (folder, start of its ID)`. `--recurring off` stops it. If
 its record of resumed chats can't be read, it stops sending rather than risk
 sending twice, and `--status` and the log say which file to fix or delete.

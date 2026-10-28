@@ -803,9 +803,8 @@ class CodexResumeTests(unittest.TestCase):
         def stuck(chat, since):
             return {"closed": stops[chat["id"]], "stopped": stops[chat["id"]]}
 
-        # One resume in the last five hours, at 19.00, leaves room for two in a window from 20.00; the third
-        # joins it once that resume is five hours old at midnight, and the fourth starts the next window at
-        # 01.00. One older than five hours does not count.
+        # A resume in the current Codex window leaves room for two until its reported reset at 20.29.
+        # Resumes from the previous window do not consume its slots.
         state = {"resumed": {"x": now - timedelta(hours=1), "y": now - timedelta(hours=6)}}
         state["sends"] = list(state["resumed"].values())
 
@@ -819,17 +818,17 @@ class CodexResumeTests(unittest.TestCase):
             return output.getvalue().splitlines()
 
         t = {name: shown(stop.isoformat()) for name, stop in stops.items()}
-        room = shown("2026-10-23T00:00:00+02:00")
+        room = shown("2026-10-22T20:29:00+02:00")
         width = len(room)
 
-        def table(a, b, d):
+        def table(a, b, c, d):
             return [
                 "",
                 "─ Chats stopped by a usage limit (5) ───────────────────────",
                 f"  {'Stopped':<{width}}  {'Continues':<{width}}  Chat",
                 f"  {t['a']}  {a:<{width}}  'a'",
                 f"  {t['b']}  {b:<{width}}  'b'",
-                f"  {t['c']}  {room}  untitled (local-relay, c)",
+                f"  {t['c']}  {c}  untitled (local-relay, c)",
                 f"  {t['d']}  {d}  'd'",
                 f"  {t['old']}  {'left alone':<{width}}  'old'",
                 "  Chats left alone were stopped by an older usage limit.",
@@ -839,13 +838,14 @@ class CodexResumeTests(unittest.TestCase):
             return {"return_value": [{"name": "5-hour", "minutes": 300, "used": used,
                                       "resets": datetime.fromisoformat("2026-10-22T20:29:00+02:00")}]}
 
-        planned = table("next check", "next check", shown("2026-10-23T01:00:00+02:00"))
+        planned = table("next check", "next check", room, room)
         self.assertEqual(overview(limits(40)), planned)
-        # Limits that cannot be read are taken to allow use.
-        self.assertEqual(overview({"side_effect": RuntimeError("app server is down")}), planned)
-        # With the limit used up, nothing continues before a minute after it resets, and later windows move too.
+        with self.assertRaisesRegex(RuntimeError, "app server is down"):
+            overview({"side_effect": RuntimeError("app server is down")})
+        # A used-up reset releases all three slots together, even though prior sends are less than five hours old.
         after_reset = shown("2026-10-22T20:30:00+02:00")
-        self.assertEqual(overview(limits(100)), table(after_reset, after_reset, shown("2026-10-23T01:30:00+02:00")))
+        self.assertEqual(overview(limits(100)), table(
+            after_reset, after_reset, after_reset, shown("2026-10-23T01:30:00+02:00")))
 
     def test_status_while_a_limit_is_used_up_counts_the_windows_that_pass_marked_chats_by(self):
         now = datetime.fromisoformat("2026-10-22T20:00:00+02:00")
@@ -880,7 +880,7 @@ class CodexResumeTests(unittest.TestCase):
                 found = codex_resume.stuck_overview(
                     now, {}, [first, later, later], window, morning, passed={"!old": first})
             self.assertEqual({chat["id"]: f"{at:%d %H.%M}" for chat, _, at in found}, {
-                "a": "28 13.09", "b": "28 14.08", "c": "28 14.08", "!new": "28 18.09", "!old": last,
+                "a": "28 13.09", "b": "28 13.09", "c": "28 13.09", "!new": "28 18.09", "!old": last,
             })
 
     def test_recurring_keeps_tiers_separate_after_removing_their_marks(self):
@@ -892,7 +892,7 @@ class CodexResumeTests(unittest.TestCase):
             "passed": {"new": "2026-10-28T08:09:00+01:00", "old": "2026-10-28T08:09:00+01:00"},
         }
         chats = [("new", "New"), ("old", "!Old"), ("a", "a"), ("b", "b"), ("c", "c")]
-        for moment, expected in (("11:15", []), ("13:09", ["a"]), ("14:08", ["b", "c"]),
+        for moment, expected in (("11:15", []), ("13:09", ["a", "b", "c"]), ("14:08", []),
                                  ("18:09", ["new"]), ("19:08", []), ("23:09", ["old"])):
             resumed, _, state = self.recurring(
                 chats, state=state, now=f"2026-10-28T{moment}:00+01:00",
@@ -901,9 +901,54 @@ class CodexResumeTests(unittest.TestCase):
             renamed = dict(self.renames)
             chats = [(chat, renamed.get(chat, title)) for chat, title in chats]
 
+    def test_limit_reset_releases_all_three_resume_slots_together(self):
+        now = datetime.fromisoformat("2026-10-28T13:09:00+01:00")
+        previous = datetime.fromisoformat("2026-10-28T08:09:00+01:00")
+        later = datetime.fromisoformat("2026-10-28T09:08:00+01:00")
+        chats = [{"id": name, "name": name} for name in ("a", "b", "c")]
+        window = {"start": previous, "tier": 0, "early": False}
+        chosen, _ = codex_resume.plan_resumes(
+            chats, now, [previous, later, later], window,
+            limit_end=datetime.fromisoformat("2026-10-28T18:08:00+01:00"))
+        self.assertEqual([chat["id"] for chat in chosen], ["a", "b", "c"])
+
+    def test_recurring_uses_reported_reset_instead_of_each_sends_age(self):
+        state = {
+            "resumed": {},
+            "sends": ["2026-10-28T08:09:00+01:00", "2026-10-28T09:08:00+01:00",
+                      "2026-10-28T09:08:00+01:00"],
+            "window": {"start": "2026-10-28T08:09:00+01:00", "tier": 0, "early": False},
+        }
+        resumed, _, state = self.recurring(
+            ["a", "b", "c"], state=state, now="2026-10-28T13:00:00+01:00",
+            stopped="2026-10-28T09:25:00+01:00", resets="2026-10-28T13:08:00+01:00",
+            sent="2026-10-28T13:09:03+01:00", allowed=[True])
+        self.assertEqual(resumed, ["a", "b", "c"])
+        self.wait.assert_called_once_with("2026-10-28T13:09:00+01:00")
+        # A new live reset, not the queueing time, is saved as the window's end.
+        resumed, _, state = self.recurring(
+            ["a", "b", "c", "d"], state=state, now="2026-10-28T13:15:00+01:00",
+            stopped="2026-10-28T09:25:00+01:00", limit_end="2026-10-28T18:08:00+01:00")
+        self.assertEqual(resumed, [])
+        self.assertEqual(state["window"]["end"], "2026-10-28T18:08:00+01:00")
+        resumed, _, _ = self.recurring(
+            ["d"], state=state, now="2026-10-28T18:08:00+01:00",
+            stopped="2026-10-28T09:25:00+01:00", limit_end="2026-10-28T23:08:00+01:00")
+        self.assertEqual(resumed, ["d"])
+
+    def test_recurring_reports_unreadable_or_missing_five_hour_limits(self):
+        with patch.object(codex_resume, "five_hour_reset",
+                          side_effect=RuntimeError("Codex reported no 5-hour usage window")):
+            with self.assertRaisesRegex(RuntimeError, "no 5-hour usage window"):
+                self.recurring(["a"])
+        self.usage.assert_not_called()
+        with self.assertRaisesRegex(RuntimeError, "no 5-hour usage window"):
+            codex_resume.five_hour_reset([
+                {"minutes": 10080, "used": 10, "resets": datetime.fromisoformat("2026-11-04T08:08:00+01:00")}])
+
     def recurring(self, chats, allowed=True, state=None, queued=True, now="2026-10-21T10:00:00+02:00",
                   stopped="2026-10-21T01:00:00+02:00", minutes=15, resets=None, sent=None, after_wait=None,
-                  morning=None, rename_error=None, scan_error=None):
+                  morning=None, rename_error=None, scan_error=None, limit_end=None):
         """Run one recurring check, set up every minutes, with chats stuck since stopped and a used-up limit
         resetting at resets; allowed is the answer, or the answers in turn, to whether the limits allow use.
         A wait ends at sent, with the chats in after_wait (default: the same) still stuck. Chats are named by
@@ -920,8 +965,17 @@ class CodexResumeTests(unittest.TestCase):
         plist_path = Path(temporary.name) / "recurring.plist"
         if minutes is not None:
             plist_path.write_bytes(plistlib.dumps({"StartInterval": minutes * 60}))
+        moment = datetime.fromisoformat(now)
+        default_end = moment + timedelta(hours=5)
+        if isinstance(state, dict) and state.get("window"):
+            running = state["window"]
+            end = datetime.fromisoformat(running.get("end", running["start"]))
+            if "end" not in running:
+                end += timedelta(hours=5)
+            if end > moment:
+                default_end = end
         windows = [{"name": "5-hour", "minutes": 300, "used": 100 if resets else 40,
-                    "resets": datetime.fromisoformat(resets or "2026-10-21T12:00:00+02:00").astimezone()}]
+                    "resets": datetime.fromisoformat(resets or limit_end) if resets or limit_end else default_end}]
         resumed = []
 
         def resume(chat, message, stamp):
@@ -1007,6 +1061,9 @@ class CodexResumeTests(unittest.TestCase):
         with (patch.object(codex_resume, "RECURRING_STATE_PATH", state_path),
               patch.object(codex_resume, "load_chats", return_value=[chat]),
               patch.object(codex_resume, "usage_allowed", return_value=True),
+              patch.object(codex_resume, "usage_limits", return_value=[
+                  {"name": "5-hour", "minutes": 300, "used": 40,
+                   "resets": datetime.fromisoformat("2026-10-21T15:00:00+02:00")}]),
               patch.object(codex_resume, "queue_message",
                            side_effect=lambda chat, *_, **__: sent.append(chat["id"])),
               redirect_stdout(io.StringIO())):
@@ -1097,7 +1154,8 @@ class CodexResumeTests(unittest.TestCase):
         # a was resumed twice in the last five hours, which its single time in resumed cannot show.
         state = {"resumed": {"a": "2026-10-21T09:00:00+02:00"},
                  "sends": ["2026-10-21T04:00:00+02:00", "2026-10-21T07:00:00+02:00", "2026-10-21T09:00:00+02:00"]}
-        resumed, _, state = self.recurring(["a", "b", "c"], state=state, stopped="2026-10-21T09:30:00+02:00")
+        resumed, _, state = self.recurring(["a", "b", "c"], state=state, stopped="2026-10-21T09:30:00+02:00",
+                                            limit_end="2026-10-21T12:00:00+02:00")
         self.assertEqual(resumed, ["a"])
         # Sends older than five hours are dropped.
         self.assertEqual(state["sends"], ["2026-10-21T07:00:00+02:00", "2026-10-21T09:00:00+02:00",
@@ -1125,7 +1183,8 @@ class CodexResumeTests(unittest.TestCase):
         # Unmarked chats get the first window, which removes one ! from each marked chat it passes by.
         resumed, _, state = self.recurring(["!b", "a", "!!c", "d"])
         self.assertEqual((resumed, self.renames), (["a", "d"], [("!b", "b"), ("!!c", "!c")]))
-        self.assertEqual(state["window"], {"start": "2026-10-21T10:00:00+02:00", "tier": 0, "early": False})
+        self.assertEqual(state["window"], {"start": "2026-10-21T10:00:00+02:00", "tier": 0, "early": False,
+                                           "end": "2026-10-21T15:00:00+02:00"})
         b, c = ("!b", "b"), ("!!c", "!c")
         # A marked chat that stops meanwhile is passed by too, and cannot join the window that passed it by,
         # though there is room; each window removes only one ! from a chat.
@@ -1175,7 +1234,7 @@ class CodexResumeTests(unittest.TestCase):
                                             now="2026-10-21T11:04:00+02:00")
         self.assertEqual((resumed, self.renames), ([], [("!new", "new")]))
         chats = [("!new", "new"), "a", "b", "c"]
-        for moment, expected in (("13:09", ["a"]), ("14:08", ["b", "c"]), ("18:09", ["!new"])):
+        for moment, expected in (("13:09", ["a", "b", "c"]), ("14:08", []), ("18:09", ["!new"])):
             resumed, _, state = self.recurring(chats, state=state, now=f"2026-10-21T{moment}:00+02:00")
             self.assertEqual(resumed, expected)
 
@@ -1191,11 +1250,13 @@ class CodexResumeTests(unittest.TestCase):
         self.assertEqual(self.recurring(["a", ("!!d", "!d")], state=state,
                                         now="2026-10-21T15:00:00+02:00")[0], ["a"])
 
-    def test_same_tier_chats_join_when_rolling_capacity_opens(self):
-        state = {"resumed": {}, "sends": ["2026-10-21T09:00:00+02:00"]}
+    def test_same_tier_chats_wait_for_the_limit_reset_when_capacity_is_full(self):
+        state = {"resumed": {}, "sends": ["2026-10-21T10:00:00+02:00"]}
         resumed, _, state = self.recurring(["!a", "!b", "!c"], state=state)
         self.assertEqual(resumed, ["!a", "!b"])
         resumed, _, state = self.recurring(["!c"], state=state, now="2026-10-21T14:00:00+02:00")
+        self.assertEqual(resumed, [])
+        resumed, _, state = self.recurring(["!c"], state=state, now="2026-10-21T15:00:00+02:00")
         self.assertEqual(resumed, ["!c"])
 
     def test_manually_changing_marks_updates_a_retained_tier(self):
@@ -1308,7 +1369,7 @@ class CodexResumeTests(unittest.TestCase):
                 "",
                 "─ Recurring check ──────────────────────────────────────────",
                 "  Every       15 minutes",
-                "  Sends       continue to up to 3 stopped chats per 5 hours, newest first, once the usage "
+                "  Sends       continue to up to 3 stopped chats per Codex usage window, newest first, once the usage "
                 "limits allow; one tier per window, with each leading ! placing a chat in a later tier",
             ]
             not_scheduled = ["", "─ Scheduled resume ─────────────────────────────────────────", "  None."]
