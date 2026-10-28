@@ -82,7 +82,8 @@ per line, such as `brew:tool` or `home:.config/dir`.
 on this Mac now, at a set time or when a usage limit resets, even while the
 screen is locked. `--recurring` keeps resuming chats a usage limit stopped,
 with `!` in a title to stagger chats behind unmarked ones and `--morning`
-to plan nights. Removing a `!` does not let a chat overtake waiting unmarked chats.
+to plan nights. Each tier gets separate five-hour windows, even after the
+check removes its `!` marks.
 
 ```sh
 codex-resume --time 15.03 --chat "explore pwa"

@@ -859,8 +859,8 @@ class CodexResumeTests(unittest.TestCase):
                 found = codex_resume.stuck_overview(now, {}, [window["start"]], window)
             return {chat["id"]: at and f"{at:%d %H.%M}" for chat, _, at in found}
 
-        # The window from 18.00 passes !b by while the limit holds both back, so both start the next one.
-        self.assertEqual(overview("2026-10-22T23:59:00+02:00"), {"a": "23 00.00", "!b": "23 00.00"})
+        # Removing !b's mark must not merge its tier with a's when the limit resets.
+        self.assertEqual(overview("2026-10-22T23:59:00+02:00"), {"a": "23 00.00", "!b": "23 05.00"})
         # Two days from now is as far as it plans, however late the limit resets.
         self.assertEqual(overview("2026-10-25T19:59:00+02:00"), {"a": None, "!b": None})
 
@@ -873,13 +873,33 @@ class CodexResumeTests(unittest.TestCase):
         window = {"start": first, "tier": 0, "early": False}
         limits = [{"name": "5-hour", "minutes": 300, "used": 100,
                    "resets": datetime.fromisoformat("2026-10-28T13:08:00+01:00")}]
-        with (patch.object(codex_resume, "all_stuck_chats", return_value=chats),
-              patch.object(codex_resume, "usage_limits", return_value=limits)):
-            found = codex_resume.stuck_overview(
-                now, {}, [first, later, later], window, passed={"!old": first})
-        self.assertEqual({chat["id"]: f"{at:%H.%M}" for chat, _, at in found}, {
-            "a": "13.09", "b": "14.08", "c": "14.08", "!new": "18.09", "!old": "19.08",
-        })
+        for morning, last in ((None, "28 23.09"), ("09:00", "29 04.00")):
+            with (self.subTest(morning=morning), local_zone("Europe/Oslo"),
+                  patch.object(codex_resume, "all_stuck_chats", return_value=chats),
+                  patch.object(codex_resume, "usage_limits", return_value=limits)):
+                found = codex_resume.stuck_overview(
+                    now, {}, [first, later, later], window, morning, passed={"!old": first})
+            self.assertEqual({chat["id"]: f"{at:%d %H.%M}" for chat, _, at in found}, {
+                "a": "28 13.09", "b": "28 14.08", "c": "28 14.08", "!new": "28 18.09", "!old": last,
+            })
+
+    def test_recurring_keeps_tiers_separate_after_removing_their_marks(self):
+        state = {
+            "resumed": {},
+            "sends": ["2026-10-28T08:09:00+01:00", "2026-10-28T09:08:00+01:00",
+                      "2026-10-28T09:08:00+01:00"],
+            "window": {"start": "2026-10-28T08:09:00+01:00", "tier": 0, "early": False},
+            "passed": {"new": "2026-10-28T08:09:00+01:00", "old": "2026-10-28T08:09:00+01:00"},
+        }
+        chats = [("new", "New"), ("old", "!Old"), ("a", "a"), ("b", "b"), ("c", "c")]
+        for moment, expected in (("11:15", []), ("13:09", ["a"]), ("14:08", ["b", "c"]),
+                                 ("18:09", ["new"]), ("19:08", []), ("23:09", ["old"])):
+            resumed, _, state = self.recurring(
+                chats, state=state, now=f"2026-10-28T{moment}:00+01:00",
+                stopped="2026-10-28T09:25:00+01:00")
+            self.assertEqual(resumed, expected, moment)
+            renamed = dict(self.renames)
+            chats = [(chat, renamed.get(chat, title)) for chat, title in chats]
 
     def recurring(self, chats, allowed=True, state=None, queued=True, now="2026-10-21T10:00:00+02:00",
                   stopped="2026-10-21T01:00:00+02:00", minutes=15, resets=None, sent=None, after_wait=None,
@@ -1000,7 +1020,9 @@ class CodexResumeTests(unittest.TestCase):
 
     def test_recurring_check_stops_when_its_record_is_unreadable(self):
         for state in ("{\"resumed\": {\"a\": ", "[]", '{"resumed": {"a": "yesterday"}}',
-                      '{"resumed": {"a": "2026-10-21T09:00:00"}}'):
+                      '{"resumed": {"a": "2026-10-21T09:00:00"}}',
+                      '{"resumed": {}, "tiers": {"a": {"tier": -1, "marks": 0}}}',
+                      '{"resumed": {}, "tiers": {"a": {"tier": 1}}}'):
             with self.subTest(state=state):
                 with self.assertRaisesRegex(RuntimeError, "recurring.json .*; fix or delete it"):
                     self.recurring(["a"], state=state)
@@ -1157,6 +1179,39 @@ class CodexResumeTests(unittest.TestCase):
             resumed, _, state = self.recurring(chats, state=state, now=f"2026-10-21T{moment}:00+02:00")
             self.assertEqual(resumed, expected)
 
+    def test_recurring_only_admits_new_chats_of_the_running_windows_tier(self):
+        _, _, state = self.recurring(["!b"])
+        resumed, _, state = self.recurring(["a", "!c", "!!d"], state=state,
+                                            now="2026-10-21T10:15:00+02:00")
+        self.assertEqual(resumed, ["!c"])
+        self.assertEqual(self.renames, [("!c", "c"), ("!!d", "!d")])
+        resumed, _, state = self.recurring(["a", ("!!d", "!d")], state=state,
+                                            now="2026-10-21T10:30:00+02:00")
+        self.assertEqual(resumed, [])
+        self.assertEqual(self.recurring(["a", ("!!d", "!d")], state=state,
+                                        now="2026-10-21T15:00:00+02:00")[0], ["a"])
+
+    def test_same_tier_chats_join_when_rolling_capacity_opens(self):
+        state = {"resumed": {}, "sends": ["2026-10-21T09:00:00+02:00"]}
+        resumed, _, state = self.recurring(["!a", "!b", "!c"], state=state)
+        self.assertEqual(resumed, ["!a", "!b"])
+        resumed, _, state = self.recurring(["!c"], state=state, now="2026-10-21T14:00:00+02:00")
+        self.assertEqual(resumed, ["!c"])
+
+    def test_manually_changing_marks_updates_a_retained_tier(self):
+        _, _, state = self.recurring(["a", "!!b"])
+        # The check removed one !, retaining tier 2. Removing the other by hand requests tier 0 instead.
+        resumed, _, state = self.recurring([("!!b", "b"), "!c"], state=state,
+                                            now="2026-10-21T10:15:00+02:00")
+        self.assertEqual(resumed, [])
+        resumed, _, state = self.recurring([("!!b", "b"), ("!c", "c")], state=state,
+                                            now="2026-10-21T15:00:00+02:00")
+        self.assertEqual(resumed, ["!!b"])
+        # A later stop starts a fresh tier, not the one retained before its resume.
+        self.assertEqual(self.recurring([("!!b", "b")], state=state,
+                                        now="2026-10-21T15:15:00+02:00",
+                                        stopped="2026-10-21T15:10:00+02:00")[0], ["!!b"])
+
     def test_at_night_chats_are_split_so_a_new_window_is_free_by_morning(self):
         with local_zone("Europe/Oslo"):
             night = {"morning": "09:00", "stopped": "2026-10-21T21:00:00+02:00"}
@@ -1182,9 +1237,9 @@ class CodexResumeTests(unittest.TestCase):
             return {chat: f"{at:%H.%M}" for chat, at in planned.items()}
 
         with local_zone("Europe/Oslo"):
-            # By day, unmarked chats come first, and a marked chat sits out one window per mark.
+            # A tier that needs two windows must finish before the next tier starts.
             self.assertEqual(times("a", "b", "c", "d", "!e", now="2026-10-21T12:00:00+02:00"),
-                             {"a": "12.00", "b": "12.00", "c": "12.00", "d": "17.00", "!e": "17.00"})
+                             {"a": "12.00", "b": "12.00", "c": "12.00", "d": "17.00", "!e": "22.00"})
             self.assertEqual(times("a"), {"a": "04.00"})
             self.assertEqual(times("a", "b", "c"), {"a": "23.00", "b": "04.00", "c": "04.00"})
             self.assertEqual(times("!a", "!!b"), {"!a": "23.00", "!!b": "04.00"})
@@ -1254,7 +1309,7 @@ class CodexResumeTests(unittest.TestCase):
                 "─ Recurring check ──────────────────────────────────────────",
                 "  Every       15 minutes",
                 "  Sends       continue to up to 3 stopped chats per 5 hours, newest first, once the usage "
-                "limits allow; titles starting with ! sit out one window per !, each removing one",
+                "limits allow; one tier per window, with each leading ! placing a chat in a later tier",
             ]
             not_scheduled = ["", "─ Scheduled resume ─────────────────────────────────────────", "  None."]
             self.assertEqual(recurring_status.getvalue().splitlines(), [

@@ -42,17 +42,23 @@ limit stop. If its reply hits the limit again, it is resumed after the next
 reset.
 
 Each 5-hour window holds up to three chats of one tier. Unmarked chats come
-first. Start a chat's title with `!` to make it sit out one window, `!!` two,
-and so on. Each window that runs while a marked chat waits removes one of its
-`!`, once, so `!!Fix` becomes `!Fix` and then `Fix`. A chat can't join the
-window that passed it by; this is recorded with the resumes. Marks never hold
-a chat back when no lower tier is waiting, and a chat of the window's tier or
-lower that stops meanwhile joins it while it has room. When a marked chat is
-renamed, it stays behind waiting unmarked chats of the same tier rather than
-overtaking them because it is newer. When it is resumed, any marks left are
-removed. Titles are read at each check, so you can rename a chat at any time;
-the app shows a title the check changed after it
-restarts. Pause the check with `--recurring off` to keep a daytime window free.
+first, then chats starting with `!`, then `!!`, and so on. A lower tier finishes
+before the next tier starts its own window, even if it takes several windows
+to resume all the lower-tier chats. Different tiers never share a window.
+Newly stopped chats of the running window's tier can join it while it has room.
+
+Each lower-tier window that runs while a marked chat waits removes one of its `!`, once,
+so `!!Fix` becomes `!Fix` and then `Fix`. This changes the title, not its retained
+tier: removing marks automatically never lets tiers merge. A chat can't join
+the window that passed it by; this is recorded with the resumes. Marks never
+hold a chat back when no lower tier is waiting. When it is resumed, any marks
+left are removed and its next stop starts a fresh tier. Changing the number of
+leading `!` by hand changes its tier at the next check; other title edits leave
+it unchanged. The app shows a title the check changed after it restarts. Pause
+the check with `--recurring off` to keep a daytime window free.
+
+Records from before tiers were retained can recover only the last removed `!`.
+The check adds that to the remaining marks when first assigning their tier.
 
 Add `--morning 09.00` to plan nights around that time. From ten hours before
 it, at 23.00 here, a single waiting chat waits for a window from five hours

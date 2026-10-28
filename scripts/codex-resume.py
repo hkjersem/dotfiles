@@ -36,8 +36,10 @@ continue to up to three chats, newest first, and at most three in any five
 hours, queueing them together and following them in one loop. Each 5-hour
 window takes up to three chats of one tier, the number of ! their title starts
 with (read from Codex's thread records, which the catalogue only catches up
-with on restart). Each window that passes a marked chat by removes one ! through
-the app server, so it sits out one window per !; resuming a marked chat removes
+with on restart). Each lower-tier window that passes a marked chat by removes one ! through
+the app server, but its tier is retained until it resumes or its marks are changed
+by hand. Lower tiers finish before a higher tier starts its own window, even
+when the lower tier needs several windows. Resuming a marked chat removes
 any marks left. With --morning HH:MM, nights from ten hours before it split waiting
 chats between an early window and one five hours before it. When a used-up
 limit resets before the next check, the check waits and sends a minute after
@@ -868,8 +870,27 @@ def chat_marks(chat):
 
 
 def chat_tier(chat):
-    """How many more windows this chat sits out: the number of ! its title starts with."""
-    return len(chat_marks(chat)[0])
+    """The chat's tier for this stop, retained when the check removes its marks."""
+    return chat.get("resume_tier", len(chat_marks(chat)[0]))
+
+
+def with_chat_tiers(chats, passed=None, tiers=None):
+    passed, tiers = passed or {}, tiers or {}
+    result = []
+    for chat in chats:
+        marks = len(chat_marks(chat)[0])
+        previous = tiers.get(chat["id"])
+        if previous is not None:
+            tier = previous["tier"] if previous["marks"] == marks else marks
+        else:
+            # Older records retain only the last window that removed a mark.
+            tier = marks + (chat["id"] in passed)
+        result.append({**chat, "resume_tier": chat.get("resume_tier", tier)})
+    return result
+
+
+def remember_chat_tiers(chats):
+    return {chat["id"]: {"tier": chat_tier(chat), "marks": len(chat_marks(chat)[0])} for chat in chats}
 
 
 def night_end(now, morning):
@@ -888,8 +909,8 @@ def plan_resumes(chats, now, sends, window, morning=None, passed=None):
     """Which of the waiting chats, newest first, to resume at now, and the window that then runs; passed holds the
     start of the window that last passed each chat by.
 
-    A window holds up to three chats of one tier, the lowest waiting, and lasts five hours from its first resume;
-    chats of that tier or lower that stop meanwhile join it while it has room, unless it passed them by. No more
+    A window holds up to three chats of one retained tier, the lowest waiting, and lasts five hours from its first
+    resume; chats of that tier that stop meanwhile join it while it has room, unless it passed them by. No more
     than three resumes are made in any five hours. At night, a single waiting chat waits for the window that ends
     at morning; two or more are split between an early window, which takes no later chats, and that one, which may
     start up to an hour late.
@@ -898,14 +919,12 @@ def plan_resumes(chats, now, sends, window, morning=None, passed=None):
     if room <= 0 or not chats:
         return [], window
     passed = passed or {}
-    # Removing a ! must not let a newer deferred chat overtake unmarked chats still waiting.
-    chats = sorted(chats, key=lambda chat: (chat_tier(chat), chat["id"] in passed))
     if window_active(window, now):
         if window["early"]:
             return [], window
         room = min(room, RECURRING_CHATS - sum(at >= window["start"] for at in sends))
         return [chat for chat in chats
-                if chat_tier(chat) <= window["tier"] and passed.get(chat["id"]) != window["start"]][:room], window
+                if chat_tier(chat) == window["tier"] and passed.get(chat["id"]) != window["start"]][:room], window
     tier = min(chat_tier(chat) for chat in chats)
     lowest = [chat for chat in chats if chat_tier(chat) == tier]
     early = False
@@ -946,7 +965,8 @@ def pass_by(chats, chosen, window, now, passed):
         return waiting, passed
     result = []
     for chat in waiting:
-        if chat_tier(chat) and passed.get(chat["id"]) != window["start"]:
+        if (chat_marks(chat)[0] and chat_tier(chat) > window["tier"]
+                and passed.get(chat["id"]) != window["start"]):
             marks, rest = chat_marks(chat)
             chat = {**chat, "name": marks[1:] + rest if len(marks) > 1 else rest.lstrip()}
             passed[chat["id"]] = window["start"]
@@ -957,7 +977,7 @@ def pass_by(chats, chosen, window, now, passed):
 def resume_times(chats, now, sends, window, morning=None, passed=None, start=None):
     """When each waiting chat continues, by its id, planning from start, now by default, and assuming the limits
     allow it then and no other chat stops; chats that would continue beyond PLAN_HORIZON from now are left out."""
-    sends, waiting, passed, times = list(sends), list(chats), passed or {}, {}
+    sends, waiting, passed, times = list(sends), with_chat_tiers(chats, passed), passed or {}, {}
     moment = start or now
     while waiting and moment is not None and moment <= now + PLAN_HORIZON:
         chosen, window = plan_resumes(waiting, moment, sends, window, morning, passed)
@@ -978,12 +998,12 @@ def used_up_reset():
     return reset_time(windows) if any(window["used"] >= 100 for window in windows) else None
 
 
-def stuck_overview(now, resumed, sends, window=None, morning=None, passed=None):
+def stuck_overview(now, resumed, sends, window=None, morning=None, passed=None, tiers=None):
     """Each chat stuck at a usage limit, newest first, with when it continues: at now, at a later time, or None
     when not within PLAN_HORIZON; chats an earlier limit stopped are skipped. Nothing continues before a used-up
     limit resets."""
     chats = all_stuck_chats(now, resumed)
-    waiting = [chat for chat in chats if not chat["earlier"]]
+    waiting = with_chat_tiers([chat for chat in chats if not chat["earlier"]], passed, tiers)
     start = used_up_reset() if waiting else None
     if start is not None and start > now:
         # Checks until then send nothing, but the running window still passes by the marked chats it does not take.
@@ -1006,7 +1026,8 @@ def print_field(label, value):
 def print_stuck_overview(state, morning=None):
     now = local_now()
     resumed = {chat: at for chat, at in state["resumed"].items() if at >= now - RECURRING_SCAN}
-    overview = stuck_overview(now, resumed, state["sends"], state.get("window"), morning, state.get("passed"))
+    overview = stuck_overview(now, resumed, state["sends"], state.get("window"), morning, state.get("passed"),
+                              state.get("tiers"))
     output.section(f"Chats stopped by a usage limit ({len(overview)})")
     if not overview:
         print("  None.")
@@ -1062,7 +1083,7 @@ def load_recurring_state():
     try:
         state = json.loads(RECURRING_STATE_PATH.read_text())
     except FileNotFoundError:
-        return {"resumed": {}, "sends": [], "window": None, "passed": {}}
+        return {"resumed": {}, "sends": [], "window": None, "passed": {}, "tiers": {}}
     except (OSError, ValueError) as error:
         raise RuntimeError(f"cannot read {RECURRING_STATE_PATH} ({error}); fix or delete it") from None
     try:
@@ -1076,12 +1097,16 @@ def load_recurring_state():
             window = {"start": datetime.fromisoformat(window["start"]), "tier": int(window["tier"]),
                       "early": bool(window["early"])}
         passed = {chat: datetime.fromisoformat(at) for chat, at in state.get("passed", {}).items()}
+        tiers = state.get("tiers", {})
+        for tier in tiers.values():
+            if any(type(tier[key]) is not int or tier[key] < 0 for key in ("tier", "marks")):
+                raise ValueError("a chat tier or mark count is not a nonnegative integer")
         if any(at.tzinfo is None for at in [*resumed.values(), *sends, *passed.values(),
                                             *([window["start"]] if window else [])]):
             raise ValueError("a time has no time zone")
     except (KeyError, AttributeError, TypeError, ValueError) as error:
         raise RuntimeError(f"unexpected contents in {RECURRING_STATE_PATH} ({error}); fix or delete it") from None
-    return {**state, "resumed": resumed, "sends": sends, "window": window, "passed": passed}
+    return {**state, "resumed": resumed, "sends": sends, "window": window, "passed": passed, "tiers": tiers}
 
 
 def save_recurring_state(state):
@@ -1134,15 +1159,20 @@ def pass_waiting_chats(state, waiting, chosen, now):
     """Remove a ! from the titles of the waiting marked chats the running window passes by."""
     remaining = [chat for chat in waiting if chat not in chosen]
     after, passed = pass_by(remaining, [], state["window"], now, state["passed"])
+    tiers = remember_chat_tiers(
+        [chat for chat in waiting if state["resumed"].get(chat["id"]) is None
+         or state["resumed"][chat["id"]] < chat["stopped"]])
     for before, chat in zip(remaining, after):
         if chat["name"] == before["name"]:
             continue
         if rename_chat(before, chat["name"], f"remove a {TIER_MARKER} from"):
+            tiers[chat["id"]]["marks"] = len(chat_marks(chat)[0])
             print(f"{log_stamp()}Chat {chat_label(before)} sits out this window; renamed it "
                   f"{chat_label(chat)}.", flush=True)
         else:
             del passed[chat["id"]]
     state["passed"] = passed
+    state["tiers"] = tiers
 
 
 def check_stuck_chats(now, morning=None):
@@ -1154,7 +1184,8 @@ def check_stuck_chats(now, morning=None):
     # None until the chats are read, so a failed read does not forget which windows passed them by.
     waiting, chats = None, []
     try:
-        waiting = stuck_chats(now, resumed)
+        waiting = with_chat_tiers(stuck_chats(now, resumed), state["passed"], state["tiers"])
+        state["tiers"] = remember_chat_tiers(waiting)
         chats, window = plan_resumes(waiting, now, sends, previous_window, morning, state["passed"])
         if not chats:
             return
@@ -1167,7 +1198,8 @@ def check_stuck_chats(now, morning=None):
             wait_until_scheduled_time(resets.isoformat())
             # The wait can run late, as when the Mac slept, and chats can be resumed meanwhile.
             now = local_now()
-            waiting = stuck_chats(now, resumed)
+            waiting = with_chat_tiers(stuck_chats(now, resumed), state["passed"], state["tiers"])
+            state["tiers"] = remember_chat_tiers(waiting)
             chats, window = plan_resumes(waiting, now, sends, previous_window, morning, state["passed"])
             if not chats or not usage_allowed():
                 return
@@ -1275,8 +1307,8 @@ def set_up_recurring(minutes, morning=None):
 def recurring_summary(minutes):
     return (f"Every {minutes} minutes, once the usage limits allow it, up to {RECURRING_CHATS} chats on this Mac "
             "that stopped at a usage limit get continue via the Codex queue. Chats whose title starts with "
-            f"{TIER_MARKER} sit out one 5-hour window per {TIER_MARKER}; each window that passes one by removes "
-            f"a {TIER_MARKER}.")
+            f"{TIER_MARKER} go in later tiers, one tier per 5-hour window. Each window that passes one by "
+            f"removes a {TIER_MARKER} without changing its tier.")
 
 
 def night_summary(morning):
@@ -1354,8 +1386,8 @@ def status():
     else:
         print_field("Every", f"{minutes} minutes")
         print_field("Sends", f"{DEFAULT_MESSAGE} to up to {RECURRING_CHATS} stopped chats per 5 hours, newest "
-                    f"first, once the usage limits allow; titles starting with {TIER_MARKER} sit out one "
-                    f"window per {TIER_MARKER}, each removing one")
+                    f"first, once the usage limits allow; one tier per window, with each leading "
+                    f"{TIER_MARKER} placing a chat in a later tier")
         morning = recurring_morning()
         if morning:
             print_field("Mornings", f"{morning}. {night_summary(morning)}")
