@@ -65,8 +65,10 @@ _parse_args() {
   # Resolve CLI cooldown → minutes
   if [[ -n "$CLI_COOLDOWN" ]]; then
     local cooldown_seconds
-    if ! cooldown_seconds=$(parse_age_seconds "$CLI_COOLDOWN"); then
-      echo "Error: --cooldown requires a duration such as 30m, 24h, 7d or 0d (disable)." >&2; exit 1
+    if [[ "$CLI_COOLDOWN" == 0 ]]; then
+      cooldown_seconds=0
+    elif ! cooldown_seconds=$(parse_age_seconds "$CLI_COOLDOWN"); then
+      echo "Error: --cooldown requires a duration such as 30m, 24h, 7d or 0 (disable)." >&2; exit 1
     fi
     COOLDOWN_MINUTES=$((cooldown_seconds / 60))
     COOLDOWN_SOURCE="--cooldown flag"
@@ -88,7 +90,7 @@ Options:
   -y, --yes          Skip confirmation prompt
   -f, --force        Check all exact pins directly via npm
   -m, --major        Allow major version bumps
-  --cooldown AGE     Override cooldown (e.g. 24h, 7d; 0d disables)
+  --cooldown AGE     Override cooldown (e.g. 24h, 7d; 0 disables)
   --actions          Update GitHub Actions instead of packages (pnpm 12.7+)
   -h, --help         Show this help
 EOF
@@ -756,7 +758,7 @@ print_header() {
       header+=("Cooldown: $(format_duration "$COOLDOWN_MINUTES") (${COOLDOWN_SOURCE})")
       [[ ${#COOLDOWN_EXCLUDE[@]} -gt 0 ]] && header+=("Excluded: ${COOLDOWN_EXCLUDE[*]}")
     else
-      header+=("Cooldown: disabled (--cooldown 0d)")
+      header+=("Cooldown: disabled (--cooldown 0)")
     fi
   fi
   out_context "${header[@]}"

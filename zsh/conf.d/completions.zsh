@@ -20,19 +20,25 @@ _dotfiles_age() {
     ages=('30m:30 minutes' '1h:1 hour' '24h:24 hours' '7d:7 days'
           '14d:14 days' '30d:30 days' '90d:90 days' '2w:2 weeks')
   fi
+  if [[ ${1:-} == cooldown && ( -z $PREFIX || $PREFIX == 0 ) ]]; then
+    ages+=('0:Disable cooldown')
+  fi
   _describe 'duration (m minutes, h hours, d days, w weeks)' ages
 }
 
 _dotfiles_duration_flags() {
   local previous=${words[CURRENT-1]}
   case "$words[1]:$previous" in
-    prune_branches:--older-than|prune_branches:--stale-after|pmu:--cooldown|audit-repo:--since)
+    pmu:--cooldown)
+      _dotfiles_age cooldown
+      return ;;
+    prune_branches:--older-than|prune_branches:--stale-after|audit-repo:--since)
       _dotfiles_age
       return ;;
   esac
   if [[ $words[1] == pmu && $PREFIX == --cooldown=* ]]; then
     compset -P '*='
-    _dotfiles_age
+    _dotfiles_age cooldown
     return
   fi
   _gnu_generic

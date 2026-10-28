@@ -19,7 +19,7 @@ class DurationArgumentTests(unittest.TestCase):
         script = ('source "$1/scripts/package-manager/_update-lib.sh"; '
                   '_parse_args --cooldown "$2"; printf "%s" "$COOLDOWN_MINUTES"')
         for value, expected in (("30m", "30"), ("24h", "1440"), ("7d", "10080"),
-                                ("2w", "20160"), ("0d", "0"), ("07d", "10080")):
+                                ("2w", "20160"), ("0", "0"), ("0d", "0"), ("07d", "10080")):
             result = subprocess.run(["/bin/bash", "-c", script, "test", str(REPO), value],
                                     text=True, capture_output=True)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -29,6 +29,15 @@ class DurationArgumentTests(unittest.TestCase):
                                     text=True, capture_output=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("requires a duration", result.stderr)
+
+    def test_equals_cooldown_zero_disables_a_configured_cooldown(self):
+        script = ('source "$1/scripts/package-manager/_update-lib.sh"; '
+                  'COOLDOWN_MINUTES=4320; _parse_args --cooldown=0; '
+                  'printf "%s|%s" "$COOLDOWN_MINUTES" "$COOLDOWN_SOURCE"')
+        result = subprocess.run(["/bin/bash", "-c", script, "test", str(REPO)],
+                                text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "0|--cooldown flag")
 
 
 MOCK_TOOL = r'''

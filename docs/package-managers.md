@@ -11,7 +11,8 @@ need a newer pnpm say so.
 
 `pmu` respects configured release-age cooldowns. `--cooldown AGE` overrides
 them using `m`, `h`, `d`, `w` (e.g. `--cooldown 3d`), including
-`--cooldown 0d` to disable the cooldown. Bare integers are not accepted.
+`--cooldown 0` to disable the cooldown (`0d` also works). Other bare integers
+are not accepted.
 Use `--yes` only when
 you intend to skip confirmation. `pma --deep` additionally refreshes pnpm's
 lockfile before auditing; it is not a read-only check. `pma` applies fixes

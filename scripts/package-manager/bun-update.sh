@@ -9,7 +9,7 @@
 #   -y / --yes         Skip confirmation prompt
 #   --force            Re-check all exact-pinned packages
 #   --major            Allow major version bumps
-#   --cooldown AGE  Override cooldown (e.g. 24h, 7d; 0d disables)
+#   --cooldown AGE  Override cooldown (e.g. 24h, 7d; 0 disables)
 
 set -euo pipefail
 

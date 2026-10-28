@@ -9,7 +9,7 @@
 #   --dry-run          Show what would change, make no changes
 #   -y / --yes         Skip confirmation prompt
 #   --major            Allow major version bumps
-#   --cooldown AGE  Override cooldown (e.g. 24h, 7d; 0d disables)
+#   --cooldown AGE  Override cooldown (e.g. 24h, 7d; 0 disables)
 #   --force            Re-check exact-pinned packages that may be suppressed by minimum-release-age
 
 set -euo pipefail

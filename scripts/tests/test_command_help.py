@@ -300,6 +300,7 @@ zpty -d z
             with self.subTest(command=command, suffix=suffix):
                 offered = self.complete([command], suffix)[command]
                 self.assertTrue({"24h", "7d", "2w"}.issubset(offered), offered)
+                self.assertEqual("0" in offered, command == "pmu", offered)
                 numbered = self.complete([command], suffix + "14")[command]
                 self.assertTrue({"14m", "14h", "14d", "14w"}.issubset(numbered), numbered)
 

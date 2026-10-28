@@ -11,7 +11,7 @@
 #   -y / --yes         Skip confirmation prompt
 #   --force            Check all exact pins directly via npm
 #   --major            Allow major version bumps
-#   --cooldown AGE  Override cooldown (e.g. 24h, 7d; 0d disables)
+#   --cooldown AGE  Override cooldown (e.g. 24h, 7d; 0 disables)
 #   --actions          Update GitHub Actions in workflows instead of packages (pnpm 12+)
 
 set -euo pipefail
