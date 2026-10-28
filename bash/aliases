@@ -126,7 +126,7 @@ _detect_pm() { bash "$HOME/.dotfiles/scripts/package-manager/_detect-pm.sh"; }
 pm()  { local _p; _p="$(_detect_pm)" || return 1; "$_p" "$@"; }
 
 # Updates packages — minor/patch by default, auto-detects bun, pnpm or npm
-# Usage: pmu [--dry-run] [--yes] [--force] [--major] [--cooldown <days>] [--actions] [<package>]
+# Usage: pmu [--dry-run] [--yes] [--force] [--major] [--cooldown AGE] [--actions] [<package>]
 pmu() { bash "$HOME/.dotfiles/scripts/package-manager/run.sh" "$@"; }
 
 # Execute a package without installing — pnpm dlx / npx / bunx

@@ -134,6 +134,12 @@ class AuditRepoTests(unittest.TestCase):
         self.assertEqual(subprocess.check_output(status_args, env=self.env), before)
         return result
 
+    def test_history_accepts_compact_duration(self):
+        result = self.run_audit("--since", "7d", "--no-package-manager")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue(any("--since=604800 seconds ago" in args for args in self.calls("git")))
+
+
     def calls(self, name):
         return [args for tool, args in map(json.loads, self.log.read_text().splitlines())
                 if tool == name]

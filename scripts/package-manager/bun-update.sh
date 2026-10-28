@@ -3,13 +3,13 @@
 # Like `bun outdated` + `bun update`, but skips major version bumps by default.
 # Respects minimumReleaseAge from bunfig.toml (project) or ~/.bunfig.toml (global).
 #
-# Usage: bun-update [--dry-run] [-y] [--force] [--major] [--cooldown <days>] [<package>]
+# Usage: bun-update [--dry-run] [-y] [--force] [--major] [--cooldown AGE] [<package>]
 #   <package>          Only update this package
 #   --dry-run          Show what would change, make no changes
 #   -y / --yes         Skip confirmation prompt
 #   --force            Re-check all exact-pinned packages
 #   --major            Allow major version bumps
-#   --cooldown <days>  Override cooldown in days (0 = disable)
+#   --cooldown AGE  Override cooldown (e.g. 24h, 7d; 0d disables)
 
 set -euo pipefail
 

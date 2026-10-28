@@ -5,13 +5,13 @@
 # Respects minimumReleaseAge / minimumReleaseAgeExclude from pnpm-workspace.yaml or .npmrc.
 # Handles pnpm workspaces and catalog: entries.
 #
-# Usage: pnpm-update [--dry-run] [-y] [--force] [--major] [--cooldown <days>] [--actions] [<package>]
+# Usage: pnpm-update [--dry-run] [-y] [--force] [--major] [--cooldown AGE] [--actions] [<package>]
 #   <package>          Only update this package (or this action with --actions)
 #   --dry-run          Show what would change, make no changes
 #   -y / --yes         Skip confirmation prompt
 #   --force            Check all exact pins directly via npm
 #   --major            Allow major version bumps
-#   --cooldown <days>  Override cooldown in days (0 = disable)
+#   --cooldown AGE  Override cooldown (e.g. 24h, 7d; 0d disables)
 #   --actions          Update GitHub Actions in workflows instead of packages (pnpm 12+)
 
 set -euo pipefail

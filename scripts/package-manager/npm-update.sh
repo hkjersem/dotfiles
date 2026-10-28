@@ -4,12 +4,12 @@
 # For packages where only a major bump exists, updates to latest within current major.
 # Respects minimum-release-age from .npmrc (in days, unlike pnpm which uses minutes).
 #
-# Usage: npm-update [--dry-run] [-y] [--force] [--major] [--cooldown <days>] [<package>]
+# Usage: npm-update [--dry-run] [-y] [--force] [--major] [--cooldown AGE] [<package>]
 #   <package>          Only update this package
 #   --dry-run          Show what would change, make no changes
 #   -y / --yes         Skip confirmation prompt
 #   --major            Allow major version bumps
-#   --cooldown <days>  Override cooldown in days (0 = disable)
+#   --cooldown AGE  Override cooldown (e.g. 24h, 7d; 0d disables)
 #   --force            Re-check exact-pinned packages that may be suppressed by minimum-release-age
 
 set -euo pipefail

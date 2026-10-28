@@ -43,7 +43,7 @@ Runs git signals for any repo; adds JS/TS-specific checks when package.json is p
 
 Options:
   --dir PATH             Target directory (default: current dir)
-  --since PERIOD         Git lookback period (default: "1 year ago")
+  --since PERIOD         Lookback duration (e.g. 7d) or Git date expression (default: "1 year ago")
   --skip-security        Skip package manager security audit
   --no-package-manager   Skip package managers and Node execution; keep local checks
   -h, --help             Show this help
@@ -70,6 +70,10 @@ if $NO_PACKAGE_MANAGER; then
 fi
 
 [[ -n "$TARGET_DIR" && -n "$SINCE" ]] || { echo "--dir and --since must not be empty" >&2; exit 1; }
+if [[ "$SINCE" =~ ^[0-9]+[mhdw]$ ]]; then
+  SINCE_SECONDS=$(parse_age_seconds "$SINCE") || { echo "Error: invalid --since duration." >&2; exit 2; }
+  SINCE="$SINCE_SECONDS seconds ago"
+fi
 if ! cd "$TARGET_DIR"; then
   echo "$ERR_FAIL Could not cd into ${TARGET_DIR}" >&2
   exit 1

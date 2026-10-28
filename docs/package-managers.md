@@ -9,8 +9,10 @@ need a newer pnpm say so.
 
 ## Updates and audits
 
-`pmu` respects configured release-age cooldowns. `--cooldown <days>` overrides
-them, including `--cooldown 0` to disable the cooldown. Use `--yes` only when
+`pmu` respects configured release-age cooldowns. `--cooldown AGE` overrides
+them using `m`, `h`, `d`, `w` (e.g. `--cooldown 3d`), including
+`--cooldown 0d` to disable the cooldown. Bare integers are not accepted.
+Use `--yes` only when
 you intend to skip confirmation. `pma --deep` additionally refreshes pnpm's
 lockfile before auditing; it is not a read-only check. `pma` applies fixes
 straight away; `pma --dry-run` only reports, and can't be combined with `--deep`.

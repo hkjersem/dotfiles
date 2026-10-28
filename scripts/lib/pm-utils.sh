@@ -2,6 +2,22 @@
 # pm-utils.sh — shared utilities for package-manager and audit scripts.
 # Sourced by audit-repo.sh, _update-lib.sh, and bun-update.sh.
 
+# Strict command-line duration, in seconds; no implicit units.
+parse_age_seconds() {
+  local value=$1 number unit
+  [[ "$value" =~ ^[0-9]+[mhdw]$ ]] || return 1
+  unit=${value: -1}
+  number=${value%?}
+  [[ ${#number} -le 8 ]] || return 1
+  number=$((10#$number))
+  case "$unit" in
+    m) echo $((number * 60)) ;;
+    h) echo $((number * 3600)) ;;
+    d) echo $((number * 86400)) ;;
+    w) echo $((number * 604800)) ;;
+  esac
+}
+
 # Convert minutes to human-readable duration (e.g. "2d 3h", "45m").
 format_duration() {
   local mins="$1"

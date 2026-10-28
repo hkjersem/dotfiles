@@ -64,14 +64,11 @@ _parse_args() {
 
   # Resolve CLI cooldown → minutes
   if [[ -n "$CLI_COOLDOWN" ]]; then
-    if ! [[ "$CLI_COOLDOWN" =~ ^[0-9]+$ ]]; then
-      echo -e "${RED}Error: --cooldown value must be a non-negative integer (days)${RESET}" >&2; exit 1
+    local cooldown_seconds
+    if ! cooldown_seconds=$(parse_age_seconds "$CLI_COOLDOWN"); then
+      echo "Error: --cooldown requires a duration such as 30m, 24h, 7d or 0d (disable)." >&2; exit 1
     fi
-    if [[ "$CLI_COOLDOWN" -eq 0 ]]; then
-      COOLDOWN_MINUTES="0"
-    else
-      COOLDOWN_MINUTES=$(( CLI_COOLDOWN * 1440 ))
-    fi
+    COOLDOWN_MINUTES=$((cooldown_seconds / 60))
     COOLDOWN_SOURCE="--cooldown flag"
   fi
 }
@@ -79,7 +76,7 @@ _parse_args() {
 # Help for pmu, shared by the package-manager wrappers
 _show_help() {
   cat <<'EOF'
-Usage: pmu [--dry-run] [--yes] [--force] [--major] [--cooldown <days>] [--actions] [<package>]
+Usage: pmu [--dry-run] [--yes] [--force] [--major] [--cooldown AGE] [--actions] [<package>]
 
 Updates packages for the detected package manager, within the major version by default.
 
@@ -91,7 +88,7 @@ Options:
   -y, --yes          Skip confirmation prompt
   -f, --force        Check all exact pins directly via npm
   -m, --major        Allow major version bumps
-  --cooldown <days>  Override cooldown in days (0 = disable)
+  --cooldown AGE     Override cooldown (e.g. 24h, 7d; 0d disables)
   --actions          Update GitHub Actions instead of packages (pnpm 12.7+)
   -h, --help         Show this help
 EOF
@@ -759,7 +756,7 @@ print_header() {
       header+=("Cooldown: $(format_duration "$COOLDOWN_MINUTES") (${COOLDOWN_SOURCE})")
       [[ ${#COOLDOWN_EXCLUDE[@]} -gt 0 ]] && header+=("Excluded: ${COOLDOWN_EXCLUDE[*]}")
     else
-      header+=("Cooldown: disabled (--cooldown 0)")
+      header+=("Cooldown: disabled (--cooldown 0d)")
     fi
   fi
   out_context "${header[@]}"

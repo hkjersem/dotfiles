@@ -12,6 +12,25 @@ import unittest
 
 REPO = Path(__file__).resolve().parents[2]
 NOW = 1800000000
+
+
+class DurationArgumentTests(unittest.TestCase):
+    def test_cooldown_units_and_rejection_of_implicit_days(self):
+        script = ('source "$1/scripts/package-manager/_update-lib.sh"; '
+                  '_parse_args --cooldown "$2"; printf "%s" "$COOLDOWN_MINUTES"')
+        for value, expected in (("30m", "30"), ("24h", "1440"), ("7d", "10080"),
+                                ("2w", "20160"), ("0d", "0"), ("07d", "10080")):
+            result = subprocess.run(["/bin/bash", "-c", script, "test", str(REPO), value],
+                                    text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, expected)
+        for value in ("7", "-7d", "1.5d", "week"):
+            result = subprocess.run(["/bin/bash", "-c", script, "test", str(REPO), value],
+                                    text=True, capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("requires a duration", result.stderr)
+
+
 MOCK_TOOL = r'''
 import json
 import os
@@ -274,7 +293,7 @@ class PackageUpdateTests(unittest.TestCase):
         for pm in ("npm", "pnpm", "bun"):
             with self.subTest(pm=pm):
                 self.manifest(pm, {name: "^1.0.0" for name in self.fixture["outdated"]})
-                result = self.invoke("--cooldown", "3", "--yes")
+                result = self.invoke("--cooldown", "3d", "--yes")
                 self.assert_success(result)
                 self.assertEqual(self.dependencies(), {
                     "@scope/fallback": "^1.1.0", "boundary": "^1.2.0", "too-new": "^1.0.0",
@@ -287,7 +306,7 @@ class PackageUpdateTests(unittest.TestCase):
         for pm in ("npm", "pnpm", "bun"):
             with self.subTest(pm=pm):
                 self.manifest(pm, {"recent": "^1.0.0"})
-                result = self.invoke("--cooldown", "3", "--yes")
+                result = self.invoke("--cooldown", "3d", "--yes")
                 self.assert_success(result)
                 self.assertIn("Nothing to update", result.stdout)
                 self.assertEqual(self.dependencies(), {"recent": "^1.0.0"})

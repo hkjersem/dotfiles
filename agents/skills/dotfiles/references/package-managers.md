@@ -30,7 +30,7 @@ With pnpm 12.7 or newer, `--actions` updates the GitHub Actions in
    `--yes` it asks for confirmation, and with no answer it aborts.
 
 It respects the release-age cooldown configured for the project or user. Add
-`--major` or `--cooldown <days>` only when the user asks for it. `--help`
+`--major` or `--cooldown AGE` only when the user asks for it. `--help`
 lists the options.
 
 ## pma: audit dependencies
