@@ -84,7 +84,9 @@ screen is locked. `--recurring` keeps resuming chats a usage limit stopped,
 with `!` in a title to stagger chats behind unmarked ones and `--morning`
 to plan nights. Each tier gets separate Codex usage windows, even after the
 check removes its `!` marks. The three-chat cap resets with Codex's five-hour limit,
-not five hours after each resume.
+not five hours after each resume. The 24-hour unattended clock resets on
+activity, quota or scheduling barriers, and missed checks—not just because a
+stop is old. The scan covers chats updated in the last eight days.
 
 ```sh
 codex-resume --time 15.03 --chat "explore pwa"

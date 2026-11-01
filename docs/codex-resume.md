@@ -75,14 +75,27 @@ half, or only the lowest tier when tiers differ, and takes no later chats. The
 rest wait for the 04.00 window. From an hour after that, at 05.00, chats wait
 for the morning, so a new window is free then.
 
-Only chats updated in the last eight days are checked. A chat stopped more than
-24 hours before the most recently stopped chat is skipped: an earlier limit
-stopped it, and it was likely left on purpose. The check runs alongside a
+Only chats updated in the last eight days are checked. A chat is left alone
+after 24 uninterrupted, observed hours in which quota and a scheduling slot
+were available but the chat had no activity. Its stop date alone does not
+make it too old. Messages, transcript changes, running turns and title or
+priority changes reset the clock, as do quota exhaustion and waiting for
+capacity, a later tier or a morning window. A rejected queue attempt is not
+chat activity; a sent message is.
+
+The clock is stored with the recurring state. Existing records start fresh.
+A check missed by more than one minute beyond the configured interval,
+an unreadable observation or reconfiguring recurring resumes resets the
+clock rather than counting unobserved time. There is no monitor while
+recurring resumes are off; enabling them again starts fresh. Checks sample
+quota and activity, so transitions between checks cannot be timed exactly.
+Running chats and chats whose latest reply completed, was cancelled or failed
+for another reason are not resumed. The check runs alongside a
 scheduled resume, opens the app if it isn't running, and logs only what it
 sends or renames, when it waits for a reset, and any errors. `--status` shows
 when it last checked and lists the chats stopped by a
 usage limit: whether each continues at the next check, when it is planned to
-continue, or is left alone as an older limit stopped it. While a limit is used
+continue, or is left alone as `24 hours unattended`. While a limit is used
 up, nothing continues before a minute after it resets. Later windows are
 estimates of five hours from their first resume, adjusted to the live reset
 at each check; later usage-limit exhaustion is not foreseen. A chat the app hasn't titled yet shows as

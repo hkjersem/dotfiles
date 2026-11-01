@@ -763,17 +763,22 @@ class CodexResumeTests(unittest.TestCase):
 
     def test_stuck_chat_is_one_whose_latest_replies_all_stopped_at_a_usage_limit(self):
         self.fake_queue([self.queued()])
+
+        def times(since=None):
+            stuck = codex_resume.stuck_at_limit(self.LOCAL_CHAT, since)
+            return {key: stuck[key] for key in ("closed", "stopped")}
+
         first, last = (datetime.fromisoformat(moment) for moment in ("2026-10-20T19:00:00+02:00",
                                                                      "2026-10-20T19:30:00+02:00"))
         self.write_session_log("task_started", "task_complete", stamped=first - timedelta(hours=1))
         self.write_session_log("task_started", self.limit_stop("t1"), stamped=first)
-        self.assertEqual(codex_resume.stuck_at_limit(self.LOCAL_CHAT), {"closed": first, "stopped": first})
+        self.assertEqual(times(), {"closed": first, "stopped": first})
         # Messages sent while the limit is used up stop at it too; the chat stays stuck since the first stop.
         self.write_session_log("task_started", self.limit_stop("t2"), stamped=last)
-        self.assertEqual(codex_resume.stuck_at_limit(self.LOCAL_CHAT), {"closed": first, "stopped": last})
+        self.assertEqual(times(), {"closed": first, "stopped": last})
         # After a resume, only later stops count: the resumed reply hitting the limit again is a new stop.
         resumed = first + timedelta(minutes=10)
-        self.assertEqual(codex_resume.stuck_at_limit(self.LOCAL_CHAT, resumed), {"closed": last, "stopped": last})
+        self.assertEqual(times(resumed), {"closed": last, "stopped": last})
         self.assertIsNone(codex_resume.stuck_at_limit(self.LOCAL_CHAT, last + timedelta(seconds=1)))
         self.write_session_log("task_started")
         self.assertIsNone(codex_resume.stuck_at_limit(self.LOCAL_CHAT))
@@ -784,14 +789,14 @@ class CodexResumeTests(unittest.TestCase):
         self.write_session_log({"type": "task_complete", "error": {"codex_error_info": "server_error"}})
         self.assertIsNone(codex_resume.stuck_at_limit(self.LOCAL_CHAT))
         self.write_session_log(self.limit_stop("t4"), stamped=last)
-        self.assertEqual(codex_resume.stuck_at_limit(self.LOCAL_CHAT), {"closed": last, "stopped": last})
+        self.assertEqual(times(), {"closed": last, "stopped": last})
         # A stamp without a time zone cannot be compared with the others, so it counts as unreadable.
         self.assertIsNone(codex_resume.record_time({"timestamp": "2026-10-20T20:00:00"}))
         self.assertFalse(codex_resume.written_since({"timestamp": "2026-10-20T20:00:00"}, first))
         self.assertEqual(codex_resume.record_time({"timestamp": "2026-10-20T18:00:00Z"}), first + timedelta(hours=1))
         self.assertIsNone(codex_resume.stuck_at_limit({**self.LOCAL_CHAT, "id": "01a1-unknown"}))
 
-    def test_stuck_chats_are_recent_and_stopped_near_the_latest_limit_newest_first(self):
+    def test_stuck_chats_do_not_age_out_while_waiting_newest_first(self):
         now = datetime.fromisoformat("2026-10-27T10:00:00+02:00")
         closed = now - timedelta(days=6)
         chats = {
@@ -814,7 +819,7 @@ class CodexResumeTests(unittest.TestCase):
         with (patch.object(codex_resume, "load_chats", return_value=catalogue),
               patch.object(codex_resume, "stuck_at_limit", side_effect=stuck)):
             found = codex_resume.stuck_chats(now)
-        self.assertEqual([chat["id"] for chat in found], ["latest", "older", "edge"])
+        self.assertEqual([chat["id"] for chat in found], ["latest", "older", "earlier-limit", "edge"])
         self.assertEqual(found[0]["name"], "latest")
 
     def test_status_lists_stuck_chats_with_what_the_next_check_does(self):
@@ -840,6 +845,7 @@ class CodexResumeTests(unittest.TestCase):
                   patch.object(codex_resume, "stuck_at_limit", side_effect=stuck),
                   patch.object(codex_resume, "local_now", return_value=now),
                   patch.object(codex_resume, "usage_limits", **limits),
+                  patch.object(codex_resume, "usage_allowed", return_value=True),
                   redirect_stdout(io.StringIO()) as output):
                 codex_resume.print_stuck_overview(state)
             return output.getvalue().splitlines()
@@ -848,7 +854,7 @@ class CodexResumeTests(unittest.TestCase):
         room = shown("2026-10-22T20:29:00+02:00")
         width = len(room)
 
-        def table(a, b, c, d):
+        def table(a, b, c, d, old):
             return [
                 "",
                 "─ Chats stopped by a usage limit (5) ───────────────────────",
@@ -857,31 +863,31 @@ class CodexResumeTests(unittest.TestCase):
                 f"  {t['b']}  {b:<{width}}  'b'",
                 f"  {t['c']}  {c}  untitled (local-relay, c)",
                 f"  {t['d']}  {d}  'd'",
-                f"  {t['old']}  {'left alone':<{width}}  'old'",
-                "  Chats left alone were stopped by an older usage limit.",
+                f"  {t['old']}  {old}  'old'",
             ]
 
         def limits(used):
             return {"return_value": [{"name": "5-hour", "minutes": 300, "used": used,
                                       "resets": datetime.fromisoformat("2026-10-22T20:29:00+02:00")}]}
 
-        planned = table("next check", "next check", room, room)
+        planned = table("next check", "next check", room, room, room)
         self.assertEqual(overview(limits(40)), planned)
         with self.assertRaisesRegex(RuntimeError, "app server is down"):
             overview({"side_effect": RuntimeError("app server is down")})
         # A used-up reset releases all three slots together, even though prior sends are less than five hours old.
         after_reset = shown("2026-10-22T20:30:00+02:00")
         self.assertEqual(overview(limits(100)), table(
-            after_reset, after_reset, after_reset, shown("2026-10-23T01:30:00+02:00")))
+            after_reset, after_reset, after_reset, shown("2026-10-23T01:30:00+02:00"),
+            shown("2026-10-23T01:30:00+02:00")))
 
     def test_status_while_a_limit_is_used_up_counts_the_windows_that_pass_marked_chats_by(self):
         now = datetime.fromisoformat("2026-10-22T20:00:00+02:00")
-        chats = [{"id": name, "name": name, "earlier": False} for name in ("a", "!b")]
+        chats = [{"id": name, "name": name} for name in ("a", "!b")]
         window = {"start": now - timedelta(hours=2), "tier": 0, "early": False}
 
         def overview(resets):
             limits = [{"name": "5-hour", "minutes": 300, "used": 100, "resets": datetime.fromisoformat(resets)}]
-            with (patch.object(codex_resume, "all_stuck_chats", return_value=chats),
+            with (patch.object(codex_resume, "stuck_chats", return_value=chats),
                   patch.object(codex_resume, "usage_limits", return_value=limits)):
                 found = codex_resume.stuck_overview(now, {}, [window["start"]], window)
             return {chat["id"]: at and f"{at:%d %H.%M}" for chat, _, at in found}
@@ -895,14 +901,14 @@ class CodexResumeTests(unittest.TestCase):
         now = datetime.fromisoformat("2026-10-28T11:04:00+01:00")
         first = datetime.fromisoformat("2026-10-28T08:09:00+01:00")
         later = datetime.fromisoformat("2026-10-28T09:08:00+01:00")
-        chats = [{"id": name, "name": name, "earlier": False}
+        chats = [{"id": name, "name": name}
                  for name in ("!new", "!old", "a", "b", "c")]
         window = {"start": first, "tier": 0, "early": False}
         limits = [{"name": "5-hour", "minutes": 300, "used": 100,
                    "resets": datetime.fromisoformat("2026-10-28T13:08:00+01:00")}]
         for morning, last in ((None, "28 23.09"), ("09:00", "29 04.00")):
             with (self.subTest(morning=morning), local_zone("Europe/Oslo"),
-                  patch.object(codex_resume, "all_stuck_chats", return_value=chats),
+                  patch.object(codex_resume, "stuck_chats", return_value=chats),
                   patch.object(codex_resume, "usage_limits", return_value=limits)):
                 found = codex_resume.stuck_overview(
                     now, {}, [first, later, later], window, morning, passed={"!old": first})
@@ -1126,11 +1132,60 @@ class CodexResumeTests(unittest.TestCase):
             codex_resume.recurring_check(datetime.fromisoformat("2026-10-21T16:00:00+02:00"))
         self.assertEqual(sent, ["01a1-mine", "01a1-mine"])
 
+    def test_recurring_keeps_an_older_marked_chat_after_days_without_quota(self):
+        now = datetime.fromisoformat("2026-11-01T21:00:00+01:00")
+        stops = {"old": now - timedelta(days=3), "new": now - timedelta(minutes=1)}
+        catalogue = [{**self.LOCAL_CHAT, "id": chat, "name": "!Old" if chat == "old" else "New",
+                      "updated": stop} for chat, stop in stops.items()]
+
+        def stuck(chat, since):
+            stop = stops[chat["id"]]
+            return {"closed": stop, "stopped": stop} if since is None or stop > since else None
+
+        sent = []
+        with tempfile.TemporaryDirectory() as temporary:
+            with (patch.object(codex_resume, "RECURRING_STATE_PATH", Path(temporary) / "recurring.json"),
+                  patch.object(codex_resume, "RECURRING_PLIST_PATH", Path(temporary) / "absent.plist"),
+                  patch.object(codex_resume, "load_chats", return_value=catalogue),
+                  patch.object(codex_resume, "stuck_at_limit", side_effect=stuck),
+                  patch.object(codex_resume, "usage_limits", return_value=[
+                      {"name": "5-hour", "minutes": 300, "used": 100,
+                       "resets": now + timedelta(hours=1)}]) as limits,
+                  patch.object(codex_resume, "usage_allowed", return_value=False) as allowed,
+                  patch.object(codex_resume, "queue_message",
+                               side_effect=lambda chat, *args: sent.append(chat["id"]) or {"chat": chat}),
+                  patch.object(codex_resume, "watch_queued"),
+                  patch.object(codex_resume, "rename_chat", return_value=True),
+                  redirect_stdout(io.StringIO())):
+                codex_resume.recurring_check(now)
+                self.assertEqual(sent, [])
+                now += timedelta(days=2)
+                limits.return_value[0]["resets"] = now + timedelta(hours=1)
+                codex_resume.recurring_check(now)
+                self.assertEqual(sent, [])
+                limits.return_value = [{"name": "5-hour", "minutes": 300, "used": 40,
+                                        "resets": now + timedelta(hours=5)}]
+                allowed.return_value = True
+                codex_resume.recurring_check(now)
+                self.assertEqual(sent, ["new"])
+                # The older chat still waits in its retained tier, even after another day.
+                now += timedelta(days=1)
+                limits.return_value[0]["resets"] = now + timedelta(hours=5)
+                codex_resume.recurring_check(now)
+                self.assertEqual(sent, ["new", "old"])
+                codex_resume.recurring_check(now + timedelta(hours=6))
+                self.assertEqual(sent, ["new", "old"])
+
     def test_recurring_check_stops_when_its_record_is_unreadable(self):
         for state in ("{\"resumed\": {\"a\": ", "[]", '{"resumed": {"a": "yesterday"}}',
                       '{"resumed": {"a": "2026-10-21T09:00:00"}}',
                       '{"resumed": {}, "tiers": {"a": {"tier": -1, "marks": 0}}}',
-                      '{"resumed": {}, "tiers": {"a": {"tier": 1}}}'):
+                      '{"resumed": {}, "tiers": {"a": {"tier": 1}}}',
+                      '{"resumed": {}, "checked": "2026-10-21T09:00:00"}',
+                      '{"resumed": {}, "unattended": {"a": {"activity": [], "since": "2026-10-21T09:00:00Z"}}}',
+                      '{"resumed": {}, "unattended": {"a": {"activity": ["a", "b", "c", ""], "since": "bad"}}}',
+                      '{"resumed": {}, "unattended": {"a": {"activity": ["a", "b", "c", ""], '
+                      '"since": "2026-10-21T09:00:00"}}}'):
             with self.subTest(state=state):
                 with self.assertRaisesRegex(RuntimeError, "recurring.json .*; fix or delete it"):
                     self.recurring(["a"], state=state)
@@ -1220,6 +1275,139 @@ class CodexResumeTests(unittest.TestCase):
         earlier = {"resumed": {"a": "2026-10-20T10:00:00+02:00"}}
         resumed, _, state = self.recurring(["a"], state=earlier, queued=False)
         self.assertEqual((resumed, state["resumed"]), (["a"], earlier["resumed"]))
+
+    def test_recurring_stops_retrying_after_24_uninterrupted_hours_of_opportunity(self):
+        start = datetime.fromisoformat("2026-10-21T10:00:00+02:00")
+        state = None
+        for check in range(96):
+            moment = start + timedelta(minutes=15 * check)
+            resumed, _, state = self.recurring(["a"], queued=False, state=state, now=moment.isoformat())
+            self.assertEqual(resumed, ["a"])
+        resumed, _, state = self.recurring(
+            ["a"], queued=False, state=state, now=(start + timedelta(hours=24)).isoformat())
+        self.assertEqual(resumed, [])
+        self.assertEqual(state["unattended"]["a"]["since"], start.isoformat())
+        before = self.state_path.read_bytes()
+        now = start + timedelta(hours=24)
+        chat = {"id": "a", "name": "a", "stopped": datetime.fromisoformat("2026-10-21T01:00:00+02:00")}
+        with (patch.object(codex_resume, "RECURRING_STATE_PATH", self.state_path),
+              patch.object(codex_resume, "stuck_chats", return_value=[chat]),
+              patch.object(codex_resume, "local_now", return_value=now),
+              patch.object(codex_resume, "recurring_minutes", return_value=15),
+              patch.object(codex_resume, "usage_limits", return_value=[
+                  {"name": "5-hour", "minutes": 300, "used": 40, "resets": now + timedelta(hours=5)}]),
+              patch.object(codex_resume, "usage_allowed", return_value=True),
+              redirect_stdout(io.StringIO()) as output):
+            codex_resume.print_stuck_overview(codex_resume.load_recurring_state())
+        self.assertIn("24 hours unattended", output.getvalue())
+        self.assertEqual(self.state_path.read_bytes(), before)
+
+    def test_recurring_restarts_the_clock_on_activity_and_observation_gaps(self):
+        start = "2026-10-21T10:00:00+02:00"
+        for change in ("message", "title", "gap"):
+            with self.subTest(change=change):
+                _, _, state = self.recurring(["a"], queued=False, now=start)
+                later = "2026-10-21T10:15:00+02:00"
+                chats, stopped = ["a"], "2026-10-21T01:00:00+02:00"
+                if change == "message":
+                    stopped = "2026-10-21T10:10:00+02:00"
+                elif change == "title":
+                    chats = [("a", "Renamed")]
+                else:
+                    later = "2026-10-22T10:00:00+02:00"
+                resumed, _, state = self.recurring(chats, queued=False, state=state, now=later, stopped=stopped)
+                self.assertEqual(resumed, ["a"])
+                self.assertEqual(state["unattended"]["a"]["since"], later)
+
+    def test_recurring_clears_the_clock_while_quota_or_scheduling_blocks_action(self):
+        start = "2026-10-21T10:00:00+02:00"
+        for barrier in ("quota", "capacity", "tier", "morning"):
+            with self.subTest(barrier=barrier):
+                _, _, state = self.recurring(["a"], queued=False, now=start)
+                options = {}
+                if barrier == "quota":
+                    options["allowed"] = False
+                elif barrier == "capacity":
+                    state["sends"] = [start] * 3
+                    options["limit_end"] = "2026-10-21T15:00:00+02:00"
+                elif barrier == "tier":
+                    state["window"] = {"start": start, "tier": 1, "early": False}
+                else:
+                    options.update(now="2026-10-21T23:00:00+02:00", morning="09:00")
+                resumed, _, state = self.recurring(
+                    ["a"], queued=False, state=state, **{"now": "2026-10-21T10:15:00+02:00", **options})
+                self.assertEqual(resumed, [])
+                self.assertEqual(state["unattended"], {})
+                later = "2026-10-22T10:00:00+02:00"
+                resumed, _, state = self.recurring(["a"], queued=False, state=state, now=later)
+                self.assertEqual(resumed, ["a"])
+                self.assertEqual(state["unattended"]["a"]["since"], later)
+
+    def test_expired_chats_do_not_block_another_tier(self):
+        chats = ["a", ("b", "!B")]
+        _, _, state = self.recurring(chats, queued=False)
+        state["checked"] = "2026-10-22T09:45:00+02:00"
+        resumed, _, state = self.recurring(chats, state=state, now="2026-10-22T10:00:00+02:00")
+        self.assertEqual(resumed, ["b"])
+        self.assertEqual(state["unattended"]["a"]["since"], "2026-10-21T10:00:00+02:00")
+        self.assertNotIn("b", state["unattended"])
+        self.assertEqual(state["tiers"]["a"], {"tier": 0, "marks": 0})
+
+    def test_transcript_activity_and_running_turns_reset_the_clock(self):
+        self.fake_queue([self.queued()])
+        now = datetime.fromisoformat("2026-10-21T10:00:00+02:00")
+        self.write_session_log("task_started", self.limit_stop("t1"), stamped=now)
+        chat = {**self.LOCAL_CHAT, "updated": now}
+        state = {"sends": [], "window": None, "passed": {}}
+        first = codex_resume.stuck_at_limit(chat)
+        codex_resume.observe_opportunities(state, [{**chat, **first}], now, None,
+                                           now + timedelta(hours=5), True, 15)
+        # A new message can be written before a new turn starts or the catalogue catches up.
+        self.write_session_log()
+        later = now + timedelta(minutes=15)
+        latest = codex_resume.stuck_at_limit(chat)
+        self.assertEqual(latest["stopped"], first["stopped"])
+        codex_resume.observe_opportunities(state, [{**chat, **latest}], later, None,
+                                           now + timedelta(hours=5), True, 15)
+        self.assertEqual(state["unattended"][chat["id"]]["since"], later)
+        self.write_session_log("task_started", stamped=later)
+        with patch.object(codex_resume, "load_chats", return_value=[chat]):
+            waiting = codex_resume.stuck_chats(later)
+        codex_resume.observe_opportunities(state, waiting, later, None, now + timedelta(hours=5), True, 15)
+        self.assertEqual(state["unattended"], {})
+
+    def test_unreadable_observations_clear_the_clock_without_hiding_the_error(self):
+        for error_type in (RuntimeError, OSError, ValueError, TypeError):
+            with self.subTest(error=error_type):
+                _, _, state = self.recurring(["a"], queued=False)
+                with patch.object(codex_resume, "five_hour_reset", side_effect=error_type("quota is unreadable")):
+                    with self.assertRaisesRegex(error_type, "quota is unreadable"):
+                        self.recurring(["a"], state=state, now="2026-10-21T10:15:00+02:00")
+                state = json.loads(self.state_path.read_text())
+                self.assertEqual(state["unattended"], {})
+                resumed, _, state = self.recurring(
+                    ["a"], queued=False, state=state, now="2026-10-21T10:30:00+02:00")
+                self.assertEqual(resumed, ["a"])
+                self.assertEqual(state["unattended"]["a"]["since"], "2026-10-21T10:30:00+02:00")
+
+    def test_clock_expiry_uses_elapsed_hours_across_the_autumn_time_change(self):
+        _, _, state = self.recurring(["a"], queued=False, now="2026-10-24T12:00:00+02:00")
+        state["checked"] = "2026-10-25T10:45:00+01:00"
+        resumed, _, _ = self.recurring(["a"], queued=False, state=state, now="2026-10-25T11:00:00+01:00")
+        self.assertEqual(resumed, [])
+
+    def test_reconfiguring_recurring_resumes_starts_the_clock_fresh(self):
+        _, _, state = self.recurring(["a"], queued=False)
+        with tempfile.TemporaryDirectory() as temporary:
+            with (patch.object(codex_resume, "RECURRING_STATE_PATH", self.state_path),
+                  patch.object(codex_resume, "RECURRING_PLIST_PATH", Path(temporary) / "recurring.plist"),
+                  patch.object(codex_resume, "LOG_PATH", Path(temporary) / "log"),
+                  patch.object(codex_resume, "launchctl"),
+                  redirect_stdout(io.StringIO())):
+                codex_resume.set_up_recurring(15)
+        saved = json.loads(self.state_path.read_text())
+        self.assertEqual(saved["unattended"], {})
+        self.assertEqual(saved["checked"], state["checked"])
 
     def test_recurring_check_keeps_the_resume_when_the_message_may_have_been_queued(self):
         uncertain = RuntimeError("The message may have been queued: no reply. Check the chat before retrying.")
