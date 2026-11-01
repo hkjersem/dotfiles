@@ -224,11 +224,14 @@ def load_chats():
         connection = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)
         try:
             rows = connection.execute(query).fetchall()
+            catalogued = {chat_id for (chat_id,) in connection.execute("SELECT thread_id FROM local_thread_catalog")}
         finally:
             connection.close()
     except sqlite3.Error as error:
         raise RuntimeError(f"Could not read Codex chats from {path}: {error}") from error
     names = chat_names()
+    rows += [row for row in uncatalogued_chats() if row[0] not in catalogued]
+    rows.sort(key=lambda row: row[3], reverse=True)
     return [
         {
             "id": chat_id,
@@ -238,6 +241,28 @@ def load_chats():
         }
         for chat_id, name, cwd, updated in rows
     ]
+
+
+def uncatalogued_chats():
+    """Chats on this Mac from Codex's thread records. The app adds a new chat to its catalogue late, and
+    not at all while a usage limit stops its first turn, but shows it in the sidebar from the start."""
+    # Subagent, guardian and review threads store JSON in source; threads without a message are not shown.
+    query = """
+        SELECT id, COALESCE(NULLIF(name, ''), title), cwd, COALESCE(NULLIF(recency_at, 0), updated_at)
+        FROM threads
+        WHERE archived = 0 AND source NOT LIKE '{%'
+          AND COALESCE(thread_source, '') NOT IN ('subagent', 'guardian_review')
+          AND (COALESCE(name, '') <> '' OR COALESCE(first_user_message, '') <> '')
+    """
+    path = CODEX_HOME / CHAT_NAMES
+    try:
+        connection = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)
+        try:
+            return connection.execute(query).fetchall()
+        finally:
+            connection.close()
+    except sqlite3.Error:
+        return []
 
 
 def chat_names():

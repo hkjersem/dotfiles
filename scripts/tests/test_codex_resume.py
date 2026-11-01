@@ -465,6 +465,33 @@ class CodexResumeTests(unittest.TestCase):
         names = {chat["id"]: chat["name"] for chat in codex_resume.load_chats()}
         self.assertEqual((names["01a1-mine"], names["01a2-new"]), ("!Find current project status", "Fresh prompt"))
 
+    def test_chats_the_catalogue_has_not_caught_up_with_are_listed(self):
+        home = self.with_chats()
+        # A chat whose first turn a usage limit stopped is in the sidebar but never reaches the catalogue.
+        connection = sqlite3.connect(home / codex_resume.CHAT_NAMES)
+        connection.execute(
+            "CREATE TABLE threads (id TEXT, name TEXT, title TEXT, cwd TEXT, archived INTEGER, source TEXT, "
+            "thread_source TEXT, first_user_message TEXT, recency_at INTEGER, updated_at INTEGER)")
+        recent = int(seconds("2026-10-31T12:42:00+01:00"))
+        connection.executemany("INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
+            ("01b1-limited", "!!!Just a test", "Just a test, reply with ok", "/work/dash", 0, "vscode", "user",
+             "Just a test, reply with ok", recent, recent),
+            ("01b2-unnamed", "", "Plan the week", "/work", 0, "vscode", None, "Plan the week", 0, recent - 60),
+            ("01b3-empty", "", "", "/home", 0, "vscode", None, "", recent, recent),
+            ("01b4-archived", "Archived", "Archived", "/work", 1, "vscode", "user", "Old", recent, recent),
+            ("01b5-sub", "Helper", "Helper", "/work", 0, '{"subagent":{}}', "subagent", "Do it", recent, recent),
+            ("01a5-gone", "Removed plan", "Removed plan", "/work", 0, "vscode", "user", "Plan", recent, recent),
+            ("01a7-mini", "Explore PWA roadmap", "", "/mini/local-relay", 0, "vscode", "user", "Go", recent, recent),
+        ])
+        connection.commit()
+        connection.close()
+        chats = codex_resume.load_chats()
+        self.assertEqual([chat["id"] for chat in chats],
+                         ["01b1-limited", "01b2-unnamed", "01a2-new", "01a1-mine", "01a4-old", "01a6-status"])
+        self.assertEqual((chats[0]["name"], chats[0]["cwd"]), ("!!!Just a test", "/work/dash"))
+        self.assertEqual(chats[1]["name"], "Plan the week")
+        self.assertEqual(codex_resume.resolve_project("dash")[1]["id"], "01b1-limited")
+
     def test_missing_chat_catalog_is_reported(self):
         with tempfile.TemporaryDirectory() as temporary, \
                 patch.object(codex_resume, "CODEX_HOME", Path(temporary)):

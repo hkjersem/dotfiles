@@ -96,7 +96,8 @@ Without a choice, the message goes to the chat on this Mac with the latest
 activity, chosen when it is sent. Add `--chat` to `--time`, `--reset` or
 `--now` to pick one by id, id prefix or name; the starts of the name's words in
 any order also work, such as `explore pwa`. `--list [text]` shows your recent
-chats on this Mac with their ids and last activity. When several chats match,
+chats on this Mac with their ids and last activity, including a new chat whose
+first turn a usage limit stopped. When several chats match,
 they are listed instead of guessing. Chats on another Mac that the app reaches
 through remote control are left out: run `codex-resume` on that Mac instead.
 
