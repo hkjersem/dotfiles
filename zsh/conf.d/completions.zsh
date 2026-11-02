@@ -45,6 +45,15 @@ _dotfiles_duration_flags() {
 }
 compdef _dotfiles_duration_flags prune_branches pmu audit-repo
 
+_git-amend-date() {
+  _arguments \
+    '(-h --help)'{-h,--help}'[Show help]' \
+    '--shift[Subtract from each existing date instead of now]' \
+    '1:age or quoted date:_dotfiles_age' \
+    '2:commit:__git_commits'
+}
+zstyle ':completion:*:*:git:*' user-commands 'amend-date:Change commit dates'
+
 _dotfiles_files() {
   if (( CURRENT == 2 )) && [[ ${words[CURRENT]} != -* ]]; then
     local -a commands=(

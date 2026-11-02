@@ -29,6 +29,8 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 | `git/gitignore_global` | Global gitignore |
 | `ssh/config` | SSH host config |
 | `scripts/setup-git-local.sh` | Interactive setup for machine-local git identity — generates `~/.gitconfig_local`, `~/.gitconfig_local_work`, `~/.gitconfig_local_personal` (all untracked). Called by `applications.sh` during install. |
+| `scripts/git-amend-date.sh` | `git amend-date` help, optional commit selection and duration parsing using the shared age parser; delegates rewriting to its Python helper |
+| `scripts/git-amend-date.py` | Previews dates, warns for parent chronology and local remote-tracking publication, and confirms; rewrites dates and descendant parent hashes on the current branch with compare-and-swap ref updating, leaving the index untouched; refuses signed rewrites and older-commit merge rewrites |
 | `scripts/install-zsh-plugins.sh` | Clone or pull oh-my-zsh and custom plugins — called by both `applications.sh` and `update.sh` |
 | `scripts/audit.sh` | Read-only drift detection — compares repo declarations vs installed state |
 | `scripts/audit-repo.sh` | Repository triage — Git, stale-branch, file, documentation-naming, test, and build indicators; extra checks for a root `package.json`. Aliased as `audit-repo`. npm/pnpm audit and outdated queries can use the network; `--skip-security` skips only audit. See [docs/audit-repo.md](docs/audit-repo.md). |

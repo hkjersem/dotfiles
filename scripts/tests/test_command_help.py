@@ -186,6 +186,7 @@ class CompletionTests(unittest.TestCase):
     ZSHRC = r"""
 unsetopt PROMPT_SP
 PS1= RPROMPT=
+HISTFILE= SAVEHIST=0
 autoload -Uz compinit && compinit -u -d "$ZDOTDIR/.zcompdump"
 source {aliases_zsh}
 source {completions}
@@ -216,10 +217,20 @@ done
 zpty -d z
 """
 
-    def complete(self, commands, suffix=" --"):
+    def complete(self, commands, suffix=" --", native_git=False):
         """Return the completions zsh offers after each command and suffix."""
         with tempfile.TemporaryDirectory() as root:
             sandbox = Sandbox(root)
+            if native_git:
+                (sandbox.root / "bin/git").unlink()
+                sandbox.env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
+                for args in (
+                    ("-c", "init.templateDir=", "init", "-q"),
+                    ("-c", "user.name=Completion", "-c", "user.email=completion@example.invalid",
+                     "-c", "core.hooksPath=/dev/null", "commit", "--allow-empty", "-qm", "Fixture"),
+                ):
+                    subprocess.run(["git", *args], cwd=sandbox.project, env=sandbox.env,
+                                   check=True, capture_output=True)
             zdotdir = sandbox.root / "zdotdir"
             zdotdir.mkdir()
             (zdotdir / ".zshrc").write_text(self.ZSHRC.format(
@@ -239,6 +250,19 @@ zpty -d z
             elif "HIT:" in line and current is not None:
                 current.add(line.split("HIT:", 1)[1].strip())
         return offered
+
+    def test_git_amend_date_completes_flags_and_shared_duration_units(self):
+        flags = self.complete(["git"], " amend-date --", native_git=True)["git"]
+        self.assertEqual(flags, {"--help", "--shift"})
+        for suffix in (" amend-date ", " amend-date --shift "):
+            with self.subTest(suffix=suffix):
+                offered = self.complete(["git"], suffix, native_git=True)["git"]
+                self.assertTrue({"24h", "7d", "2w"}.issubset(offered), offered)
+                numbered = self.complete(["git"], suffix + "1", native_git=True)["git"]
+                self.assertTrue({"1m", "1h", "1d", "1w"}.issubset(numbered), numbered)
+                commits = self.complete(["git"], suffix + "1d ", native_git=True)["git"]
+                self.assertIn("HEAD", commits)
+                self.assertTrue(any(re.fullmatch(r"[0-9a-f]{7,40}", item) for item in commits), commits)
 
     def test_profile_names_are_completed_only_for_the_first_argument(self):
         for suffix, expected in (

@@ -136,6 +136,19 @@ bash ~/.dotfiles/scripts/setup-git-local.sh
 git whoami
 ```
 
+`git amend-date 1d` sets HEAD's author and committer dates to 24 hours ago;
+`git amend-date --shift 1d` moves each existing date back by 24 hours.
+It reuses the `m`, `h`, `d`, `w` duration syntax and zsh completion, and also
+accepts a quoted explicit Git date. Append a hash or revision, such as
+`git amend-date 1d HEAD~1`, to change an older commit: descendants on the current
+branch get new parent hashes but keep their dates; other branches stay put.
+Older-commit rewrites refuse merge histories and require an attached branch.
+It previews the dates, warns if either predates a parent or the commit appears
+in local remote-tracking refs, and asks `[y/N]`. It never fetches, so the pushed
+warning depends on the last fetch. Staged files, commit contents, messages and
+identities stay intact. No commit hooks run; signed rewrites are refused.
+Coordinate before rewriting published commits.
+
 The setup writes `~/.gitconfig_local`, `~/.gitconfig_local_work`, and
 `~/.gitconfig_local_personal` as needed. These files stay outside the repository.
 Re-running asks before replacing the managed block and preserves other settings
