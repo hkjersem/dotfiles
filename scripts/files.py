@@ -2,7 +2,8 @@
 """Read-only filesystem reports for the files shell command."""
 
 import argparse
-from collections import defaultdict
+from collections import Counter, defaultdict
+import ctypes
 from dataclasses import dataclass
 from datetime import datetime
 import fnmatch
@@ -40,8 +41,10 @@ MONTHS = (
     "januar", "februar", "mars", "april", "mai", "juni",
     "juli", "august", "september", "oktober", "november", "desember",
 )
-SIZE_CACHE_VERSION = 2
+SIZE_CACHE_VERSION = 3
 SIZE_CACHE_TTL = 24 * 60 * 60
+# sys/stat.h: a dataless object has no locally materialized contents.
+SF_DATALESS = 0x40000000
 
 
 @dataclass
@@ -49,6 +52,45 @@ class Entry:
     path: Path
     relative: Path
     info: os.stat_result
+
+
+def cloud_only(info):
+    return bool(info.st_flags & SF_DATALESS)
+
+
+def prevent_cloud_downloads():
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.setiopolicy_np.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int]
+    libc.setiopolicy_np.restype = ctypes.c_int
+    # sys/resource.h: VFS_MATERIALIZE_DATALESS_FILES, PROCESS, OFF.
+    if libc.setiopolicy_np(3, 0, 1) != 0:
+        code = ctypes.get_errno()
+        raise OSError(code, f"could not disable automatic cloud downloads: {os.strerror(code)}")
+
+
+class CloudOnlyDirectoryError(OSError):
+    pass
+
+
+def entry_name(entry):
+    return display(entry.relative) + (" [cloud-only]" if cloud_only(entry.info) else "")
+
+
+def report_warnings(warnings, root, verbose):
+    if not warnings:
+        return
+    output.section("Warnings")
+    noun = "entry" if len(warnings) == 1 else "entries"
+    output.row("warn", "Incomplete report",
+               f"{len(warnings)} {noun} could not be inspected; totals may be lower.")
+    if verbose:
+        for path, exc in sorted(warnings.items()):
+            name = path.relative_to(root) if path.is_relative_to(root) else path
+            output.row("warn", display(name), display(exc.strerror or str(exc)))
+    else:
+        for reason, count in sorted(Counter(exc.strerror or str(exc) for exc in warnings.values()).items()):
+            output.note(f"{count}: {display(reason)}")
+        output.note(output.paint("Use --verbose for paths.", "dim"))
 
 
 def size_arg(value):
@@ -77,9 +119,11 @@ def parser():
         allow_abbrev=False, formatter_class=argparse.RawDescriptionHelpFormatter,
         description=command_help.description("files") + "\n\n"
                     "Defaults to the current folder; includes hidden entries.\n"
-                    "Never follows symlinks. No exclusions are implicit except .git in leftovers.",
+                    "Never follows symlinks. Leftovers excludes .git and hides tool-managed matches.",
         epilog=command_help.help_epilog("files", "Options (after the command; see files <command> --help):\n"
                "  -r, --recursive  Descend into subfolders\n"
+               "  -v, --verbose  Show warning paths and tool-managed leftover matches\n"
+               "  --local-only  Exclude cloud-only files and folders\n"
                "  --clean  Exclude wipe_clean's shared generated-artifact targets\n"
                "  --clean-git  Exclude generated artifacts and .git entries at every depth\n"
                "  --exclude GLOB  Skip a name or relative-path glob; repeatable\n"
@@ -94,11 +138,16 @@ def parser():
     commands = result.add_subparsers(dest="command", required=True)
     for name, description in COMMANDS.items():
         command = commands.add_parser(name, help=description, description=description, allow_abbrev=False)
+        command.add_argument("-v", "--verbose", action="store_true",
+                             help="show warning paths" +
+                             (" and tool-managed matches" if name == "leftovers" else ""))
         if name == "caches":
             command.add_argument("--limit", type=limit_arg, default=20, metavar="N",
                                  help="maximum rows (default: 20; 0 shows all)")
             continue
         command.add_argument("path", nargs="?", default=".", help="folder to inspect (default: .)")
+        command.add_argument("--local-only", action="store_true",
+                             help="exclude cloud-only files and folders without downloading them")
         command.add_argument("-r", "--recursive", action="store_true",
                              help="also list nested folders" if name == "sizes" else "descend into subfolders")
         command.add_argument("--clean", action="store_true",
@@ -190,7 +239,8 @@ class ScanProgress:
             output.progress_done()
 
 
-def scan(root, recursive, excludes, *, clean=False, warnings=None, progress=None, prune_matches=None):
+def scan(root, recursive, excludes, *, clean=False, warnings=None, progress=None, prune_matches=None,
+         local_only=False):
     entries = []
     inspected = 0
     warnings = warnings if warnings is not None else {}
@@ -201,6 +251,9 @@ def scan(root, recursive, excludes, *, clean=False, warnings=None, progress=None
         if progress:
             progress.update(folder, inspected)
         try:
+            if cloud_only(folder.lstat()):
+                warnings[folder] = CloudOnlyDirectoryError("Cloud-only folder contents were not inspected")
+                continue
             with os.scandir(folder) as children:
                 for child in children:
                     inspected += 1
@@ -218,10 +271,16 @@ def scan(root, recursive, excludes, *, clean=False, warnings=None, progress=None
                     kind = "d" if stat.S_ISDIR(info.st_mode) else "f" if stat.S_ISREG(info.st_mode) else None
                     if any(fnmatch.fnmatchcase(child.name, pattern) for pattern in targets.get(kind, [])):
                         continue
+                    if local_only and cloud_only(info):
+                        continue
                     entries.append(Entry(Path(child.path), relative, info))
                     if (stat.S_ISDIR(info.st_mode) and recursive
                             and not (prune_matches and prune_matches(relative))):
-                        pending.append(Path(child.path))
+                        if cloud_only(info):
+                            warnings[Path(child.path)] = CloudOnlyDirectoryError(
+                                "Cloud-only folder contents were not inspected")
+                        else:
+                            pending.append(Path(child.path))
         except PermissionError as exc:
             if folder == root:
                 raise
@@ -229,9 +288,11 @@ def scan(root, recursive, excludes, *, clean=False, warnings=None, progress=None
     return entries
 
 
-def latest_mtime(path, *, excludes=(), clean=False, progress=None):
+def latest_mtime(path, *, excludes=(), clean=False, progress=None, local_only=False):
     """Inspect all included descendants; unreadable entries fail rather than appear old."""
     info = path.lstat()
+    if stat.S_ISDIR(info.st_mode) and cloud_only(info):
+        raise CloudOnlyDirectoryError("Cloud-only folder contents were not inspected")
     newest = info.st_mtime
     targets = clean_targets() if clean else {}
     pending = [path] if stat.S_ISDIR(info.st_mode) else []
@@ -245,6 +306,8 @@ def latest_mtime(path, *, excludes=(), clean=False, progress=None):
                        or fnmatch.fnmatchcase(relative, pattern) for pattern in excludes):
                     continue
                 info = child.stat(follow_symlinks=False)
+                if local_only and cloud_only(info):
+                    continue
                 kind = "d" if stat.S_ISDIR(info.st_mode) else "f"
                 if any(fnmatch.fnmatchcase(child.name, pattern) for pattern in targets.get(kind, [])):
                     continue
@@ -252,6 +315,8 @@ def latest_mtime(path, *, excludes=(), clean=False, progress=None):
                 inspected += 1
                 if progress:
                     progress.update(folder, inspected)
+                if stat.S_ISDIR(info.st_mode) and cloud_only(info):
+                    raise CloudOnlyDirectoryError("Cloud-only folder contents were not inspected")
                 if stat.S_ISDIR(info.st_mode):
                     pending.append(Path(child.path))
     return newest
@@ -269,18 +334,29 @@ def leftover_reason(relative):
     return None
 
 
+def tool_managed(relative):
+    return ("node_modules" in relative.parts or ".cache" in relative.parts
+            or any(relative.is_relative_to(prefix) for prefix in
+                   (".local/share/fnm", ".vscode/extensions", "Library/Caches")))
+
+
 def report_leftovers(args, root):
     excludes = args.exclude + [".git"]
     warnings = {}
     rows = []
+    hidden = 0
     cutoff = time.time() - args.older_than if args.older_than is not None else None
     progress = ScanProgress(root, True)
     try:
         entries = scan(root, args.recursive, excludes, clean=args.clean or args.clean_git,
-                       warnings=warnings, progress=progress, prune_matches=leftover_reason)
+                       warnings=warnings, progress=progress, prune_matches=leftover_reason,
+                       local_only=args.local_only)
         for entry in entries:
             reason = leftover_reason(entry.relative)
             if not reason or not (stat.S_ISREG(entry.info.st_mode) or stat.S_ISDIR(entry.info.st_mode)):
+                continue
+            if not args.verbose and tool_managed(entry.relative):
+                hidden += 1
                 continue
             denied = {}
             size = None
@@ -292,23 +368,24 @@ def report_leftovers(args, root):
                                              for pattern in excludes
                                              if pattern.startswith(entry.relative.as_posix() + "/")]
                 newest = latest_mtime(entry.path, excludes=local_excludes,
-                                      clean=args.clean or args.clean_git, progress=progress)
+                                      clean=args.clean or args.clean_git, progress=progress,
+                                      local_only=args.local_only)
                 if cutoff is not None and newest > cutoff:
                     continue
                 if folder:
                     size = scan_sizes(entry.path, False, False, local_excludes, include_root=True,
                                       clean=args.clean or args.clean_git, warnings=denied,
-                                      progress=progress)[Path(".")]
+                                      progress=progress, local_only=args.local_only)[Path(".")]
                     if denied:
                         size = None
                 else:
                     size = entry.info.st_blocks * 512
-            except PermissionError as exc:
+            except (PermissionError, CloudOnlyDirectoryError) as exc:
                 denied[entry.path] = exc
             warnings.update(denied)
             # Unknown ages cannot satisfy an explicit age filter.
             if cutoff is None or (newest is not None and not denied):
-                rows.append((size, newest, entry.relative, folder, reason))
+                rows.append((size, newest, entry.relative, folder, reason, cloud_only(entry.info)))
     finally:
         progress.close()
     context = [display(root), "recursive" if args.recursive else "non-recursive"]
@@ -316,31 +393,33 @@ def report_leftovers(args, root):
         context.append("clean: generated artifacts excluded")
     if args.clean_git:
         context.append("clean-git: .git entries excluded")
+    if args.local_only:
+        context.append("local only")
     if warnings:
         context.append("incomplete")
     output.context(*context)
     output.section("Possible leftovers")
     output.note("Name matches only, not a deletion recommendation. Git metadata is excluded.")
-    for size, newest, name, folder, reason in sorted(
+    for size, newest, name, folder, reason, cloud in sorted(
             rows, key=lambda row: (row[0] is None, -(row[0] or 0), row[2]))[:args.limit or None]:
         print(f"  {human_size(size) if size is not None else 'Unknown':>12}  "
               f"{'Folder' if folder else 'File':6}  "
-              f"{output.listing_name(display(name), 'folder' if folder else 'file')}")
+              f"{output.listing_name(display(name), 'folder' if folder else 'file')}"
+              f"{' [cloud-only]' if cloud else ''}")
         modified = modified_time(newest) if newest is not None else "Unknown"
         output.note(f"{reason} │ Last modified: {modified}")
     if not rows:
         output.note("No matches.")
     if args.limit and len(rows) > args.limit:
         output.note(f"Showing {args.limit} of {len(rows)}; use --limit 0 to show all.")
-    if warnings:
-        output.section("Warnings")
-        output.row("warn", "Incomplete report", "Permission-denied entries were skipped.")
-        for path, exc in sorted(warnings.items()):
-            output.row("warn", display(path.relative_to(root)), display(exc.strerror or str(exc)))
+    if hidden:
+        output.note(f"{hidden} tool-managed matches hidden. " +
+                    output.paint("Use --verbose to include.", "dim"))
+    report_warnings(warnings, root, args.verbose)
 
 
 def scan_sizes(root, recursive, direct, excludes, *, logical=False, clean=False, warnings=None,
-               progress=None, include_root=False):
+               progress=None, include_root=False, local_only=False, cloud_paths=None):
     """Keep only folder totals; macOS supplies names, types and sizes in batches."""
     warnings = warnings if warnings is not None else {}
     targets = clean_targets() if clean else {}
@@ -353,6 +432,11 @@ def scan_sizes(root, recursive, direct, excludes, *, logical=False, clean=False,
         folder = root / relative_folder
         subtotal = 0
         try:
+            if cloud_only(folder.lstat()):
+                if cloud_paths is not None:
+                    cloud_paths.add(Path(relative_folder or "."))
+                warnings[folder] = CloudOnlyDirectoryError("Cloud-only folder contents were not inspected")
+                continue
             if progress:
                 progress.update(folder, inspected)
             for name, kind, logical_size, allocated_size, error in directory_entries(folder):
@@ -371,6 +455,13 @@ def scan_sizes(root, recursive, direct, excludes, *, logical=False, clean=False,
                     continue
                 if any(fnmatch.fnmatchcase(name, pattern) for pattern in targets.get(kind, [])):
                     continue
+                if local_only:
+                    try:
+                        if cloud_only((root / relative).lstat()):
+                            continue
+                    except PermissionError as exc:
+                        warnings[root / relative] = exc
+                        continue
                 if kind == "d":
                     totals[relative] = 0
                     if not direct or recursive or depth == 0:
@@ -462,11 +553,7 @@ def report_caches(args):
         output.note(f"Showing {args.limit} of {len(results)}; use --limit 0 to show all.")
     if results:
         output.note("Preview cleanup: clean_caches --dry-run")
-    if warnings:
-        output.section("Warnings")
-        output.row("warn", "Incomplete report", "Some cache folders could not be inspected.")
-        for path, exc in sorted(warnings.items()):
-            output.row("warn", display(path), display(exc.strerror or str(exc)))
+    report_warnings(warnings, home, args.verbose)
 
 
 def signature(info):
@@ -526,7 +613,7 @@ def duplicate_groups(files, warnings=None):
 
 def size_cache_path(root, args):
     settings = [SIZE_CACHE_VERSION, str(root), args.recursive, args.direct, args.logical, args.clean or args.clean_git,
-                args.clean_git, sorted(set(args.exclude))]
+                args.clean_git, args.local_only, sorted(set(args.exclude))]
     if args.clean or args.clean_git:
         settings.append((Path(__file__).resolve().parent / "lib" / "clean-targets.sh").read_text())
     key = hashlib.sha256(json.dumps(settings).encode()).hexdigest()
@@ -534,11 +621,12 @@ def size_cache_path(root, args):
     return base / "dotfiles" / "files-sizes" / f"{key}.json"
 
 
-def save_size_cache(path, totals, warnings):
+def save_size_cache(path, totals, warnings, cloud_paths):
     snapshot = {
         "created": time.time(),
         "totals": {str(name): size for name, size in totals.items()},
         "warnings": {str(name): error.strerror or str(error) for name, error in warnings.items()},
+        "cloud_paths": sorted(str(name) for name in cloud_paths),
     }
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     temporary = None
@@ -574,15 +662,18 @@ def load_size_cache(path):
         created = snapshot["created"]
         totals = snapshot["totals"]
         warnings = snapshot["warnings"]
+        cloud_paths = snapshot["cloud_paths"]
         if (type(created) not in (int, float) or not 0 <= time.time() - created < SIZE_CACHE_TTL
                 or not isinstance(totals, dict) or not isinstance(warnings, dict)
+                or not isinstance(cloud_paths, list) or any(not isinstance(name, str) for name in cloud_paths)
                 or any(not isinstance(name, str) or type(size) is not int or size < 0
                        for name, size in totals.items())
                 or any(not isinstance(name, str) or not isinstance(message, str)
                        for name, message in warnings.items())):
             raise ValueError("invalid or expired snapshot")
         return ({Path(name): size for name, size in totals.items()},
-                {Path(name): PermissionError(message) for name, message in warnings.items()}, created)
+                {Path(name): PermissionError(message) for name, message in warnings.items()},
+                {Path(name) for name in cloud_paths}, created)
     except (FileNotFoundError, ValueError, KeyError, TypeError) as exc:
         raise OSError("no usable sizes cache (missing, expired or invalid); run without --cached to refresh") from exc
 
@@ -601,22 +692,25 @@ def report(args):
         return
     excludes = args.exclude + ([".git"] if args.clean_git else [])
     warnings = {}
+    cloud_paths = set()
     cache_path = size_cache_path(root, args) if sizes else None
     if sizes:
         clean_size_cache(cache_path.parent)
     progress = ScanProgress(root, sizes)
     try:
         if cached:
-            totals, warnings, created = load_size_cache(cache_path)
+            totals, warnings, cloud_paths, created = load_size_cache(cache_path)
             entries = []
         elif sizes:
             totals = scan_sizes(root, args.recursive, args.direct, excludes, logical=args.logical,
-                                clean=args.clean or args.clean_git, warnings=warnings, progress=progress)
-            save_size_cache(cache_path, totals, warnings)
+                                clean=args.clean or args.clean_git, warnings=warnings, progress=progress,
+                                local_only=args.local_only, cloud_paths=cloud_paths)
+            save_size_cache(cache_path, totals, warnings, cloud_paths)
             entries = []
         else:
             entries = scan(root, args.recursive, excludes,
-                           clean=args.clean or args.clean_git, warnings=warnings, progress=progress)
+                           clean=args.clean or args.clean_git, warnings=warnings, progress=progress,
+                           local_only=args.local_only)
     finally:
         progress.close()
     files = [entry for entry in entries if stat.S_ISREG(entry.info.st_mode)]
@@ -630,13 +724,13 @@ def report(args):
     elif args.command == "large":
         selected = sorted((entry for entry in files if entry.info.st_size >= args.min),
                           key=lambda entry: (-entry.info.st_size, entry.relative.as_posix()))
-        rows = [(human_size(entry.info.st_size), display(entry.relative)) for entry in selected]
+        rows = [(human_size(entry.info.st_size), entry_name(entry)) for entry in selected]
     elif args.command == "changed":
         cutoff = time.time() - args.since if args.since is not None else None
         for entry in sorted(files, key=lambda entry: (-entry.info.st_mtime_ns, entry.relative.as_posix())):
             if cutoff is not None and entry.info.st_mtime < cutoff:
                 continue
-            rows.append((modified_time(entry.info.st_mtime), display(entry.relative)))
+            rows.append((modified_time(entry.info.st_mtime), entry_name(entry)))
     elif args.command == "sizes":
         incomplete = set()
         for path in warnings:
@@ -644,13 +738,14 @@ def report(args):
             incomplete.add(relative)
             incomplete.update([relative.parent] if args.direct else relative.parents)
         rows = [("Unknown" if name in incomplete else human_size(size),
-                 output.listing_name(display(name), "folder")) for name, size in
+                 output.listing_name(display(name), "folder") +
+                 (" [cloud-only]" if name in cloud_paths else "")) for name, size in
                 sorted(totals.items(), key=lambda item: (-item[1], item[0]))
                 if args.recursive or len(name.parts) == 1]
     elif args.command == "empty":
-        rows = [("File", display(entry.relative)) for entry in files if not entry.info.st_size]
+        rows = [("File", entry_name(entry)) for entry in files if not entry.info.st_size]
         for entry in folders:
-            if entry.path in warnings:
+            if entry.path in warnings or cloud_only(entry.info):
                 continue
             try:
                 with os.scandir(entry.path) as children:
@@ -669,7 +764,7 @@ def report(args):
         rows = [(f"{count:>6}  {human_size(size):>12}", display(extension))
                 for extension, (count, size) in sorted(totals.items(), key=lambda item: (-item[1][0], item[0]))]
     elif args.command == "duplicates":
-        groups = duplicate_groups(files, warnings)
+        groups = duplicate_groups([entry for entry in files if not cloud_only(entry.info)], warnings)
 
     scope = ("all folders" if args.recursive else "child folders") if sizes else (
         "recursive" if args.recursive else "non-recursive")
@@ -681,10 +776,18 @@ def report(args):
         context.append("clean: generated artifacts excluded")
     if args.clean_git:
         context.append("clean-git: .git entries excluded")
+    if args.local_only:
+        context.append("local only")
     if warnings:
         context.append("incomplete")
     output.context(*context)
     output.section(args.command.capitalize())
+    cloud_count = sum(cloud_only(entry.info) for entry in entries) + len(cloud_paths)
+    if cloud_count:
+        noun = "entry" if cloud_count == 1 else "entries"
+        output.note(f"{cloud_count} cloud-only {noun}; cloud-only folders are not traversed.")
+        if args.command == "duplicates":
+            output.note("Cloud-only files are not hashed or downloaded.")
     if args.command == "sizes":
         output.note(("Logical file bytes; " if args.logical else "Allocated file bytes; ") +
                     ("direct files only." if args.direct else "includes all subfolders."))
@@ -718,16 +821,13 @@ def report(args):
     limit = getattr(args, "limit", 0)
     if limit and total > limit:
         output.note(f"Showing {limit} of {total}; use --limit 0 to show all.")
-    if warnings:
-        output.section("Warnings")
-        output.row("warn", "Incomplete report", "Permission-denied entries were skipped; totals may be lower.")
-        for path, exc in sorted(warnings.items()):
-            output.row("warn", display(path.relative_to(root)), display(exc.strerror or str(exc)))
+    report_warnings(warnings, root, args.verbose)
 
 
 def main(argv=None):
     args = parser().parse_args(argv)
     try:
+        prevent_cloud_downloads()
         report(args)
     except OSError as exc:
         print(f"Error: {display(exc)}", file=sys.stderr)

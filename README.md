@@ -272,6 +272,21 @@ directories and worktree pointer files at every depth. It does not hide
 | `files caches` | Rank existing developer cache folders by allocated bytes, including all nested contents; read-only, with `--limit 0` for every result |
 | `files leftovers -r` | Rank possible agent/temporary leftovers by allocated bytes, with File/Folder, latest descendant modification and match reason; never deletes |
 
+All reports summarize unreadable entries by reason. Add `--verbose` (`-v`) to
+show each affected path; the report remains marked incomplete either way.
+
+Cloud-only entries are marked `[cloud-only]` wherever their paths are listed.
+Use `--local-only` with any path-based report to exclude them, for example
+`files large -r --local-only`. Detection uses macOS's dataless flag, not zero
+allocated bytes or the folder name. Downloaded iCloud files remain included.
+Cloud-only folders are never traversed, their contents are unknown, and
+`duplicates` skips cloud-only files. The process disables automatic cloud
+downloads for every report.
+
+`~/Library/Mobile Documents` contains iCloud Drive (`com~apple~CloudDocs`)
+and app-specific iCloud containers. It can contain both downloaded files and
+cloud-only placeholders; it is not itself a cache or cleanup target.
+
 `files leftovers` matches agent configuration/session names (`.claude`,
 `.cursor`, `.gemini`, `.copilot`, `.cursorrules`, `.aider*`), agent logs
 (`*.agent.log`) and broad temporary/workspace names (`tmp.*`, `wt-*`,
@@ -285,6 +300,10 @@ no modification in the included subtree, or use the usual exclusions and
 `--limit 0`. Last modification includes descendants, so this report performs
 an additional metadata traversal beyond native sizing. Unreadable ages do
 not qualify for an age filter and produce warnings.
+Matches inside `node_modules`, `.cache`, `.local/share/fnm`,
+`.vscode/extensions` and `Library/Caches` are hidden and counted separately;
+`--verbose` includes them. Agent folders outside these tool-managed trees
+remain visible, without implying they should be deleted.
 
 `files caches` checks known default locations for npm, pnpm, Bun, Homebrew,
 pip, uv (honouring `XDG_CACHE_HOME`), Go, Gradle, Cargo, Playwright and Xcode

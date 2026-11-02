@@ -14,6 +14,7 @@ import stat
 import struct
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
@@ -64,6 +65,128 @@ class FilesTests(unittest.TestCase):
         self.assertEqual(code, 0, stderr.getvalue())
         self.assertEqual(stderr.getvalue(), "")
         return stdout.getvalue()
+
+    @contextlib.contextmanager
+    def cloud_metadata(self, *paths):
+        flagged = set(paths)
+        original_stat, original_scan = Path.lstat, os.scandir
+
+        def metadata(path, info):
+            fields = {name: getattr(info, name) for name in dir(info) if name.startswith("st_")}
+            # SF_DATALESS from macOS sys/stat.h, independent of the command's constant.
+            fields["st_flags"] = 0x40000000 if Path(path) in flagged else info.st_flags
+            return SimpleNamespace(**fields)
+
+        @contextlib.contextmanager
+        def children(path):
+            if Path(path) in flagged:
+                raise AssertionError("cloud-only folder traversed")
+            with original_scan(path) as entries:
+                yield iter(SimpleNamespace(
+                    name=child.name, path=child.path,
+                    stat=lambda *, follow_symlinks, child=child: metadata(
+                        child.path, child.stat(follow_symlinks=follow_symlinks)),
+                ) for child in entries)
+
+        with patch.object(FILES.os, "scandir", side_effect=children), \
+                patch.object(Path, "lstat", lambda path: metadata(path, original_stat(path))):
+            yield
+
+    def test_cloud_only_labels_and_local_filter_do_not_hide_downloaded_icloud_files(self):
+        folder = self.root / "Library/Mobile Documents/com~apple~CloudDocs"
+        folder.mkdir(parents=True)
+        remote, local = folder / "remote.txt", folder / "local.txt"
+        remote.write_bytes(b"same")
+        local.write_bytes(b"same")
+        with self.cloud_metadata(remote):
+            for command in ("large", "changed"):
+                with self.subTest(command=command):
+                    text = self.run_report(command, "-r", "--limit", "0")
+                    self.assertIn("remote.txt [cloud-only]", text)
+                    self.assertIn("local.txt", text)
+                    filtered = self.run_report(command, "-r", "--local-only", "--limit", "0")
+                    self.assertNotIn("remote.txt", filtered)
+                    self.assertIn("local.txt", filtered)
+            text = self.run_report("count", "-r")
+            self.assertIn("1 cloud-only entry", text)
+            filtered = self.run_report("count", "-r", "--local-only")
+            self.assertRegex(filtered, r"Files\s+8\b")
+            with patch.object(FILES, "digest", wraps=FILES.digest) as digest:
+                text = self.run_report("duplicates", "-r")
+            self.assertNotIn(remote, [call.args[0].path for call in digest.call_args_list])
+            self.assertIn("local.txt", text)
+            self.assertIn("Cloud-only files are not hashed", text)
+
+    def test_sizes_local_filter_and_cached_cloud_folder_labels(self):
+        remote, folder = self.root / "sub/large.bin", self.root / "cloud-folder"
+        folder.mkdir()
+        with self.cloud_metadata(remote, folder):
+            for command in ("count", "empty", "leftovers"):
+                text = self.run_report(command, "-r")
+                self.assertIn("Incomplete report", text)
+                self.assertIn("Cloud-only folder contents were not inspected", text)
+                if command == "empty":
+                    self.assertNotRegex(text, r"Folder\s+cloud-folder")
+            text = self.run_report("sizes", "--logical", "--limit", "0")
+            self.assertRegex(text, r"Unknown\s+cloud-folder \[cloud-only\]")
+            with patch.object(FILES, "scan_sizes", side_effect=AssertionError("rescan")):
+                cached = self.run_report("sizes", "--logical", "--cached", "--limit", "0")
+            self.assertIn("cloud-folder [cloud-only]", cached)
+            filtered = self.run_report("sizes", "--logical", "--local-only", "--limit", "0")
+            self.assertRegex(filtered, r"2 B\s+sub\b")
+            self.assertNotIn("cloud-folder", filtered)
+            self.assertNotIn("Unknown", filtered)
+
+    def test_local_only_keeps_sparse_files_and_leftover_age_ignores_excluded_cloud_files(self):
+        sparse = self.root / "sparse.bin"
+        with sparse.open("wb") as file:
+            file.truncate(1024 * 1024)
+        candidate = self.root / "tmp.old"
+        candidate.mkdir()
+        remote = candidate / "cloud.txt"
+        remote.write_text("remote")
+        for path in (candidate, sparse):
+            os.utime(path, (0, 0))
+        with self.cloud_metadata(remote):
+            text = self.run_report("large", "--local-only")
+            self.assertIn("sparse.bin", text)
+            self.assertNotIn("[cloud-only]", text)
+            self.assertNotIn("tmp.old", self.run_report("leftovers", "--older-than", "7d"))
+            filtered = self.run_report("leftovers", "--older-than", "7d", "--local-only")
+            self.assertIn("tmp.old", filtered)
+            self.assertRegex(filtered, r"0 B\s+Folder\s+tmp.old")
+
+    def test_cloud_download_policy_failure_is_explicit_and_does_not_scan(self):
+        libc = Mock()
+        libc.setiopolicy_np.return_value = -1
+        with patch.object(FILES.ctypes, "CDLL", return_value=libc), \
+                patch.object(FILES.ctypes, "get_errno", return_value=errno.EPERM), \
+                patch.object(FILES, "report") as report, \
+                contextlib.redirect_stderr(io.StringIO()) as stderr:
+            self.assertEqual(FILES.main(["large", str(self.root)]), 1)
+        libc.setiopolicy_np.assert_called_once_with(3, 0, 1)
+        report.assert_not_called()
+        self.assertIn("Operation not permitted", stderr.getvalue())
+
+    def test_leftovers_hides_tool_managed_matches_but_keeps_agent_configuration(self):
+        for name in ("node_modules/tool/tmp.js", "Library/Caches/tool/tmp.state",
+                     ".cache/tool/tmp.js", ".local/share/fnm/lib/tmp.js",
+                     ".vscode/extensions/tool/.claude/config"):
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("keep")
+        (self.root / ".copilot").mkdir()
+        (self.root / "tmp.project").write_text("candidate")
+        default = self.run_report("leftovers", "-r", "--limit", "0")
+        self.assertIn(".copilot", default)
+        self.assertIn("tmp.project", default)
+        self.assertIn("5 tool-managed matches hidden", default)
+        self.assertNotIn("tmp.js", default)
+        self.assertNotIn("tmp.state", default)
+        verbose = self.run_report("leftovers", "-r", "--verbose", "--limit", "0")
+        self.assertIn("node_modules/tool/tmp.js", verbose)
+        self.assertIn(".vscode/extensions/tool/.claude", verbose)
+        self.assertNotIn("matches hidden", verbose)
 
     def test_leftovers_lists_sizes_categories_without_duplicate_subtrees_or_symlinks(self):
         config = self.root / ".claude"
@@ -165,12 +288,16 @@ class FilesTests(unittest.TestCase):
 
         with patch.object(FILES, "directory_entries", side_effect=denied):
             text = self.run_caches()
+            verbose = self.run_caches("--verbose")
         self.assertRegex(text, r"Unknown\s+npm")
         self.assertRegex(text, r"Unknown\s+Gradle")
         self.assertRegex(text, r"Unknown\s+Bun")
         self.assertIn("Incomplete report", text)
         self.assertIn("Permission denied", text)
         self.assertIn("Symlink cache skipped", text)
+        self.assertIn("Use --verbose for paths", text)
+        self.assertNotIn(".npm/nested", text)
+        self.assertIn(".npm/nested", verbose)
 
     def test_caches_honours_xdg_uv_location_and_empty_report(self):
         text = self.run_caches()
@@ -246,7 +373,7 @@ class FilesTests(unittest.TestCase):
 
     def test_cache_missing_expired_and_different_options_fail_without_rescan(self):
         self.run_report("sizes")
-        for options in (["--direct"], ["-r"], ["--logical"], ["--clean"], ["--clean-git"],
+        for options in (["--direct"], ["-r"], ["--logical"], ["--clean"], ["--clean-git"], ["--local-only"],
                         ["--exclude", "sub"]):
             with self.subTest(options=options), contextlib.redirect_stderr(io.StringIO()) as stderr:
                 self.assertEqual(FILES.main(["sizes", "--cached", *options, str(self.root)]), 1)
@@ -645,7 +772,7 @@ class FilesTests(unittest.TestCase):
             with self.subTest(command=command), \
                     patch.object(FILES.os, "scandir", side_effect=denied), \
                     patch.object(FILES, "directory_entries", side_effect=denied_native):
-                text = self.run_report(command, "-r")
+                text = self.run_report(command, "-r", "--verbose")
             self.assertIn("Incomplete report", text)
             self.assertIn("sub/nested", text)
             if command == "sizes":
@@ -655,6 +782,32 @@ class FilesTests(unittest.TestCase):
                 self.assertNotRegex(text, r"Folder\s+sub/nested")
             if command == "count":
                 self.assertRegex(text, r"Files\s+6\b")
+
+    def test_warning_paths_are_verbose_only_across_reports(self):
+        original, original_native = os.scandir, FILES.directory_entries
+        denied_path = self.root / "sub/nested"
+
+        def denied(path):
+            if Path(path) == denied_path:
+                raise PermissionError(errno.EPERM, "Operation not permitted", str(path))
+            return original(path)
+
+        def denied_native(path):
+            if Path(path) == denied_path:
+                raise PermissionError(errno.EPERM, "Operation not permitted", str(path))
+            return original_native(path)
+
+        for command in FILES.COMMANDS.keys() - {"caches"}:
+            with self.subTest(command=command), \
+                    patch.object(FILES.os, "scandir", side_effect=denied), \
+                    patch.object(FILES, "directory_entries", side_effect=denied_native):
+                compact = self.run_report(command, "-r").split("─ Warnings")[1]
+                verbose = self.run_report(command, "-r", "--verbose").split("─ Warnings")[1]
+                self.assertIn("1 entry could not be inspected", compact)
+                self.assertIn("1: Operation not permitted", compact)
+                self.assertIn("Use --verbose for paths", compact)
+                self.assertNotIn("sub/nested", compact)
+                self.assertIn("sub/nested", verbose)
 
     def test_denied_metadata_skips_only_that_entry(self):
         original = os.scandir
@@ -680,7 +833,7 @@ class FilesTests(unittest.TestCase):
 
         with patch.object(FILES.os, "scandir", side_effect=denied), \
                 patch.object(FILES, "directory_entries", side_effect=denied_native):
-            text = self.run_report("sizes", "-r")
+            text = self.run_report("sizes", "-r", "--verbose")
             file_text = self.run_report("large", "-r")
         self.assertRegex(text, r"Unknown\s+sub")
         self.assertIn("sub/large.bin", text)
