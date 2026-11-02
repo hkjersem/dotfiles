@@ -463,7 +463,9 @@ A branch is deleted only when its remote branch is gone and its commits are
 confirmed on the remote, for example through a merged pull request. Anything
 uncertain is listed for review instead. With `--include-merged`, local
 branches already merged into the default branch are deleted too, even when
-their remote branch still exists; the remote branch is kept. Never-pushed
+their remote branch still exists; the remote branch is kept. The flag also
+includes branches tracking another local branch when their commits are
+confirmed on a remote, including pull request heads. Never-pushed
 branches, repositories without a remote, and protected names such as `main`
 are never deleted. A
 branch's linked worktree is removed first, and only when it has no

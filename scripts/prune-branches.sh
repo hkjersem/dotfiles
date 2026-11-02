@@ -37,8 +37,9 @@ Options:
   -n, --dry-run    Show the plan without prompting or deleting
   --yes, -y        Skip the confirmation prompt
   --include-merged Also delete local branches already merged into the remote's
-                   default branch whose remote branch still exists (the remote
-                   branch is kept)
+                   default branch, keeping their remote branch; also include
+                   branches tracking a local branch when their commits are
+                   confirmed on a remote (including pull request heads)
   --include-detached Also remove clean detached linked worktrees with remotely confirmed commits
   --older-than AGE Retain recent tips/worktrees (e.g. 24h, 7d); includes descendants outside .git
   --no-fetch       Use existing remote-tracking refs (requires --dry-run)
