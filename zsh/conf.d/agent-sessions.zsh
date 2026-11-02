@@ -252,12 +252,22 @@ _agent_session_expired() {
 # agent's arguments for cplt. REPLY names the new record if a hangup kept it.
 _agent_session_run() {
   emulate -L zsh
-  local launcher=$1 agent=$2 sep id tracked marker follower ret tty fd
+  local launcher=$1 agent=$2 sep id tracked marker follower ret tty fd arg model
   shift 2
   sep=${@[(i)--]}
   local -a launcher_args=("${@[1,sep-1]}") agent_args=("${@[sep+1,-1]}")
   local -a context_args
   local -x DOTFILES_AGENT_SESSION= DOTFILES_AGENT_KIND=$agent
+
+  if [[ $agent == copilot && -n ${DOTFILES_COPILOT_MODEL:-} ]]; then
+    for arg in "${agent_args[@]}"; do
+      case $arg in
+        --) break ;;
+        --model|--model=*) model=explicit; break ;;
+      esac
+    done
+    [[ -n $model ]] || agent_args=(--model "$DOTFILES_COPILOT_MODEL" "${agent_args[@]}")
+  fi
 
   if [[ $launcher == cplt && $agent == copilot ]]; then
     _agent_session_copilot_id "${launcher_args[@]}" "${agent_args[@]}"
@@ -428,6 +438,8 @@ _agent_session_resume() {
   [[ -t 0 && -z $CPLT_NO_RESUME && -z $__CPLT_WRAPPED && -d $_agent_sessions_dir ]] || return
   local f cwd launcher line pid started claim id agent app activity file owner ret=0
   local _agent_session_resume_claim
+  # Automatic restores leave model selection to the saved session.
+  local DOTFILES_COPILOT_MODEL=
   local -a launcher_args resume claims
   for file in "$_agent_sessions_dir"/*.*(N.m+6); do
     f=${file:h}/${${file:t}%%.*}

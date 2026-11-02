@@ -341,6 +341,62 @@ class AgentSessionsTest(unittest.TestCase):
             ["copilot", "--resume", ID_A],
         ])
 
+    def test_local_model_default_reaches_both_launchers(self):
+        self.run_zsh("copilot; cplt --preset strict",
+                     DOTFILES_COPILOT_MODEL="claude-opus-5.5")
+        direct, sandboxed = self.args()
+        self.assertEqual(direct[:2], ["copilot", "--session-id"])
+        self.assertRegex(direct[2], f"^{UUID}$")
+        self.assertEqual(direct[3:], ["--model", "claude-opus-5.5"])
+        self.assertEqual(sandboxed[:9],
+                         ["cplt", "--preset", "strict", *CONTEXT, "--", "--allow-all"])
+        self.assertEqual(sandboxed[9], "--session-id")
+        self.assertRegex(sandboxed[10], f"^{UUID}$")
+        self.assertEqual(sandboxed[11:], ["--model", "claude-opus-5.5"])
+        self.assertEqual(self.markers(), [])
+
+    def test_explicit_model_overrides_local_default(self):
+        self.run_zsh(
+            "copilot --continue --model x; copilot --continue --model=y; "
+            "cplt -- --continue --model x; cplt -- --continue --model=y",
+            DOTFILES_COPILOT_MODEL="claude-opus-5.5",
+        )
+        self.assertEqual(self.args(), [
+            ["copilot", "--continue", "--model", "x"],
+            ["copilot", "--continue", "--model=y"],
+            ["cplt", *CONTEXT, "--", "--allow-all", "--continue", "--model", "x"],
+            ["cplt", *CONTEXT, "--", "--allow-all", "--continue", "--model=y"],
+        ])
+
+    def test_local_model_default_does_not_change_claude(self):
+        self.run_zsh(
+            f"claude --resume {ID_A}; cplt --agent claude -- --resume {ID_A}",
+            DOTFILES_COPILOT_MODEL="claude-opus-5.5",
+        )
+        self.assertEqual(self.args(), [
+            ["claude", "--resume", ID_A],
+            ["cplt", "--agent", "claude", *CONTEXT, "--",
+             "--dangerously-skip-permissions", "--resume", ID_A],
+        ])
+
+    def test_automatic_restore_skips_model_default_without_changing_later_launches(self):
+        for launcher in ("copilot", "cplt"):
+            with self.subTest(launcher=launcher):
+                self.write_marker(ID_A, self.project, launcher=launcher)
+                count = len(self.calls())
+                pid, fd = self.interactive_shell(
+                    self.project, DOTFILES_COPILOT_MODEL="claude-opus-5.5")
+                self.wait_for_calls(fd, count + 1)
+                expected = (["copilot"] if launcher == "copilot" else
+                            ["cplt", "--agent", "copilot", *CONTEXT, "--", "--allow-all"])
+                self.assertEqual(self.args()[-1], [*expected, f"--resume={ID_A}"])
+                os.write(fd, b"copilot --continue\n")
+                self.wait_for_calls(fd, count + 2)
+                self.exit_shell(pid, fd)
+                self.assertEqual(self.args()[-1],
+                                 ["copilot", "--model", "claude-opus-5.5", "--continue"])
+                self.assertEqual(self.markers(), [])
+
     def test_untrackable_runs_get_no_session_id(self):
         self.run_zsh("cplt -- -p 'fix it'; copilot --resume --prompt='fix it'; copilot --acp")
         self.assertEqual(self.args(), [
@@ -358,7 +414,8 @@ class AgentSessionsTest(unittest.TestCase):
     def test_subcommands_and_other_agents_pass_through(self):
         self.run_zsh("cplt config show; cplt exec -- env; cplt --agent opencode; cplt --agent=pi -- x; "
                      "cplt --preset strict config path; cplt --no-allow-tmp-exec doctor; "
-                     "copilot login; copilot --version; copilot mcp list")
+                     "copilot login; copilot --version; copilot mcp list",
+                     DOTFILES_COPILOT_MODEL="claude-opus-5.5")
         self.assertEqual(self.args(), [
             ["cplt", "config", "show"], ["cplt", "exec", "--", "env"], ["cplt", "--agent", "opencode"],
             ["cplt", "--agent=pi", "--", "x"], ["cplt", "--preset", "strict", "config", "path"],

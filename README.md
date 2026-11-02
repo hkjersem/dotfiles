@@ -514,6 +514,15 @@ without tracking activity, and never while their shell is still running.
 Failed automatic launches keep their record for the next terminal to retry.
 `CPLT_NO_RESUME=1` turns resuming off.
 
+To set a machine-local Copilot model through an explicit CLI flag, add
+`DOTFILES_COPILOT_MODEL='<model-id>'` to `~/.zshrc_local`, using your chosen
+model's CLI identifier.
+Both `copilot` and `cplt` (when running Copilot) use it for manual launches.
+Automatic session restoration leaves model selection to the saved session.
+An explicit `--model` takes precedence; subcommands
+and other agents are unchanged. Leave the variable unset or empty to use
+Copilot's own default. `command copilot` and `command cplt` bypass this too.
+
 Run `agent-sessions` for a read-only table of recorded sessions: project,
 session ID prefix, title, terminal app, launcher, owning shell PID and restoration status.
 Live sessions come first, followed by waiting sessions and other records;
