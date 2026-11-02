@@ -242,117 +242,30 @@ bundle it; `npm_globals_diff <version_a> [version_b]` compares globals;
 ## Inspect files and folders
 
 `files <command> [options] [path]` reports on the current folder by default.
-Except for the global `caches` report, commands support `-r`/`--recursive` and repeatable `--exclude GLOB`
-(matching an entry name or relative path). Hidden and Git-ignored entries are
-included unless explicitly excluded (`leftovers` always excludes `.git`). Symlinks are never followed, including
-the target folder itself. Nothing is deleted or modified. Zsh completes
-subcommand names and flags from the command's help.
-Folder names use the shell's BSD `ls` colours (`LSCOLORS`), without trailing
-slashes. Mixed empty-entry results keep explicit `File` and `Folder` labels;
-redirected output and `NO_COLOR` remain plain. Colours use the terminal palette,
-so light and dark themes apply just as they do to `ls`.
-
-Add `--clean` to a folder-report subcommand to exclude the generated directories and file
-patterns shared with `wipe_clean` and `copy_clean` (such as `node_modules`,
-`dist`, `.venv` and `*.tsbuildinfo`). The report marks when this filter is active.
-It does not exclude Git metadata or apply `.gitignore`.
-Use `--clean-git` for the same generated-artifact exclusions plus `.git`
-directories and worktree pointer files at every depth. It does not hide
-`.gitignore`, `.github`, or other Git-ignored project files.
+Reports are read-only and never follow symlinks. Hidden files are included.
+Except for the global `caches` report, commands support `-r`/`--recursive`
+and repeatable `--exclude GLOB`. Listings default to 20 rows; `--limit 0` shows all.
 
 | Command | What it does |
 |---|---|
-| `files count -r` | Separate totals for files, folders, symlinks and other entries; excludes the root itself |
-| `files large -r --min 100M` | Largest files first; size suffixes use powers of 1024 |
-| `files changed -r --since 7d` | Files by modification time, newest first, with local timestamps; ages accept `m`, `h`, `d`, `w` |
-| `files sizes` | Allocated file bytes per immediate child folder, including all its subfolders; `-r` also lists nested folders, `--direct` counts only direct files per listed folder, and `--logical` reports file lengths instead |
-| `files empty -r` | Zero-byte files and genuinely empty folders, not folders made empty by exclusions |
-| `files types -r` | Counts and bytes by final extension, case-insensitive; dotfiles without a suffix have no extension |
-| `files duplicates -r` | SHA-256 content matches, grouped by size first; skips empty files and counts hard links once |
-| `files caches` | Rank existing developer cache folders by allocated bytes, including all nested contents; read-only, with `--limit 0` for every result |
-| `files leftovers -r` | Rank possible agent/temporary leftovers by allocated bytes, with File/Folder, latest descendant modification and match reason; never deletes |
+| `files count -r` | Count files, folders and symlinks |
+| `files large -r --min 100M` | Largest files first |
+| `files changed -r --since 7d` | Recently modified files |
+| `files sizes` | Allocated bytes per child folder, including subfolders |
+| `files empty -r` | Zero-byte files and genuinely empty folders |
+| `files types -r` | Counts and bytes by extension |
+| `files duplicates -r` | Group identical nonempty files |
+| `files caches` | Rank known developer caches |
+| `files leftovers -r` | Possible agent/temporary leftovers; not deletion recommendations |
 
-All reports summarize unreadable entries by reason. Add `--verbose` (`-v`) to
-show each affected path; the report remains marked incomplete either way.
+Use `--clean` to exclude generated artifacts, or `--clean-git` to exclude
+Git metadata too. Warnings are summarized; `--verbose` shows affected paths
+and hidden tool-managed leftover matches. Cloud-only paths are marked
+`[cloud-only]`; `--local-only` excludes them without excluding downloaded
+iCloud files. Reports do not trigger cloud downloads.
 
-Cloud-only entries are marked `[cloud-only]` wherever their paths are listed.
-Use `--local-only` with any path-based report to exclude them, for example
-`files large -r --local-only`. Detection uses macOS's dataless flag, not zero
-allocated bytes or the folder name. Downloaded iCloud files remain included.
-Cloud-only folders are never traversed, their contents are unknown, and
-`duplicates` skips cloud-only files. The process disables automatic cloud
-downloads for every report.
-
-`~/Library/Mobile Documents` contains iCloud Drive (`com~apple~CloudDocs`)
-and app-specific iCloud containers. It can contain both downloaded files and
-cloud-only placeholders; it is not itself a cache or cleanup target.
-
-`files leftovers` matches agent configuration/session names (`.claude`,
-`.cursor`, `.gemini`, `.copilot`, `.cursorrules`, `.aider*`), agent logs
-(`*.agent.log`) and broad temporary/workspace names (`tmp.*`, `wt-*`,
-`agent-workspace*`, `agent-work-*`, `nav-pilot-e2e-bin*`). These are candidates
-for inspection, not proof that anything is disposable. Only the requested
-directory is searched; `-r` discovers nested candidates. Matching folders are
-shown once with their full included subtree size. Git metadata is excluded;
-symlink candidates are omitted and destinations never followed. File contents
-are never read. Add `--older-than 7d` to require
-no modification in the included subtree, or use the usual exclusions and
-`--limit 0`. Last modification includes descendants, so this report performs
-an additional metadata traversal beyond native sizing. Unreadable ages do
-not qualify for an age filter and produce warnings.
-Matches inside `node_modules`, `.cache`, `.local/share/fnm`,
-`.vscode/extensions` and `Library/Caches` are hidden and counted separately;
-`--verbose` includes them. Agent folders outside these tool-managed trees
-remain visible, without implying they should be deleted.
-
-`files caches` checks known default locations for npm, pnpm, Bun, Homebrew,
-pip, uv (honouring `XDG_CACHE_HOME`), Go, Gradle, Cargo, Playwright and Xcode
-DerivedData. It always scans recursively and does not use the size snapshot
-cache. Missing folders are omitted; inaccessible folders show `Unknown` with
-warnings, and symlink roots are reported but not followed. Custom tool cache
-locations are not discovered, and no package managers or cleanup tools run.
-This subcommand accepts only `--limit` and `--help`, not a target path. When
-caches are found, it ends with a hint to preview cleanup with `clean_caches --dry-run`.
-
-Listings show up to 20 rows or duplicate groups; `--limit 0` shows all.
-`sizes` always scans nested contents for totals unless `--direct` is set;
-its `-r` flag expands the listing rather than changing how totals are calculated.
-Parent and nested folder totals overlap, so do not sum rows from `sizes -r`.
-Size scans use macOS's bulk metadata API and retain folder totals rather than
-the whole file list. No compiler or additional dependency is needed; normal
-runs read current metadata.
-Fresh size runs atomically save the full snapshot, including warnings, under
-`${XDG_CACHE_HOME:-~/.cache}/dotfiles/files-sizes/`. Use `files sizes --cached`
-to reuse it with a different `--limit` without inspecting the target folder.
-Cached output shows its age; snapshots expire after 24 hours and are replaced
-by fresh runs with the same folder and scan options (including recursion,
-direct mode and exclusions). Missing, invalid or expired caches produce an
-error, never an automatic rescan. Each `files sizes` invocation, including
-`--cached`, deletes snapshot files last written at least 24 hours ago from this
-cache directory. No background service runs; files remain while the command
-is unused. Cached results do not reflect added, removed or changed files.
-On a terminal, size scans lasting over two seconds show an updating progress
-line with the current folder and entry count. It clears before the report or
-on interruption; redirected output stays plain.
-`count` always shows all totals. `sizes` reports allocated file-data bytes by
-default, so sparse files count only their allocated data. Use `--logical` to
-report full file lengths instead. Shared APFS blocks can be counted more than
-once; outside duplicate detection, hard-linked paths count separately.
-Duplicate savings are estimates excluding hard-linked copies; APFS sharing may
-reduce actual savings. Permission-denied entries are skipped with path-specific
-warnings and an incomplete-report marker; affected child folder sizes show
-`Unknown`, not zero. An unreadable target folder, other I/O errors, or detected
-changes during duplicate hashing still fail explicitly. Filesystem reports are snapshots, not a
-transactional view of concurrently changing folders.
-
-```sh
-files large -r --exclude node_modules --exclude .git ~/Developer
-files count -r --clean
-files sizes -r --clean-git
-files sizes -r --clean-git --cached --limit 0
-files duplicates -r --limit 0 ~/Downloads
-files changed --help
-```
+See [file reports](docs/files.md) for all options, size caching, iCloud
+behaviour, leftover matching and examples.
 
 ## Clean and copy projects
 
