@@ -14,6 +14,7 @@ FNM_STUB = r'''
 import json
 import os
 from pathlib import Path
+import shutil
 import sys
 
 path = Path(os.environ["FNM_TEST_STATE"])
@@ -67,13 +68,23 @@ elif args[:1] == ["exec"] and args[1].startswith("--using="):
             if not matches:
                 reject()
             print(max(matches, key=lambda v: tuple(map(int, v[1:].split(".")))))
+    elif command == ["node", "-p", "process.execPath"]:
+        print(Path(os.environ["FNM_DIR"]) / "node-versions" / using /
+              "installation" / "bin" / "node")
     elif command[:2] == ["npm", "list"] and using in state["installed"]:
         fail("enumerate")
         print(state.get("globals_raw", json.dumps(state["globals"])))
     elif command == ["corepack", "--version"] and using in state["installed"]:
-        if not (state.get("bundled_corepack", True) or state.get("corepack_installed")):
+        target_corepack = (Path(os.environ["FNM_DIR"]) / "node-versions" /
+                           using / "installation" / "bin" / "corepack")
+        executable = str(target_corepack) if target_corepack.exists() else shutil.which("corepack")
+        if not executable:
             sys.exit(127)
-        print("0.36.0")
+        os.execv(executable, [executable, "--version"])
+    elif command and command[0].endswith("/corepack") and command[1:] == ["enable"]:
+        fail("corepack_enable")
+        state["corepack_enabled"] = using
+        save()
     elif command == ["corepack", "enable"] and using in state["installed"]:
         fail("corepack_enable")
         state["corepack_enabled"] = using
@@ -81,6 +92,10 @@ elif args[:1] == ["exec"] and args[1].startswith("--using="):
     elif command == ["npm", "install", "-g", "--", "corepack"] and using in state["installed"]:
         fail("corepack_install")
         state["corepack_installed"] = using
+        corepack = (Path(os.environ["FNM_DIR"]) / "node-versions" /
+                    using / "installation" / "bin" / "corepack")
+        corepack.write_text("#!/bin/sh\necho 0.36.0\n")
+        corepack.chmod(0o755)
         save()
     elif command[:2] == ["npm", "install"] and using in state["installed"]:
         fail("migrate")
@@ -115,7 +130,11 @@ class InstallNodeTests(unittest.TestCase):
         self.state_path = self.root / "state.json"
         self.log_path = self.root / "calls.jsonl"
         self.env = dict(os.environ, HOME=str(self.root),
-                        PATH=str(bin_dir) + os.pathsep + os.environ["PATH"],
+                        PATH=os.pathsep.join(
+                            [str(bin_dir)] +
+                            [entry for entry in os.environ["PATH"].split(os.pathsep)
+                             if not os.access(Path(entry) / "corepack", os.X_OK)]),
+                        FNM_DIR=str(self.root / "fnm"),
                         FNM_TEST_STATE=str(self.state_path),
                         FNM_TEST_LOG=str(self.log_path))
         # A shell that exports this would hide a missing FNM_COREPACK_ENABLED=false on fnm install.
@@ -135,6 +154,16 @@ class InstallNodeTests(unittest.TestCase):
         state.update(overrides)
         self.state_path.write_text(json.dumps(state))
         self.log_path.write_text("")
+        for version in set(state["installed"] + [state["target"]]):
+            node_bin = (Path(self.env["FNM_DIR"]) / "node-versions" / version /
+                        "installation" / "bin")
+            node_bin.mkdir(parents=True, exist_ok=True)
+            (node_bin / "node").touch()
+            (node_bin / "node").chmod(0o755)
+            if version != state["target"] or state.get("bundled_corepack", True):
+                corepack = node_bin / "corepack"
+                corepack.write_text("#!/bin/sh\necho 0.36.0\n")
+                corepack.chmod(0o755)
         command = ["/bin/bash", str(SCRIPT)]
         if request is not None:
             command.append(request)
@@ -232,8 +261,31 @@ class InstallNodeTests(unittest.TestCase):
         self.assertEqual(state["corepack_installed"], "v26.1.0")
         self.assertEqual(state["corepack_enabled"], "v26.1.0")
         install = events.index(["exec", "--using=v26.1.0", "npm", "install", "-g", "--", "corepack"])
-        enable = events.index(["exec", "--using=v26.1.0", "corepack", "enable"])
+        corepack = (Path(self.env["FNM_DIR"]) / "node-versions" /
+                    "v26.1.0/installation/bin/corepack")
+        enable = events.index(["exec", "--using=v26.1.0", str(corepack), "enable"])
         self.assertLess(install, enable)
+
+    def test_corepack_from_another_node_does_not_hide_missing_target_corepack(self):
+        external_bin = self.root / "external-bin"
+        external_bin.mkdir()
+        external_corepack = external_bin / "corepack"
+        external_corepack.write_text("#!/bin/sh\necho 0.36.0\n")
+        external_corepack.chmod(0o755)
+        self.env["PATH"] = str(external_bin) + os.pathsep + self.env["PATH"]
+        result, state, events = self.run_case(
+            request="26", target="v26.1.0", installed=["v24.1.0"],
+            bundled_corepack=False)
+
+        self.assert_success(result)
+        self.assertEqual(state["corepack_installed"], "v26.1.0")
+        self.assertEqual(state["corepack_enabled"], "v26.1.0")
+        self.assertIn("  Installing corepack (not bundled with v26.1.0)", result.stdout)
+        self.assertTrue((Path(self.env["FNM_DIR"]) / "node-versions" /
+                         "v26.1.0/installation/bin/corepack").is_file())
+        self.assertEqual(
+            events.count(["exec", "--using=v26.1.0", "npm", "install", "-g", "--", "corepack"]),
+            1)
 
     def test_corepack_failures_prevent_default_and_cleanup(self):
         for stage in ("corepack_install", "corepack_enable"):

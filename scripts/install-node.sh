@@ -124,14 +124,20 @@ if [[ -n "$MIGRATE_FROM" ]]; then
     fi
 fi
 
+NODE_EXECUTABLE=$(fnm exec --using="$NEW_NODE" node -p 'process.execPath') \
+    || fail "could not locate Node $NEW_NODE executable."
+[[ -n "$NODE_EXECUTABLE" ]] || fail "could not locate Node $NEW_NODE executable."
+COREPACK="${NODE_EXECUTABLE%/*}/corepack"
+
 # Node 25+ no longer bundles corepack, so install it globally when missing.
-# Bundled copies are left alone rather than downgraded to the old version's.
-if ! fnm exec --using="$NEW_NODE" corepack --version >/dev/null 2>&1; then
+# Check the target installation directly; PATH may contain another Node's copy.
+if [[ ! -x "$COREPACK" ]]; then
     echo "  Installing corepack (not bundled with $NEW_NODE)"
     fnm exec --using="$NEW_NODE" npm install -g -- corepack \
         || fail "could not install corepack for $NEW_NODE; old versions were kept."
 fi
-fnm exec --using="$NEW_NODE" corepack enable \
+[[ -x "$COREPACK" ]] || fail "corepack is missing from $NEW_NODE after installation."
+fnm exec --using="$NEW_NODE" "$COREPACK" enable \
     || fail "could not enable corepack for $NEW_NODE; old versions were kept."
 
 # Keep an existing default usable when its installation is about to be removed.
