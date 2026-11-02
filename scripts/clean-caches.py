@@ -5,6 +5,7 @@ import argparse
 from dataclasses import dataclass
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -40,6 +41,9 @@ CLEANERS = (
     Cleaner("xcode", "", (), (), "rebuild/reindex"),
 )
 BY_NAME = {cleaner.name: cleaner for cleaner in CLEANERS}
+# Playwright installs each browser as <name>-<revision>, plus these bookkeeping entries.
+PLAYWRIGHT_BROWSER = re.compile(r"[a-z][a-z_-]*-\d+")
+PLAYWRIGHT_EXTRAS = {".links", "__dirlock", ".DS_Store"}
 
 
 def query(tool, args):
@@ -83,6 +87,11 @@ def cache_path(cleaner):
         return path
     if not path.is_dir():
         raise OSError(f"not a cache directory: {display(path)}")
+    if cleaner.name == "playwright":
+        foreign = sorted(entry.name for entry in path.iterdir()
+                         if entry.name not in PLAYWRIGHT_EXTRAS and not PLAYWRIGHT_BROWSER.fullmatch(entry.name))
+        if foreign:
+            raise OSError(f"folder holds not only Playwright browsers: {display(foreign[0])}")
     return path
 
 

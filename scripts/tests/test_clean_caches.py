@@ -201,6 +201,39 @@ class CleanCachesTests(unittest.TestCase):
         self.assertEqual(sentinel.read_text(), "keep")
         self.assertEqual(self.calls, [])
 
+    def test_playwright_folder_with_other_entries_is_never_removed(self):
+        browsers = self.home / "Library/Caches"
+        for entry in ("chromium-1200", "firefox-beta-1490", ".links"):
+            (browsers / entry).mkdir(parents=True)
+        (browsers / "com.apple.Safari").mkdir()
+        with patch.dict(os.environ, {"PLAYWRIGHT_BROWSERS_PATH": str(browsers)}):
+            code, text = self.run_command("--only", "playwright", "--deep")
+            self.assertEqual(code, 1, text)
+            self.assertIn("not only Playwright browsers", text)
+            self.assertTrue((browsers / "com.apple.Safari").exists())
+            (browsers / "com.apple.Safari").rmdir()
+            code, text = self.run_command("--only", "playwright", "--deep")
+        self.assertEqual(code, 0, text)
+        self.assertFalse(browsers.exists())
+
+    def test_playwright_contents_are_rechecked_after_confirmation(self):
+        browsers = self.home / "Library/Caches/ms-playwright"
+        browser = browsers / "chromium-1200"
+        browser.mkdir(parents=True)
+        sentinel = browsers / "unrelated.txt"
+
+        def confirm():
+            sentinel.write_text("keep")
+            return True
+
+        with patch.object(CACHES, "confirm_cleanup", side_effect=confirm), \
+                contextlib.redirect_stdout(io.StringIO()) as stdout:
+            code = CACHES.main(["--only", "playwright", "--deep"])
+        self.assertEqual(code, 1, stdout.getvalue())
+        self.assertIn("not only Playwright browsers", stdout.getvalue())
+        self.assertEqual(sentinel.read_text(), "keep")
+        self.assertTrue(browser.is_dir())
+
     def test_broad_symlink_and_relative_paths_are_refused(self):
         alias = self.home / "alias"
         alias.symlink_to(self.cache)

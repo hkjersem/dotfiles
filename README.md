@@ -407,7 +407,9 @@ custom DerivedData locations are not discovered. Deep cleaners also allow
 direct deletion of Gradle's `caches` under `GRADLE_USER_HOME` (default
 `~/.gradle`) and Playwright's global browser directory
 (`PLAYWRIGHT_BROWSERS_PATH`, or `~/Library/Caches/ms-playwright`).
-Project-local Playwright mode (`0`) and relative paths are refused.
+Project-local Playwright mode (`0`) and relative paths are refused, as is a
+Playwright folder holding entries besides `<browser>-<revision>` names and
+Playwright bookkeeping (`.links`, `__dirlock`, `.DS_Store`).
 Symlink cache paths and ancestors, home/root/working-directory ancestors,
 and non-directory targets are refused.
 
