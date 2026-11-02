@@ -292,7 +292,8 @@ DerivedData. It always scans recursively and does not use the size snapshot
 cache. Missing folders are omitted; inaccessible folders show `Unknown` with
 warnings, and symlink roots are reported but not followed. Custom tool cache
 locations are not discovered, and no package managers or cleanup tools run.
-This subcommand accepts only `--limit` and `--help`, not a target path.
+This subcommand accepts only `--limit` and `--help`, not a target path. When
+caches are found, it ends with a hint to preview cleanup with `clean_caches --dry-run`.
 
 Listings show up to 20 rows or duplicate groups; `--limit 0` shows all.
 `sizes` always scans nested contents for totals unless `--direct` is set;

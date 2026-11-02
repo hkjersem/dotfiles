@@ -451,9 +451,6 @@ def report_caches(args):
     results.sort(key=lambda item: (item[2] is None, -(item[2] or 0), item[0]))
     output.context(display(home), "known developer caches", *(['incomplete'] if warnings else []))
     output.section("Caches")
-    output.note("Allocated file bytes, including nested contents. Nothing is deleted.")
-    output.note("Known default locations only; custom tool paths may not be listed.")
-    output.note("Hard links and shared APFS blocks can be counted more than once.")
     output.table_header("%12s  %-18s  %s", "Bytes", "Cache", "Folder")
     for label, path, size in results[:args.limit or None]:
         name = "~/" + str(path.relative_to(home)) if path.is_relative_to(home) else str(path)
@@ -463,6 +460,8 @@ def report_caches(args):
         output.note("No known cache folders found.")
     if args.limit and len(results) > args.limit:
         output.note(f"Showing {args.limit} of {len(results)}; use --limit 0 to show all.")
+    if results:
+        output.note("Preview cleanup: clean_caches --dry-run")
     if warnings:
         output.section("Warnings")
         output.row("warn", "Incomplete report", "Some cache folders could not be inspected.")

@@ -142,6 +142,8 @@ class FilesTests(unittest.TestCase):
         self.assertLess(text.index("npm"), text.index("Bun"))
         self.assertNotIn("Gradle", text)
         self.assertEqual({path: path.read_bytes() for path in before}, before)
+        self.assertIn("Preview cleanup: clean_caches --dry-run", text)
+        self.assertNotIn("Hard links", text)
         text = self.run_caches("--limit", "1")
         self.assertIn("Showing 1 of 2", text)
         self.assertNotIn("Bun", text)
@@ -171,7 +173,9 @@ class FilesTests(unittest.TestCase):
         self.assertIn("Symlink cache skipped", text)
 
     def test_caches_honours_xdg_uv_location_and_empty_report(self):
-        self.assertIn("No known cache folders found", self.run_caches())
+        text = self.run_caches()
+        self.assertIn("No known cache folders found", text)
+        self.assertNotIn("clean_caches", text)
         uv = Path(self.cache.name) / "uv"
         uv.mkdir()
         (uv / "cached").write_bytes(b"cache")
