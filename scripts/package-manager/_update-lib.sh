@@ -77,10 +77,10 @@ _parse_args() {
 
 # Help for pmu, shared by the package-manager wrappers
 _show_help() {
-  cat <<'EOF'
+  python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/dotfiles-help.py" --render-help pmu <<'EOF'
 Usage: pmu [--dry-run] [--yes] [--force] [--major] [--cooldown AGE] [--actions] [<package>]
 
-Updates packages for the detected package manager, within the major version by default.
+{summary}
 
 Arguments:
   <package>          Only update this package, or this action with --actions
@@ -93,6 +93,8 @@ Options:
   --cooldown AGE     Override cooldown (e.g. 24h, 7d; 0 disables)
   --actions          Update GitHub Actions instead of packages (pnpm 12.7+)
   -h, --help         Show this help
+
+{examples}
 EOF
 }
 

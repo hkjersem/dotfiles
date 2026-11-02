@@ -7,16 +7,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/_detect-pm.sh"
 
 show_help() {
-  cat <<'EOF'
+  python3 "$SCRIPT_DIR/../dotfiles-help.py" --render-help pma <<'EOF'
 Usage: pma [--dry-run | --deep]
 
-Audits dependencies for known vulnerabilities with the detected package manager,
-and fixes them with npm or pnpm. Bun only reports them.
+{summary}
 
 Options:
   --dry-run   Report findings, and for npm the fixes it would make, without changing files
   --deep      For pnpm only, refresh the lockfile deeply before the audit fix step
   -h, --help  Show this help
+
+{examples}
 EOF
 }
 

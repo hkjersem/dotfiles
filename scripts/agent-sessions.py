@@ -12,12 +12,13 @@ from typing import NamedTuple
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import agent_sessions  # noqa: E402
 import output  # noqa: E402
+import command_help  # noqa: E402
 
 
 UUID = r"[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}"
-HELP = """Usage: agent-sessions [--help]
-Show recorded Copilot and Claude terminal sessions, their titles and restore status.
-This only reads state; it does not resume, register or clean up sessions.
+HELP = f"""Usage: agent-sessions [--help]
+
+{command_help.description("agent-sessions")}
 
   -h, --help  Show this help
 """

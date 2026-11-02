@@ -5,11 +5,29 @@
 # the same list.
 typeset -ga dotfiles_commands=(
   agent-sessions audit-repo clean_caches codex-resume copy_clean
-  dotfiles-audit dotfiles-defaults dotfiles-install dotfiles-profile dotfiles-update
+  dotfiles-audit dotfiles-defaults dotfiles-help dotfiles-install dotfiles-profile dotfiles-update
   files history-delete install_node nosync npm_globals_diff npm_release_age
-  pma pmc pmi pml pmr pmu prune_branches roadmaps wipe wipe_clean
+  pma pmc pmh pmi pml pmr pmu prune_branches roadmaps wipe wipe_clean
 )
 compdef _gnu_generic $dotfiles_commands
+
+_dotfiles_help() {
+  if [[ $PREFIX == -* ]]; then
+    _gnu_generic
+    return
+  fi
+  local matches
+  local -a candidates scope
+  [[ $words[1] == pmh ]] && scope+=(--packages)
+  if (( CURRENT > 2 )); then
+    scope+=("${(@)words[2,CURRENT-1]}")
+  fi
+  matches=$(python3 "$HOME/.dotfiles/scripts/dotfiles-help.py" "${scope[@]}" --list) || return
+  [[ -n $matches ]] || return 1
+  candidates=("${(@f)matches}")
+  _describe 'topic or command' candidates
+}
+compdef _dotfiles_help dotfiles-help pmh
 
 _dotfiles_age() {
   local number=$PREFIX

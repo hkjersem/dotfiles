@@ -9,6 +9,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "lib"))
 import output  # noqa: E402
+import command_help  # noqa: E402
 
 
 ATTRIBUTE = "com.apple.fileprovider.ignore#P"
@@ -89,12 +90,14 @@ def main(argv=None):
         prog="nosync",
         allow_abbrev=False,
         description=(
-            "Mark folders to keep out of iCloud sync. Defaults to node_modules and .git; "
+            command_help.description("nosync") + "\n\nDefaults to node_modules and .git; "
             "--inspect alone defaults to the current folder. Recursive searches use exact "
             "folder names and stop at matches or folders whose ignore attribute is exactly 1. "
             "MARKED reports the attribute, not verified iCloud behavior. "
             "Set NO_COLOR=1 to disable terminal colors."
         ),
+        epilog=command_help.examples("nosync"),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--inspect", action="store_true", help="report the attribute without changes")
     parser.add_argument(

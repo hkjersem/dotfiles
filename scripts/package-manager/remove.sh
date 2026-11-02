@@ -10,10 +10,10 @@ source "$SCRIPT_DIR/_detect-pm.sh"
 source "$SCRIPT_DIR/_update-lib.sh"
 
 show_help() {
-  cat <<'EOF'
+  python3 "$SCRIPT_DIR/../dotfiles-help.py" --render-help pmr <<'EOF'
 Usage: pmr <package...> [flags]
 
-Removes packages with the detected package manager.
+{summary}
 
 Options:
   --root      With pnpm, remove from the workspace root package.json
@@ -27,6 +27,8 @@ pnpm behavior:
   - Ambiguous declarations error instead of guessing.
   - Use --root to force removing from the workspace root package.json.
   - Use pnpm --filter <workspace> remove ... to target a specific workspace.
+
+{examples}
 EOF
 }
 

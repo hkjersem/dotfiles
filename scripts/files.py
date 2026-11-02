@@ -21,6 +21,7 @@ import time
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import output  # noqa: E402
+import command_help  # noqa: E402
 from file_sizes import directory_entries  # noqa: E402
 
 
@@ -74,9 +75,10 @@ def parser():
     result = argparse.ArgumentParser(
         prog="files", usage="files <command> [options] [path]",
         allow_abbrev=False, formatter_class=argparse.RawDescriptionHelpFormatter,
-        description="Read-only folder reports. Defaults to the current folder; includes hidden entries.\n"
+        description=command_help.description("files") + "\n\n"
+                    "Defaults to the current folder; includes hidden entries.\n"
                     "Never follows symlinks. No exclusions are implicit except .git in leftovers.",
-        epilog="Options (after the command; see files <command> --help):\n"
+        epilog=command_help.help_epilog("files", "Options (after the command; see files <command> --help):\n"
                "  -r, --recursive  Descend into subfolders\n"
                "  --clean  Exclude wipe_clean's shared generated-artifact targets\n"
                "  --clean-git  Exclude generated artifacts and .git entries at every depth\n"
@@ -87,7 +89,7 @@ def parser():
                "  --logical  Count logical file bytes instead of allocated bytes for sizes\n"
                "  --cached  Reuse the last sizes snapshot (expires after 24 hours); never rescan\n"
                "  --since AGE  Modification age for changed (m, h, d, w)\n"
-               "  --older-than AGE  No modification within AGE for leftovers, including descendants\n",
+               "  --older-than AGE  No modification within AGE for leftovers, including descendants\n"),
     )
     commands = result.add_subparsers(dest="command", required=True)
     for name, description in COMMANDS.items():

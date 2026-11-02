@@ -10,10 +10,10 @@ source "$SCRIPT_DIR/_detect-pm.sh"
 source "$SCRIPT_DIR/_update-lib.sh"
 
 show_help() {
-  cat <<'EOF'
+  python3 "$SCRIPT_DIR/../dotfiles-help.py" --render-help pmc <<'EOF'
 Usage: pmc [--dry-run] [--yes]
 
-Cleans package-manager metadata for the detected package manager.
+{summary}
 
 Options:
   -n, --dry-run  Show the cleanup without changing files
@@ -25,6 +25,8 @@ Actions:
   - pnpm: suggest packages that could be centralized in catalog
   - pnpm: skip catalog cleanup when named pnpm catalogs are present
   - all package managers: remove empty top-level manifest sections from package.json files
+
+{examples}
 EOF
 }
 

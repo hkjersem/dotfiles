@@ -16,8 +16,10 @@ source "$SCRIPT_DIR/lib/stale-branches.sh" || exit 1
 source "$SCRIPT_DIR/package-manager/_update-lib.sh" || exit 1
 
 usage() {
-  cat <<EOF
+  python3 "$SCRIPT_DIR/dotfiles-help.py" --render-help prune_branches <<'EOF'
 Usage: prune_branches [options] [path]
+
+{summary}
 
 Finds local branches whose upstream branch was deleted on its remote and
 deletes them once their commits are confirmed on a remote (pull request head,
@@ -45,6 +47,8 @@ Options:
   --jobs N         Repositories to fetch in parallel (default: 6)
   --timeout N      Seconds allowed per remote fetch (default: 60)
   -h, --help       Show this help
+
+{examples}
 EOF
 }
 
@@ -89,7 +93,7 @@ while [[ $# -gt 0 ]]; do
         --timeout) SB_FETCH_TIMEOUT=$2 ;;
       esac
       shift 2 ;;
-    --help|-h) usage; exit 0 ;;
+    --help|-h) usage; exit $? ;;
     -*) echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
     *)
       [[ -z "$TARGET" ]] || { echo "Only one path may be given" >&2; exit 1; }

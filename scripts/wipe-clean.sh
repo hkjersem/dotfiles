@@ -6,18 +6,20 @@
 set -euo pipefail
 
 show_help() {
-    cat <<'EOF'
+    python3 "$(dirname "${BASH_SOURCE[0]}")/dotfiles-help.py" --render-help wipe_clean <<'EOF'
 Usage: wipe_clean [--dry-run] [--sort path|size] [--older-than AGE]
 
-Deletes known build artifacts and dependency folders below the current
-directory, after previewing allocated sizes and asking for confirmation. Git directories
-and submodules are left alone.
+{summary}
+
+Previews allocated sizes. Git directories and submodules are left alone.
 
 Options:
   -n, --dry-run  Show the cleanup plan without prompting or deleting
   --sort ORDER  Preview order: path (default) or size (largest first)
   --older-than AGE  Only targets with no modification within AGE (e.g. 24h, 7d, 2w), including descendants
   -h, --help  Show this help
+
+{examples}
 EOF
 }
 

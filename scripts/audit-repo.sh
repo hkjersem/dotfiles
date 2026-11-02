@@ -36,10 +36,11 @@ NO_PACKAGE_MANAGER=false
 WORKSPACES=false
 
 usage() {
-  cat <<EOF
+  python3 "$SCRIPT_DIR/dotfiles-help.py" --render-help audit-repo <<'EOF'
 Usage: audit-repo [options]
 
-Read-only triage audit for git repositories.
+{summary}
+
 Runs git signals for any repo; adds JS/TS-specific checks when package.json is present.
 
 Options:
@@ -49,6 +50,8 @@ Options:
   --no-package-manager   Skip package managers and Node execution; keep local checks
   --workspaces           Report allocated sizes and assessments of registered worktrees
   -h, --help             Show this help
+
+{examples}
 EOF
 }
 
@@ -63,7 +66,7 @@ while [[ $# -gt 0 ]]; do
     --skip-security) SKIP_AUDIT=true; shift ;;
     --no-package-manager) NO_PACKAGE_MANAGER=true; shift ;;
     --workspaces) WORKSPACES=true; shift ;;
-    --help|-h)  usage; exit 0 ;;
+    --help|-h)  usage; exit $? ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
   esac
 done

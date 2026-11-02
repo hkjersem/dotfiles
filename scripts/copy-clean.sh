@@ -10,13 +10,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/clean-targets.sh"
 
 usage() {
-    cat <<'EOF'
+    python3 "$SCRIPT_DIR/dotfiles-help.py" --render-help copy_clean <<'EOF'
 Usage: copy_clean [--ignore-git] [--keep-name] [source] <destination>
        copy_clean --zip [--ignore-git] [destination.zip]
        copy_clean --zip [--ignore-git] <source> <destination.zip>
 
-Recursively copy a source directory to a new destination, excluding the build
-artifacts removed by wipe_clean. When source is omitted, the current directory
+{summary}
+
+When source is omitted, the current directory
 is used. In ZIP mode, destination defaults inside the source and uses its name.
 An existing ZIP destination directory receives <source-name>.zip. Files are
 copied with macOS clone-on-write copies where supported.
@@ -26,6 +27,8 @@ Options:
   --keep-name   Create the copy under destination using the source name.
   --zip         Create only a ZIP archive, preserving the source folder name.
   -h, --help    Show this help.
+
+{examples}
 EOF
 }
 

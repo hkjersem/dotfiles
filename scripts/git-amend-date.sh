@@ -5,13 +5,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 for arg in "$@"; do
   case "$arg" in
     -h|--help)
-      cat <<'EOF'
+      python3 "$SCRIPT_DIR/dotfiles-help.py" --render-help "git amend-date" <<'EOF'
 Usage: git amend-date <age | date> [commit]
        git amend-date --shift <age> [commit]
 
-Change a commit's author and committer dates.
-
-Previews dates and asks [y/N]; warns when earlier than a parent or found in local remote-tracking refs. Preserves staged changes and commit content. Older commits rewrite descendants on the current branch; merges and signed rewrites are refused. No commit hooks run.
+{summary}
 
 An age is a non-negative integer with m, h, d or w (minutes, hours, days,
 weeks). A day is exactly 24 hours. Bare ages mean ago from now; --shift
@@ -32,12 +30,7 @@ Hashes change; published commits require coordinated rewriting.
   --shift     Move each existing date back by the given age
   -h, --help  Show help
 
-Examples:
-  git amend-date 1d
-  git amend-date 2h
-  git amend-date --shift 1d
-  git amend-date 1d HEAD~1
-  git amend-date "2026-10-30T12:00:00+01:00"
+{examples}
 EOF
       exit $?
       ;;

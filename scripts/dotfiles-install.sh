@@ -3,16 +3,17 @@
 for arg in "$@"; do
     case "$arg" in
         -h|--help)
-            cat <<'EOF'
+            python3 "$(dirname "${BASH_SOURCE[0]}")/dotfiles-help.py" --render-help dotfiles-install <<'EOF'
 Usage: dotfiles-install [options]
 
-Reapply dotfiles links and bootstrap tools, then audit.
-Leaves macOS preferences unchanged; use dotfiles-defaults to apply them.
+{summary}
 
   --no-defaults  Leave macOS preferences unchanged (already the default)
   -h, --help     Show this help
+
+{examples}
 EOF
-            exit 0
+            exit $?
             ;;
         --no-defaults) ;;
         *) echo "Error: unknown option: $arg (see --help)" >&2; exit 2 ;;

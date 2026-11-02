@@ -1,16 +1,13 @@
 # Sourced by history-delete so the replacement history stays in the calling shell.
 if [[ " $* " == *" --help "* || " $* " == *" -h "* ]]; then
-  cat <<'EOF'
+  python3 "$HOME/.dotfiles/scripts/dotfiles-help.py" --render-help history-delete <<'EOF'
 Usage: history-delete <event-number>
 
-Delete a numbered event from this shell and saved history.
-
-Zsh only. Shows the command and asks [y/N] before deleting. Event numbers may change; other open shells can retain and re-save it. Ambiguous duplicates are refused. Native h flags remain unchanged.
+{summary}
 
   -h, --help  Show help
 
-Examples:
-  history-delete 222
+{examples}
 EOF
   return $?
 fi

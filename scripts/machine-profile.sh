@@ -74,15 +74,17 @@ machine_profile_main() {
         personal|work) save_machine_profile "$1" || return $? ;;
         --choose) choose_machine_profile || return $? ;;
         --help|-h)
-            cat <<'EOF'
+            python3 "$(dirname "${BASH_SOURCE[0]}")/dotfiles-help.py" --render-help dotfiles-profile <<'EOF'
 Usage: dotfiles-profile [personal|work|--choose]
 
-Show or set this machine's profile.
+{summary}
 
   --choose    Choose the profile interactively
   -h, --help  Show this help
+
+{examples}
 EOF
-            return 0
+            return $?
             ;;
         *) echo "Usage: dotfiles-profile [personal|work|--choose]" >&2; return 2 ;;
     esac

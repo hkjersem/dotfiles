@@ -6,10 +6,12 @@ SKIP_OS_UPDATES=false
 for arg in "$@"; do
   case "$arg" in
     -h|--help)
-      cat <<'EOF'
+      python3 "$(dirname "${BASH_SOURCE[0]}")/../scripts/dotfiles-help.py" --render-help dotfiles-update <<'EOF'
 Usage: dotfiles-update [options]
 
-Updates macOS and App Store apps, Command Line Tools, Homebrew packages, Node
+{summary}
+
+Includes macOS and App Store apps, Command Line Tools, Homebrew packages, Node
 and npm globals, Zsh plugins and supported installed CLIs, then runs the audit.
 It does not pull this repository; run git pull in ~/.dotfiles for that.
 
@@ -17,8 +19,10 @@ Options:
   --skip-os-updates  Skip macOS updates and their restart prompt; still update apps and Command Line Tools
   --no-defaults  Skip applying macOS defaults (osxdefaults.sh); dotfiles-update always passes it
   -h, --help     Show this help
+
+{examples}
 EOF
-      exit 0
+      exit $?
       ;;
     --no-defaults) SKIP_DEFAULTS=true ;;
     --skip-os-updates) SKIP_OS_UPDATES=true ;;

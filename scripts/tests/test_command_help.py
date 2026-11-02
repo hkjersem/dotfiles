@@ -93,6 +93,25 @@ class CommandHelpTests(unittest.TestCase):
                         self.assertEqual(sandbox.tool_calls(), "")
                         self.assertEqual(sandbox.files(), before)
 
+    def test_help_renderer_failures_are_reported_without_running_tools_or_changing_files(self):
+        with tempfile.TemporaryDirectory() as root:
+            sandbox = Sandbox(root)
+            python = sandbox.root / "bin/python3"
+            python.write_text('#!/bin/sh\nprintf "Help renderer failed\\n" >&2\nexit 7\n')
+            python.chmod(0o755)
+            before = sandbox.files()
+            for command in script_commands():
+                with self.subTest(command=command):
+                    result = subprocess.run(
+                        ["/bin/bash", "-c", f'source "$HOME/.aliases"\n{command} --help'],
+                        cwd=sandbox.project, env=sandbox.env, capture_output=True, text=True,
+                        stdin=subprocess.DEVNULL, timeout=30,
+                    )
+                    self.assertEqual(result.returncode, 7, result.stdout + result.stderr)
+                    self.assertIn("Help renderer failed", result.stderr)
+                    self.assertEqual(sandbox.tool_calls(), "")
+                    self.assertEqual(sandbox.files(), before)
+
     def run_wipe(self, sandbox, *args):
         return subprocess.run(
             ["/bin/bash", "-c", 'source "$HOME/.aliases"\nwipe "$@"', "wipe", *args],
@@ -244,6 +263,7 @@ zpty -d z
                 env={**sandbox.env, "ZDOTDIR": str(zdotdir)}, capture_output=True, text=True, timeout=120,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stderr, "")
             self.assertEqual(sandbox.tool_calls(), "")
         offered, current = {}, None
         for line in result.stdout.splitlines():
@@ -280,6 +300,35 @@ zpty -d z
             with self.subTest(suffix=suffix):
                 offered = self.complete(["dotfiles-profile"], suffix)["dotfiles-profile"]
                 self.assertEqual(offered & {"personal", "work"}, expected)
+
+    def test_cheat_sheet_completes_topics_commands_and_scoped_names(self):
+        offered = self.complete(["dotfiles-help"], " ")["dotfiles-help"]
+        self.assertTrue({"packages", "cleanup", "agents", "pml", "files"}.issubset(offered), offered)
+        self.assertEqual(self.complete(["dotfiles-help"], " pack")["dotfiles-help"], {"packages"})
+        packages = {"pm", "pmx", "pmi", "pmr", "pmu", "pml", "pmc", "pma", "pmh"}
+        self.assertEqual(self.complete(["pmh"], " ")["pmh"], packages)
+        self.assertEqual(self.complete(["dotfiles-help"], " packages ")["dotfiles-help"], packages)
+        self.assertEqual(self.complete(["pmh"], " pml")["pmh"], {"pml"})
+        flags = self.complete(["dotfiles-help", "pmh"])
+        for command in flags:
+            self.assertEqual(flags[command], {"--help", "--list", "--packages"})
+
+    def test_cheat_sheet_completes_git_aliases_and_shell_shortcuts(self):
+        self.assertEqual(self.complete(["dotfiles-help"], " git unst")["dotfiles-help"], {"unstage"})
+        shell = self.complete(["dotfiles-help"], " shell ")["dotfiles-help"]
+        self.assertTrue({"..", "cpwd", "rr", "emptytrash"}.issubset(shell), shell)
+        self.assertFalse({"pml", "unstage"} & shell, shell)
+        self.assertEqual(self.complete(["dotfiles-help"], " zsh Ctrl-R")["dotfiles-help"], {"Ctrl-R"})
+
+    def test_cheat_sheet_preserves_multiple_query_words_and_handles_no_matches(self):
+        for suffix, expected in (
+            (" cleanup wipe ", {"wipe"}),
+            (" agents codex-resume ", {"codex-resume"}),
+            (" disk space ", {"files", "dotfiles-help"}),
+            (" nonexistent query ", set()),
+        ):
+            with self.subTest(suffix=suffix):
+                self.assertEqual(self.complete(["dotfiles-help"], suffix)["dotfiles-help"], expected)
 
     def test_files_subcommands_and_flags_are_completed(self):
         names = {"count", "large", "changed", "sizes", "empty", "types", "duplicates", "caches", "leftovers"}

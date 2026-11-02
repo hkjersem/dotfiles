@@ -11,6 +11,7 @@ import sys
 
 sys.dont_write_bytecode = True
 from files import ScanProgress, display, human_size, output, scan_sizes  # noqa: E402
+from lib import command_help  # noqa: E402
 
 
 @dataclass
@@ -86,9 +87,10 @@ def cache_path(cleaner):
 
 def parser():
     result = argparse.ArgumentParser(
-        prog="clean_caches", description=__doc__,
-        epilog="Runs globally from HOME, not in the current project. Project artifacts: wipe_clean.\n"
-               "Cleaners: " + ", ".join(BY_NAME),
+        prog="clean_caches", description=command_help.description("clean_caches"),
+        epilog=command_help.help_epilog(
+            "clean_caches", "Runs globally from HOME, not in the current project. Project artifacts: wipe_clean.\n"
+            "Cleaners: " + ", ".join(BY_NAME)),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     result.add_argument("--only", metavar="NAMES", help="comma-separated cleaners; required unless --dry-run")

@@ -155,6 +155,48 @@ Re-running asks before replacing the managed block and preserves other settings
 in `~/.gitconfig_local`. Declining work setup removes the managed directory
 overrides, without deleting the separate identity files.
 
+## Find a command
+
+`dotfiles-help` is a read-only terminal cheat sheet for custom commands, grouped
+by purpose. It prints examples rather than executing them, and marks commands
+that can change state or run tools with `!`. The overview stays compact;
+`shell` covers every alias in `bash/aliases` and its everyday helper functions.
+The `git` and `zsh` topics add selected configured Git aliases and interactive
+tips, not an exhaustive list of plugin features.
+Their links sit at the bottom of the overview's shell group. Individual sheets
+keep each subgroup together and separate entries, with wrapped descriptions,
+muted cautions and highlighted examples on colour terminals.
+
+```sh
+dotfiles-help                # Compact overview
+dotfiles-help cleanup        # Topic, with examples and cautions
+dotfiles-help pml            # Remember how to try a local library
+dotfiles-help disk space     # Search names, descriptions and examples
+dotfiles-help shell          # Full grouped shell-shortcut reference
+dotfiles-help git            # Useful Git aliases and their cautions
+dotfiles-help git unstage    # One Git alias
+dotfiles-help zsh            # History search, fuzzy finding and completion
+pmh                         # Package-manager cheat sheet
+pmh update                  # Search within package-manager commands
+```
+
+Zsh completes topic and command names with Tab, including command names after
+a topic (`dotfiles-help packages <Tab>`). `pmh` completes only package-manager
+commands. Each script command's own `--help` remains the reference for all its
+flags. Run `reload` in existing terminals to load the new commands and completions.
+Destructive and legacy aliases are documented with warnings, not recommended
+as routine maintenance. The reference does not change any alias or key binding.
+Descriptions, cautions and examples live in `scripts/lib/command_help.py`, shared
+by the cheat sheet, its completion candidates and individual command help.
+Usage syntax, flags and detailed behavior stay with each command; documentation
+keeps the longer workflows.
+
+In zsh, `G`, `H`, `T` and `L` are global aliases: use `files sizes G cache`
+to filter output, `files sizes H` or `files sizes T` for the first/last lines,
+and `dotfiles-help shell L` to page it. Quote these letters when you mean them
+as literal arguments (`'G'`); they expand anywhere on a command line.
+They are not defined in Bash. The `g` shortcut is documented in the Git topic.
+
 ## Delete a history entry
 
 In zsh, `h` lists native history; `history-delete 222` deletes the event numbered
@@ -172,6 +214,7 @@ field or lockfile. The selected manager must already be installed.
 
 | Command | What it does |
 |---|---|
+| `pmh` | Show the package-manager cheat sheet; `pmh pml` shows a command's examples |
 | `pm <command>` | Run a command with the detected package manager |
 | `pmx <package>` | Execute a package through npx, pnpm dlx, or bunx |
 | `pmi [package...]` | Install dependencies or add packages |

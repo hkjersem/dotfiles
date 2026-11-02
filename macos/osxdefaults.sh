@@ -6,15 +6,17 @@ SET_DNS=false
 for arg in "$@"; do
   case "$arg" in
     -h|--help)
-      cat <<'EOF'
+      python3 "$(dirname "${BASH_SOURCE[0]}")/../scripts/dotfiles-help.py" --render-help dotfiles-defaults <<'EOF'
 Usage: dotfiles-defaults [options]
 
-Apply macOS system preferences.
+{summary}
 
   --dns       Also set Cloudflare DNS on all network interfaces
   -h, --help  Show this help
+
+{examples}
 EOF
-      exit 0
+      exit $?
       ;;
     --dns) SET_DNS=true ;;
     *) echo "Error: unknown option: $arg (see --help)" >&2; exit 2 ;;

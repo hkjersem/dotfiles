@@ -9,10 +9,12 @@ set -euo pipefail
 
 case "${1:-}" in
     -h|--help)
-        cat <<'EOF'
+        python3 "$(dirname "${BASH_SOURCE[0]}")/dotfiles-help.py" --render-help install_node <<'EOF'
 Usage: install_node [version]
 
-Installs a Node version with fnm and keeps it as the only installed version
+{summary}
+
+Keeps it as the only installed version
 of its major: every other version of that major is removed, including newer
 ones. Global npm packages are carried over from the highest other version of
 that major, or for a new major from the highest installed version, and
@@ -21,8 +23,10 @@ v22.1.0 (default: lts).
 
 Options:
   -h, --help  Show this help
+
+{examples}
 EOF
-        exit 0
+        exit $?
         ;;
     -*) echo "Usage: install_node [version]" >&2; exit 2 ;;
 esac

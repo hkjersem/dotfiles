@@ -35,6 +35,7 @@ _spec.loader.exec_module(rm)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import output  # noqa: E402
+import command_help  # noqa: E402
 
 INDEX_FOLDERS = ("docs", "tasks", "planning")
 
@@ -122,19 +123,13 @@ def find_roadmaps(folder: str, problems: List[str]) -> List[argparse.Namespace]:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    parser = argparse.ArgumentParser(prog="roadmaps", description=__doc__, allow_abbrev=False,
+    parser = argparse.ArgumentParser(prog="roadmaps",
+                                     description=command_help.description("roadmaps") + "\n\n" +
+                                     __doc__.split("\n\n", 1)[1], allow_abbrev=False,
                                      formatter_class=argparse.RawDescriptionHelpFormatter,
-                                     epilog="""Examples:
-  roadmaps                      Overview of configured locations
-  roadmaps .                    Overview of the current repository
-  roadmaps --check .             Detailed validation (also: roadmaps . --check)
-  roadmaps --check --strict .    Include brief-quality warnings
-  roadmaps --check               Validate all configured locations
-  roadmaps --sync .              Refresh generated lists, then validate
-
-Sync changes index blocks only, never briefs, statuses or handwritten sections.
+                                     epilog=command_help.help_epilog("roadmaps", """Sync changes index blocks only, never briefs, statuses or handwritten sections.
 Paths may be collections: sync updates every discovered roadmap in those paths.
-Exit status: 0 success; 1 errors or no roadmaps in check/sync; 2 usage; 130 Ctrl+C.""")
+Exit status: 0 success; 1 errors or no roadmaps in check/sync; 2 usage; 130 Ctrl+C."""))
     parser.add_argument("paths", nargs="*", metavar="PATH",
                         help="a repository, or a folder whose direct subfolders are repositories")
     parser.add_argument("--today", metavar="YYYY-MM-DD", help="treat this date as today")

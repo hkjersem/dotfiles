@@ -105,6 +105,7 @@ from xml.parsers.expat import ExpatError
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import output  # noqa: E402
+import command_help  # noqa: E402
 
 
 LABEL = "com.hkjersem.codex-resume"
@@ -1586,16 +1587,15 @@ def argument_parser():
     parser = argparse.ArgumentParser(
         prog="codex-resume",
         allow_abbrev=False,
-        description=(
-            "Send continue, or a message, to a Codex desktop chat on this Mac now, at a set time, "
-            "or when a usage limit resets. Times use local 24-hour HH:MM, HH.MM, or HHMM format."
-        ),
-        epilog=(
+        description=command_help.description("codex-resume") +
+                    "\n\nTimes use local 24-hour HH:MM, HH.MM, or HHMM format.",
+        epilog=command_help.help_epilog("codex-resume",
             "The message goes through the Codex queue, and the app sends it once the chat is not busy, "
             "also with a locked screen; a draft in the composer is left alone. The app is opened in the "
             "background when it is not running. Without --chat or --project, the chat on this Mac with the "
             "latest activity is used. Scheduled jobs keep the Mac from idle-sleeping while they wait."
         ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     actions = parser.add_mutually_exclusive_group(required=True)
     actions.add_argument(

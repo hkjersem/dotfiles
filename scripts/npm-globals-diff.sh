@@ -7,17 +7,19 @@
 
 case "${1:-}" in
     -h|--help)
-        cat <<'EOF'
+        python3 "$(dirname "${BASH_SOURCE[0]}")/dotfiles-help.py" --render-help npm_globals_diff <<'EOF'
 Usage: npm_globals_diff <version_a> [version_b]
 
-Compares global npm packages between two installed Node versions. Versions
-can be a major (22), a full version (v22.22.0) or lts; version_b defaults to
-the current Node version.
+{summary}
+
+Versions can be a major (22), a full version (v22.22.0) or lts.
 
 Options:
   -h, --help  Show this help
+
+{examples}
 EOF
-        exit 0
+        exit $?
         ;;
 esac
 

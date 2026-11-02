@@ -8,13 +8,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/_detect-pm.sh"
 
 show_help() {
-  cat <<'EOF'
+  python3 "$SCRIPT_DIR/../dotfiles-help.py" --render-help pml <<'EOF'
 Usage: pml <library path>
        pml --undo <library path>
 
-Links a local library into the current project instead of the installed
-version, for trying out changes. --undo restores the installed version.
-Supports npm and pnpm 11 or newer.
+{summary}
 
 Options:
   --undo      Restore the installed version
@@ -26,6 +24,8 @@ pnpm: pnpm records the link in pnpm-lock.yaml, and in package.json when the
       library is not a dependency, plus an override in pnpm-workspace.yaml.
       --undo removes all of it, including on pnpm releases whose own unlink
       keeps the package.json entry.
+
+{examples}
 EOF
 }
 

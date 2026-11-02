@@ -5,23 +5,26 @@
 usage="Usage: wipe <name> [--file|-f|--dir|-d]"
 
 show_help() {
-    cat <<'EOF'
+    python3 "$(dirname "${BASH_SOURCE[0]}")/dotfiles-help.py" --render-help wipe <<'EOF'
 Usage: wipe <name> [--file|-f|--dir|-d]
 
-Deletes every file or folder named <name> below the current directory,
-skipping node_modules and .git. Names containing a dot are treated as
-files and other names as folders, unless --file or --dir is given.
+{summary}
+
+Names containing a dot are treated as files and other names as folders,
+unless --file or --dir is given.
 
 Options:
   -f, --file  Delete files with this name
   -d, --dir   Delete folders with this name
   -h, --help  Show this help
+
+{examples}
 EOF
 }
 
 for arg in "$@"; do
     case "$arg" in
-        -h|--help) show_help; exit 0 ;;
+        -h|--help) show_help; exit $? ;;
     esac
 done
 

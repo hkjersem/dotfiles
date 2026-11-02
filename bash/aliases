@@ -9,11 +9,13 @@ alias rr="rm -rf"
 # Default options
 alias rsync="rsync -vh"
 
-# Global aliases
-alias G="| grep -i"
-alias H="| head"
-alias T="| tail"
-alias L="| less"
+# Zsh global aliases expand after a command as well as at its start.
+if [[ -n ${ZSH_VERSION:-} ]]; then
+  alias -g G="| grep -i"
+  alias -g H="| head"
+  alias -g T="| tail"
+  alias -g L="| less"
+fi
 
 # dir listing/traversal
 alias l="ls -lahA"
@@ -31,12 +33,8 @@ alias tree1="tree -d -L 1"
 alias tree2="tree -d -L 2"
 alias cpwd="pwd|tr -d '\n'|pbcopy" # Copies current path to clipboard
 
-# npm
-alias ni="npm install"
-alias nun="npm uninstall"
-alias nup="npm update && npm out"
+# Dependency cleanup
 alias nrr="wipe node_modules"
-alias pn=pnpm
 
 # Network
 alias ip="dig +short myip.opendns.com @resolver1.opendns.com"
@@ -58,6 +56,7 @@ alias week="date +%V"
 alias sudo='sudo '
 
 # Dotfiles management
+dotfiles-help() { python3 "$HOME/.dotfiles/scripts/dotfiles-help.py" "$@"; }
 dotfiles-update() { bash "$HOME/.dotfiles/macos/update.sh" --no-defaults "$@"; }
 dotfiles-install() { bash "$HOME/.dotfiles/scripts/dotfiles-install.sh" "$@"; }
 dotfiles-defaults() { bash "$HOME/.dotfiles/macos/osxdefaults.sh" "$@"; }
@@ -124,6 +123,9 @@ _detect_pm() { bash "$HOME/.dotfiles/scripts/package-manager/_detect-pm.sh"; }
 # Run any package manager command, e.g. pm run dev
 # Usage: pm <command> [args...]
 pm()  { local _p; _p="$(_detect_pm)" || return 1; "$_p" "$@"; }
+
+# Discover package-manager wrappers without running a package manager
+pmh() { python3 "$HOME/.dotfiles/scripts/dotfiles-help.py" --packages "$@"; }
 
 # Updates packages — minor/patch by default, auto-detects bun, pnpm or npm
 # Usage: pmu [--dry-run] [--yes] [--force] [--major] [--cooldown AGE] [--actions] [<package>]

@@ -11,11 +11,10 @@ source "$SCRIPT_DIR/_detect-pm.sh"
 source "$SCRIPT_DIR/_update-lib.sh"
 
 show_help() {
-  cat <<'EOF'
+  python3 "$SCRIPT_DIR/../dotfiles-help.py" --render-help pmi <<'EOF'
 Usage: pmi [<package...>] [flags]
 
-Installs the project's dependencies, or adds packages, with the detected
-package manager.
+{summary}
 
 Options:
   --root      With pnpm, install into the workspace root package.json
@@ -33,6 +32,8 @@ pnpm behavior:
   - Catalog entries are only rewritten when the requested spec includes a version.
   - Use --root to force installing into the workspace root package.json.
   - Use pnpm --filter <workspace> add ... to target a specific workspace.
+
+{examples}
 EOF
 }
 

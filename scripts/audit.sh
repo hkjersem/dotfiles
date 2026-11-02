@@ -6,14 +6,16 @@
 for arg in "$@"; do
     case "$arg" in
         -h|--help)
-            cat <<'EOF'
+            python3 "$(dirname "${BASH_SOURCE[0]}")/dotfiles-help.py" --render-help dotfiles-audit <<'EOF'
 Usage: dotfiles-audit
 
-Check for drift between repository declarations and installed state.
+{summary}
 
   -h, --help  Show this help
+
+{examples}
 EOF
-            exit 0
+            exit $?
             ;;
         *) echo "Error: unknown option: $arg (see --help)" >&2; exit 2 ;;
     esac

@@ -2,6 +2,11 @@
 
 [README](../README.md#package-manager-commands)
 
+Run `pmh` (or `dotfiles-help packages`) for a terminal cheat sheet, `pmh pml`
+for a command's examples and cautions, or `pmh update` to search by task.
+Zsh completes command names after `pmh`. `pm -h` still shows the detected
+package manager's native help; wrapper commands have their own `--help`.
+
 The README lists the commands. This page covers updates, pnpm workspaces,
 local libraries, and how `dotfiles-update` keeps package managers and Node
 current. The commands support npm, Bun and pnpm 10.29 or newer; options that
