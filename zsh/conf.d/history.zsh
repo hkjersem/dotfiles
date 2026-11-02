@@ -12,3 +12,5 @@ setopt HIST_IGNORE_SPACE
 setopt HIST_REDUCE_BLANKS
 setopt INC_APPEND_HISTORY
 setopt SHARE_HISTORY
+
+history-delete() { source "$HOME/.dotfiles/scripts/history-delete.zsh" "$@"; }

@@ -29,6 +29,8 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 | `git/gitignore_global` | Global gitignore |
 | `ssh/config` | SSH host config |
 | `scripts/setup-git-local.sh` | Interactive setup for machine-local git identity — generates `~/.gitconfig_local`, `~/.gitconfig_local_work`, `~/.gitconfig_local_personal` (all untracked). Called by `applications.sh` during install. |
+| `scripts/history-delete.zsh` | Sourced by `history-delete` in the current zsh; snapshots and replaces its active history after deleting a numbered event without changing native `h` flags |
+| `scripts/history-delete.py` | Internal helper for history-delete: filters native history records, preserves unrelated bytes and metadata, and atomically updates saved history under zsh's lock-file convention |
 | `scripts/git-amend-date.sh` | `git amend-date` help, optional commit selection and duration parsing using the shared age parser; delegates rewriting to its Python helper |
 | `scripts/git-amend-date.py` | Previews dates, warns for parent chronology and local remote-tracking publication, and confirms; rewrites dates and descendant parent hashes on the current branch with compare-and-swap ref updating, leaving the index untouched; refuses signed rewrites and older-commit merge rewrites |
 | `scripts/install-zsh-plugins.sh` | Clone or pull oh-my-zsh and custom plugins — called by both `applications.sh` and `update.sh` |

@@ -14,6 +14,7 @@ REPO = Path(__file__).resolve().parents[2]
 ALIASES = REPO / "bash" / "aliases"
 COMPLETIONS = REPO / "zsh" / "conf.d" / "completions.zsh"
 FLAG_HIGHLIGHT = REPO / "zsh" / "conf.d" / "flag-highlight.zsh"
+ZSH_COMMANDS = ("history-delete",)
 SCRIPT_FUNCTION = re.compile(
     r'^([\w-]+)\(\) \{ (?:bash|python3) "\$HOME/\.dotfiles/(?:scripts|macos)/[^"]+"'
     r'(?: --[\w-]+)* "\$@"; \}$', re.M)
@@ -71,7 +72,7 @@ class CommandHelpTests(unittest.TestCase):
             "dotfiles-update", "dotfiles-install", "dotfiles-defaults",
             "dotfiles-audit", "dotfiles-profile",
         }.issubset(script_commands()))
-        self.assertEqual(completed_commands(), script_commands())
+        self.assertEqual(completed_commands(), sorted([*script_commands(), *ZSH_COMMANDS]))
 
     def test_help_prints_usage_without_running_tools_or_changing_files(self):
         with tempfile.TemporaryDirectory() as root:
@@ -186,9 +187,10 @@ class CompletionTests(unittest.TestCase):
     ZSHRC = r"""
 unsetopt PROMPT_SP
 PS1= RPROMPT=
-HISTFILE= SAVEHIST=0
 autoload -Uz compinit && compinit -u -d "$ZDOTDIR/.zcompdump"
 source {aliases_zsh}
+source "$HOME/.dotfiles/zsh/conf.d/history.zsh"
+HISTFILE= SAVEHIST=0
 source {completions}
 compadd() {{
   [[ ${{@[1,(i)(-|--)]}} == *-(O|A|D)\ * ]] && {{ builtin compadd "$@"; return; }}
@@ -250,6 +252,10 @@ zpty -d z
             elif "HIT:" in line and current is not None:
                 current.add(line.split("HIT:", 1)[1].strip())
         return offered
+
+    def test_history_delete_flags_are_completed(self):
+        offered = self.complete(["history-delete"])
+        self.assertEqual(offered["history-delete"], {"--help"})
 
     def test_git_amend_date_completes_flags_and_shared_duration_units(self):
         flags = self.complete(["git"], " amend-date --", native_git=True)["git"]
@@ -351,6 +357,7 @@ class FlagHighlightTests(unittest.TestCase):
     # the text of each highlighted region per buffer.
     DRIVER = r"""
 source "$1"; compdef() { :; }; source "$2"; source "$3"
+source "$HOME/.dotfiles/zsh/conf.d/history.zsh"
 # zsh-syntax-highlighting runs highlighters with this option.
 setopt warn_create_global
 _zsh_highlight_add_highlight() { print -r -- "MARK:$4:${BUFFER[$1+1,$2]}"; }
@@ -387,8 +394,11 @@ done
         return dict(zip(buffers, marks))
 
     def test_flags_listed_in_help_are_not_marked(self):
-        buffers = [f"{command} -h --help" for command in script_commands()]
+        buffers = [f"{command} -h --help" for command in [*script_commands(), *ZSH_COMMANDS]]
         self.assertEqual(self.marked(*buffers), {buffer: [] for buffer in buffers})
+
+    def test_history_delete_unknown_flags_are_marked(self):
+        self.assertEqual(self.marked("history-delete --nope"), {"history-delete --nope": ["--nope"]})
 
     def test_flags_missing_from_help_are_marked(self):
         self.assertEqual(self.marked(

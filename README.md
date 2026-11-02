@@ -155,6 +155,16 @@ Re-running asks before replacing the managed block and preserves other settings
 in `~/.gitconfig_local`. Declining work setup removes the managed directory
 overrides, without deleting the separate identity files.
 
+## Delete a history entry
+
+In zsh, `h` lists native history; `history-delete 222` deletes the event numbered
+222 from the current shell and its saved history, after showing the selected
+command and asking `[y/N]` (only `y` or `Y` confirms). Numbers may change afterward.
+Other open shells can retain and later re-save the entry, so this is not a
+secure-erasure guarantee. Ambiguous duplicate matches are refused rather than
+deleting the wrong occurrence. `history-delete --help` and flag completion are
+available; native `h` flags are unchanged.
+
 ## Package-manager commands
 
 These commands detect npm, pnpm, or Bun from the project's `packageManager`

@@ -6,7 +6,7 @@
 typeset -ga dotfiles_commands=(
   agent-sessions audit-repo clean_caches codex-resume copy_clean
   dotfiles-audit dotfiles-defaults dotfiles-install dotfiles-profile dotfiles-update
-  files install_node nosync npm_globals_diff npm_release_age
+  files history-delete install_node nosync npm_globals_diff npm_release_age
   pma pmc pmi pml pmr pmu prune_branches roadmaps wipe wipe_clean
 )
 compdef _gnu_generic $dotfiles_commands
