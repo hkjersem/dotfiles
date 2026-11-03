@@ -89,10 +89,18 @@ an unreadable observation or reconfiguring recurring resumes resets the
 clock rather than counting unobserved time. There is no monitor while
 recurring resumes are off; enabling them again starts fresh. Checks sample
 quota and activity, so transitions between checks cannot be timed exactly.
+A chat whose latest reply stopped with a temporary error gets `continue` at the
+next check once no limit is used up: the model at capacity ("Selected model is
+at capacity", `server_overloaded`), a rate limit, a failed or lost connection,
+too many failed attempts or a server error. Codex has already retried these
+itself. The chat skips the windows, tiers and the three-chat cap, and is retried
+at each check after another such stop, until it has failed for 24 hours. A
+server error can recur for one chat, so it is retried at most three times in a
+row. `--status` lists these chats and their error in their own section.
 Running chats and chats whose latest reply completed, was cancelled or failed
-for another reason are not resumed. The check runs alongside a
-scheduled resume, opens the app if it isn't running, and logs only what it
-sends or renames, when it waits for a reset, and any errors. `--status` shows
+for another reason are not resumed. The check runs alongside a scheduled
+resume, opens the app if it isn't running, and logs only what it sends or
+renames, when it waits for a reset, and any errors. `--status` shows
 when it last checked and lists the chats stopped by a
 usage limit: whether each continues at the next check, when it is planned to
 continue, or is left alone as `24 hours unattended`. While a limit is used

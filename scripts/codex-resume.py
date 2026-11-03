@@ -51,6 +51,11 @@ after that count, so each chat is resumed once per stop. An unreadable record
 stops the checks rather than risk sending twice, and a lock skips a check while
 another runs. It logs only what it sends or renames, when it waits for a reset,
 and errors, and does not inhibit sleep. --status lists the stuck chats and when each is planned to continue.
+A chat whose last reply stopped with a temporary error in RETRY_ERRORS, such as
+server_overloaded ("Selected model is at capacity") or a failed connection, gets
+continue at the next check once the limits allow use, outside the windows, tiers
+and caps, and again after each later such stop, until it has failed for 24
+hours. A server error is retried at most three times in a row.
 --recurring off removes it; --cancel leaves it alone.
 
 A scheduled resume is a user LaunchAgent that starts immediately under
@@ -138,6 +143,19 @@ RECURRING_SCAN = timedelta(days=8)
 # Codex starts a usage window when the app takes the first message, a little after the send is recorded.
 WINDOW_START_SLACK = timedelta(minutes=15)
 USAGE_LIMIT_ERROR = "usage_limit_exceeded"
+# Temporary errors a reply can stop with, after Codex's own retries, and how --status names them; such a chat
+# can continue at the next check.
+RETRY_ERRORS = {
+    "server_overloaded": "model at capacity",
+    "rate_limit_exceeded": "rate limited",
+    "http_connection_failed": "connection failed",
+    "response_stream_connection_failed": "connection failed",
+    "response_stream_disconnected": "connection lost",
+    "response_too_many_failed_attempts": "too many failed attempts",
+    "internal_server_error": "server error",
+}
+# A server error can recur for one chat whatever the time, so it is only retried this many times in a row.
+SERVER_ERROR_RETRIES = 3
 SCRIPT_PATH = Path(__file__).resolve()
 TIME_PATTERN = re.compile(r"([01][0-9]|2[0-3])[:.]?([0-5][0-9])\Z")
 SCHEDULE_DELAY_SECONDS = 3
@@ -857,15 +875,25 @@ def wait_for_early_reset(timestamp, minutes, used_up):
         print(f"{log_stamp()}Not sending yet ({detail}); {then}.", flush=True)
 
 
-def limit_stop(payload):
+def stop_reason(payload):
+    """The codex_error_info a reply ended with, or None; Codex writes some as an object keyed by the reason."""
     error = payload.get("error")
-    return (payload["type"] == "task_complete" and isinstance(error, dict)
-            and error.get("codex_error_info") == USAGE_LIMIT_ERROR)
+    if payload["type"] != "task_complete" or not isinstance(error, dict):
+        return None
+    reason = error.get("codex_error_info")
+    if isinstance(reason, dict) and len(reason) == 1:
+        reason = next(iter(reason))
+    return reason if isinstance(reason, str) else None
 
 
-def stuck_at_limit(chat, since=None):
-    """For a chat whose latest replies, since a time if given, all stopped at a usage limit, when the limit first
-    stopped it and when it last did; None when its last reply ended otherwise or is still running."""
+def limit_stop(payload, reasons=(USAGE_LIMIT_ERROR,)):
+    return stop_reason(payload) in reasons
+
+
+def stuck_at_limit(chat, since=None, reasons=(USAGE_LIMIT_ERROR,)):
+    """For a chat whose latest replies, since a time if given, all stopped at a usage limit (or other reasons),
+    when it first stopped and when it last did, and the reason of each stop; None when its last reply ended
+    otherwise or is still running."""
     path = chat_log(chat)
     if path is None:
         return None
@@ -875,11 +903,12 @@ def stuck_at_limit(chat, since=None):
         if running:
             continue
         # Each message sent while the limit is used up stops at it too, so the chat stays stuck.
-        stops = [*stops, (record, payload)] if limit_stop(payload) else []
+        stops = [*stops, (record, payload)] if limit_stop(payload, reasons) else []
     if running or not stops or record_time(stops[0][0]) is None or record_time(stops[-1][0]) is None:
         return None
     metadata = path.stat()
     return {"closed": record_time(stops[0][0]), "stopped": record_time(stops[-1][0]),
+            "reasons": [stop_reason(payload) for _, payload in stops],
             "revision": f"{path.name}:{metadata.st_mtime_ns}:{metadata.st_size}"}
 
 
@@ -895,6 +924,59 @@ def stuck_chats(now=None, resumed=None):
             if stuck is not None:
                 found.append({**chat, **stuck})
     return sorted(found, key=lambda chat: chat["stopped"], reverse=True)
+
+
+def retry_chats(now=None, resumed=None):
+    """Chats on this Mac whose last reply stopped with a temporary error, newest first. For a chat in resumed,
+    only stops after it was last resumed count. A chat failing for over UNATTENDED_LIMIT, or whose
+    SERVER_ERROR_RETRIES retries after a server error all hit one again, is left alone."""
+    now = now or datetime.now().astimezone()
+    resumed = resumed or {}
+    found = []
+    for chat in load_chats():
+        if chat["updated"] < now - RECURRING_SCAN:
+            continue
+        stuck = stuck_at_limit(chat, resumed.get(chat["id"]), RETRY_ERRORS)
+        if stuck is None:
+            continue
+        # Retries that fail again extend the run, so the whole run says how long and how often it failed.
+        run = stuck_at_limit(chat, None, RETRY_ERRORS) or stuck
+        server_errors = 0
+        for reason in reversed(run["reasons"]):
+            if reason != "internal_server_error":
+                break
+            server_errors += 1
+        # The first server error plus each retry that hit one again.
+        if run["closed"] >= now - UNATTENDED_LIMIT and server_errors <= SERVER_ERROR_RETRIES:
+            found.append({**chat, **stuck, "reason": stuck["reasons"][-1]})
+    return sorted(found, key=lambda chat: chat["stopped"], reverse=True)
+
+
+def resume_retries(state, now, queued):
+    """Queue continue in each chat a temporary error stopped, without waiting for a window or tier, once the
+    usage limits allow it; the queued messages are added to queued for following."""
+    resumed = state["resumed"]
+    chats = retry_chats(now, resumed)
+    if not chats or not usage_allowed():
+        return
+    for chat in chats:
+        print(f"{log_stamp()}Chat {chat_label(chat)} stopped with a temporary error ({RETRY_ERRORS[chat['reason']]}) "
+              f"{format_time(chat['stopped'].astimezone())}; resuming it.", flush=True)
+        # Recorded first, so a message that may have been queued is never sent twice.
+        previous = resumed.get(chat["id"])
+        resumed[chat["id"]] = now
+        save_recurring_state(state)
+        try:
+            entry = queue_message(chat, None, log_stamp)
+        except NotQueuedError as error:
+            print(f"{log_stamp()}{error}", file=sys.stderr, flush=True)
+            if previous is None:
+                del resumed[chat["id"]]
+            else:
+                resumed[chat["id"]] = previous
+            continue
+        if entry is not None:
+            queued.append(entry)
 
 
 def chat_marks(chat):
@@ -1126,6 +1208,16 @@ def print_stuck_overview(state, morning=None):
     resumed = {chat: at for chat, at in state["resumed"].items() if at >= now - RECURRING_SCAN}
     overview = stuck_overview(now, resumed, state["sends"], state.get("window"), morning, state.get("passed"),
                               state.get("tiers"), state.get("unattended"), state.get("checked"), recurring_minutes())
+    retrying = retry_chats(now, resumed)
+    if retrying:
+        output.section(f"Chats stopped by a temporary error ({len(retrying)})")
+        rows = [(format_time(chat["stopped"].astimezone()), RETRY_ERRORS[chat["reason"]], chat_label(chat))
+                for chat in retrying]
+        widths = [max(len(heading), *(len(row[index]) for row in rows))
+                  for index, heading in enumerate(("Stopped", "Error"))]
+        for row in [("Stopped", "Error", "Chat"), *rows]:
+            print(f"  {row[0]:<{widths[0]}}  {row[1]:<{widths[1]}}  {row[2]}")
+        print("  Each continues at the next check once the usage limits allow it.")
     output.section(f"Chats stopped by a usage limit ({len(overview)})")
     if not overview:
         print("  None.")
@@ -1294,8 +1386,9 @@ def check_stuck_chats(now, morning=None):
     state.update(resumed=resumed, sends=sends)
     previous_window = state["window"]
     # None until the chats are read, so a failed read does not forget which windows passed them by.
-    waiting, chats, expired_tiers = None, [], {}
+    waiting, chats, expired_tiers, queued = None, [], {}, []
     try:
+        resume_retries(state, now, queued)
         waiting = with_chat_tiers(stuck_chats(now, resumed), state["passed"], state["tiers"])
         state["tiers"] = remember_chat_tiers(waiting)
         if not waiting:
@@ -1316,6 +1409,9 @@ def check_stuck_chats(now, morning=None):
                 return
             print(f"{log_stamp()}{len(chats) or len(waiting)} chat(s) stopped at a usage limit; waiting until "
                   f"{format_time(resets)}, a minute after it resets.", flush=True)
+            # Chats resumed after a temporary error are followed now rather than after the wait.
+            watch_queued(queued)
+            queued.clear()
             wait_until_scheduled_time(resets.isoformat())
             # The wait can run late, as when the Mac slept, and chats can be resumed meanwhile.
             now = local_now()
@@ -1333,45 +1429,38 @@ def check_stuck_chats(now, morning=None):
             if not chats:
                 return
         # All are queued first and then followed together, so the app takes them within seconds of each other.
-        queued = []
-        try:
-            for chat in chats:
-                print(f"{log_stamp()}Chat {chat_label(chat)} stopped at a usage limit "
-                      f"{format_time(chat['stopped'].astimezone())}; resuming it.", flush=True)
-                # Recorded first, so a message that may have been queued is never sent twice.
-                previous = resumed.get(chat["id"])
-                resumed[chat["id"]] = now
-                sends.append(now)
-                state["window"] = window
-                save_recurring_state(state)
-                not_queued = False
-                try:
-                    entry = queue_message(chat, None, log_stamp)
-                except NotQueuedError as error:
-                    not_queued = True
-                    print(f"{log_stamp()}{error}", file=sys.stderr, flush=True)
-                    entry = None
-                    if previous is None:
-                        del resumed[chat["id"]]
-                    else:
-                        resumed[chat["id"]] = previous
-                if not not_queued:
-                    state["unattended"].pop(chat["id"], None)
-                if entry is None:
-                    # Nothing was sent, either because queueing failed or because Codex is already replying in
-                    # the chat; a replying chat stays recorded, so its earlier stop is not resumed later.
-                    sends.pop()
-                    # A window none of its chats were resumed in has not started.
-                    if not any(at >= window["start"] for at in sends):
-                        state["window"] = previous_window
-                    continue
-                queued.append(entry)
-                unmark(chat)
-        except RuntimeError:
-            # The chats queued before the failure still need opening if the app leaves them queued.
-            watch_queued(queued)
-            raise
-        watch_queued(queued)
+        for chat in chats:
+            print(f"{log_stamp()}Chat {chat_label(chat)} stopped at a usage limit "
+                  f"{format_time(chat['stopped'].astimezone())}; resuming it.", flush=True)
+            # Recorded first, so a message that may have been queued is never sent twice.
+            previous = resumed.get(chat["id"])
+            resumed[chat["id"]] = now
+            sends.append(now)
+            state["window"] = window
+            save_recurring_state(state)
+            not_queued = False
+            try:
+                entry = queue_message(chat, None, log_stamp)
+            except NotQueuedError as error:
+                not_queued = True
+                print(f"{log_stamp()}{error}", file=sys.stderr, flush=True)
+                entry = None
+                if previous is None:
+                    del resumed[chat["id"]]
+                else:
+                    resumed[chat["id"]] = previous
+            if not not_queued:
+                state["unattended"].pop(chat["id"], None)
+            if entry is None:
+                # Nothing was sent, either because queueing failed or because Codex is already replying in
+                # the chat; a replying chat stays recorded, so its earlier stop is not resumed later.
+                sends.pop()
+                # A window none of its chats were resumed in has not started.
+                if not any(at >= window["start"] for at in sends):
+                    state["window"] = previous_window
+                continue
+            queued.append(entry)
+            unmark(chat)
     finally:
         if sys.exc_info()[0] is not None:
             state["unattended"] = {}
@@ -1380,6 +1469,8 @@ def check_stuck_chats(now, morning=None):
             pass_waiting_chats(state, waiting, chats, now)
             state["tiers"].update(expired_tiers)
         save_recurring_state(state)
+        # Also after a failure, as the chats queued before it still need opening if the app leaves them queued.
+        watch_queued(queued)
 
 
 def launchctl(*arguments):
@@ -1454,7 +1545,8 @@ def recurring_summary(minutes):
     return (f"Every {minutes} minutes, once the usage limits allow it, up to {RECURRING_CHATS} chats on this Mac "
             "that stopped at a usage limit get continue via the Codex queue. Chats whose title starts with "
             f"{TIER_MARKER} go in later tiers, one tier per 5-hour window. Each window that passes one by "
-            f"removes a {TIER_MARKER} without changing its tier.")
+            f"removes a {TIER_MARKER} without changing its tier. Chats a temporary error, such as the model being at "
+            "capacity, stopped continue at the next check.")
 
 
 def night_summary(morning):
@@ -1634,7 +1726,7 @@ def argument_parser():
         "--recurring", metavar="MINUTES|off",
         help=f"check this often (at least {MIN_RESET_CHECK_MINUTES} minutes) for chats a usage limit stopped, and "
              f"queue continue to up to {RECURRING_CHATS} of them, newest first, once the limits allow it; "
-             "'off' stops the checks",
+             "chats a temporary error stopped continue at the next check; 'off' stops the checks",
     )
     actions.add_argument("--recurring-check", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(

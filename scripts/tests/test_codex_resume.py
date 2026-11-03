@@ -95,6 +95,9 @@ REAL_OPEN_APP = codex_resume.open_app
 REAL_OPEN_CHAT = codex_resume.open_chat
 
 
+RETRY_CHATS = codex_resume.retry_chats
+
+
 class CodexResumeTests(unittest.TestCase):
     def setUp(self):
         # Keep agent-awake wake requests out of this Mac's ~/.cache and away from its root helper.
@@ -121,6 +124,11 @@ class CodexResumeTests(unittest.TestCase):
         recurring = patch.object(codex_resume, "RECURRING_PLIST_PATH", Path("/nonexistent/recurring.plist"))
         recurring.start()
         self.addCleanup(recurring.stop)
+        # Reading chats a temporary error stopped would otherwise read this Mac's Codex chats; tests of them use
+        # the real one.
+        retrying = patch.object(codex_resume, "retry_chats", return_value=[])
+        retrying.start()
+        self.addCleanup(retrying.stop)
     def test_requires_valid_24_hour_time(self):
         for value in (
             "4:15", "24:00", "12:60", "+5h", "12:30pm",
@@ -1177,6 +1185,101 @@ class CodexResumeTests(unittest.TestCase):
                                    stamped=datetime.fromisoformat("2026-10-21T11:00:00+02:00"))
             codex_resume.recurring_check(datetime.fromisoformat("2026-10-21T16:00:00+02:00"))
         self.assertEqual(sent, ["01a1-mine", "01a1-mine"])
+
+    def overload_stop(self, turn):
+        return {"type": "task_complete", "turn_id": turn,
+                "error": {"message": "Selected model is at capacity. Please try a different model.",
+                          "codex_error_info": "server_overloaded"}}
+
+    def test_overloaded_chat_is_one_whose_last_reply_stopped_at_capacity_within_a_day(self):
+        self.fake_queue([self.queued()])
+        now = datetime.fromisoformat("2026-11-03T20:00:00+01:00")
+        stopped = now - timedelta(hours=1)
+        chat = {**self.LOCAL_CHAT, "updated": stopped}
+
+        def found(resumed=None):
+            with patch.object(codex_resume, "load_chats", return_value=[chat]):
+                return [(item["id"], item["stopped"]) for item in RETRY_CHATS(now, resumed)]
+
+        self.write_session_log("task_started", self.limit_stop("t1"), stamped=stopped - timedelta(hours=2))
+        self.assertEqual(found(), [])
+        self.write_session_log("task_started", self.overload_stop("t2"), stamped=stopped)
+        self.assertEqual(found(), [("01a1-mine", stopped)])
+        # Once resumed, only a later stop makes it due again.
+        resumed = {"01a1-mine": stopped + timedelta(minutes=15)}
+        self.assertEqual(found(resumed), [])
+        again = stopped + timedelta(minutes=20)
+        self.write_session_log("task_started", self.overload_stop("t3"), stamped=again)
+        self.assertEqual(found(resumed), [("01a1-mine", again)])
+        # A model at capacity for over a day, through every retry, is left alone.
+        self.write_session_log("task_started", self.overload_stop("t0"), stamped=now - timedelta(hours=25))
+        with patch.object(codex_resume, "stuck_at_limit",
+                          side_effect=lambda chat, since, reasons: {"closed": now - timedelta(hours=25),
+                                                                    "stopped": again,
+                                                                    "reasons": ["server_overloaded"]}):
+            self.assertEqual(found(resumed), [])
+        # A finished reply ends the run.
+        self.write_session_log("task_started", "task_complete", stamped=now)
+        self.assertEqual(found(), [])
+
+    def test_temporary_errors_written_as_objects_count_and_server_errors_are_retried_three_times(self):
+        self.fake_queue([self.queued()])
+        now = datetime.fromisoformat("2026-11-03T20:00:00+01:00")
+        chat = {**self.LOCAL_CHAT, "updated": now}
+
+        def found():
+            with patch.object(codex_resume, "load_chats", return_value=[chat]):
+                return [item["reason"] for item in RETRY_CHATS(now)]
+
+        def stop(reason, minutes):
+            self.write_session_log("task_started", {"type": "task_complete", "error": {"codex_error_info": reason}},
+                                   stamped=now - timedelta(minutes=minutes))
+
+        stop({"http_connection_failed": {"http_status_code": 502}}, 60)
+        self.assertEqual(found(), ["http_connection_failed"])
+        stop({"context_window_exceeded": None}, 55)
+        self.assertEqual(found(), [])
+        # The first server error and two retries that hit one again leave a third retry.
+        for minutes in (50, 40, 30):
+            stop("internal_server_error", minutes)
+        self.assertEqual(found(), ["internal_server_error"])
+        stop("internal_server_error", 20)
+        self.assertEqual(found(), [])
+        # Another temporary error between them starts the count again.
+        stop("server_overloaded", 15)
+        stop("internal_server_error", 10)
+        self.assertEqual(found(), ["internal_server_error"])
+
+    def test_recurring_check_resumes_an_overloaded_chat_at_once_outside_the_caps(self):
+        self.fake_queue([self.queued()])
+        chat = {**self.LOCAL_CHAT, "updated": datetime.fromisoformat("2026-11-03T20:00:00+01:00")}
+        self.write_session_log("task_started", self.overload_stop("t1"),
+                               stamped=datetime.fromisoformat("2026-11-03T20:01:00+01:00"))
+        state_path = codex_resume.CODEX_HOME / "recurring.json"
+        sent, allowed = [], [False, True, True, True]
+        with (patch.object(codex_resume, "RECURRING_STATE_PATH", state_path),
+              patch.object(codex_resume, "retry_chats", RETRY_CHATS),
+              patch.object(codex_resume, "load_chats", return_value=[chat]),
+              patch.object(codex_resume, "usage_allowed", side_effect=allowed),
+              patch.object(codex_resume, "usage_limits", side_effect=AssertionError("no limit chat waits")),
+              patch.object(codex_resume, "queue_message",
+                           side_effect=lambda chat, *_, **__: sent.append(chat["id"])),
+              redirect_stdout(io.StringIO()) as output):
+            # Not while a limit is used up, as the reply would only stop at it.
+            codex_resume.recurring_check(datetime.fromisoformat("2026-11-03T20:15:00+01:00"))
+            self.assertEqual(sent, [])
+            codex_resume.recurring_check(datetime.fromisoformat("2026-11-03T20:30:00+01:00"))
+            codex_resume.recurring_check(datetime.fromisoformat("2026-11-03T20:45:00+01:00"))
+            self.assertEqual(sent, ["01a1-mine"])
+            self.write_session_log("task_started", self.overload_stop("t2"),
+                                   stamped=datetime.fromisoformat("2026-11-03T20:50:00+01:00"))
+            codex_resume.recurring_check(datetime.fromisoformat("2026-11-03T21:00:00+01:00"))
+        self.assertEqual(sent, ["01a1-mine", "01a1-mine"])
+        self.assertIn("stopped with a temporary error (model at capacity)", output.getvalue())
+        state = json.loads(state_path.read_text())
+        self.assertEqual(state["resumed"], {"01a1-mine": "2026-11-03T21:00:00+01:00"})
+        # Neither counts towards the three-chat cap or starts a usage window.
+        self.assertEqual(state["sends"], [])
 
     def test_recurring_keeps_an_older_marked_chat_after_days_without_quota(self):
         now = datetime.fromisoformat("2026-11-01T21:00:00+01:00")
