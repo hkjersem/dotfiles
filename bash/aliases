@@ -189,6 +189,7 @@ wipe() { bash "$HOME/.dotfiles/scripts/wipe.sh" "$@"; }
 # Read-only folder reports: files <count|large|changed|sizes|empty|types|duplicates> [-r] [path]
 files() { python3 "$HOME/.dotfiles/scripts/files.py" "$@"; }
 clean_caches() { python3 "$HOME/.dotfiles/scripts/clean-caches.py" "$@"; }
+clean_docker() { python3 "$HOME/.dotfiles/scripts/clean-docker.py" "$@"; }
 
 
 # Repository triage — Git signals for all languages; extra checks for JS/TS

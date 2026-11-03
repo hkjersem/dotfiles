@@ -325,6 +325,52 @@ ZIP archives always include the source folder name; without a destination,
 the archive is created inside the source. `--ignore-git` excludes `.git`
 directories; otherwise Git metadata is copied too.
 
+## Clean Docker storage
+
+`clean_docker --inspect` shows Docker storage and inspection guidance.
+`--dry-run` shows only the cleanup plan, for both supported cleaners by default
+or those selected with `--only`. Neither mode prompts or deletes.
+A normal run requires explicit `--only` selection, asks with the single-key
+`[y/N]` prompt, then reports what happened without displaying a plan.
+Containers, volumes and tagged images are never deleted; it never runs
+`system prune`, `--all`, or VM disk compaction.
+
+```sh
+clean_docker --inspect
+clean_docker --dry-run
+clean_docker --only build-cache --older-than 30d
+clean_docker --only build-cache,dangling-images --older-than 7d --dry-run
+clean_docker --context colima --builder colima --only build-cache
+```
+
+`--older-than` uses `m`, `h`, `d` or `w`: build-cache age means last use, while
+image age means creation, not last use. Containerd-backed image stores use local
+image-record creation, so a recently pulled old image may be retained. Without
+the flag, all eligible data in the selected categories is considered.
+Build-cache previews exclude shared, internal and frontend records. With an age
+filter, cache counts are upper bounds **before age filtering**: Buildx exposes
+only rounded last-use ages. Image counts are upper bounds based on image build
+creation, not containerd's local timestamp. Docker applies the native age and
+eligibility checks during pruning. Cache cleanup can slow later builds.
+
+The default builder is the context's own builder, **not** whichever builder
+Buildx has selected. `--builder` selects another explicitly; the context and
+builder targets are pinned and rechecked after confirmation. A stopped builder
+is reported, not started. If `DOCKER_HOST` is set, choose a named `--context`
+explicitly. Storage totals describe the context's daemon; a different builder
+can have separate storage. Docker's reclaimable totals are not the filtered
+cleanup estimate or guaranteed space returned to macOS from Colima/Docker's VM.
+The command is also listed under `dotfiles-help cleanup`.
+
+In `--inspect`, the storage report marks each category's cleanup scope; Docker's
+reclaimable image storage can include tagged images that this command retains. An
+“Inspect further” section prints read-only commands for the same context and
+builder, with volume-reference checks and manual removal guidance when containers
+or volumes exist. Manual removals have no confirmation prompt and can destroy
+needed data; `--help` stays focused on flags and examples. `--inspect` cannot be
+combined with `--dry-run`, `--only` or `--older-than`; `--context` and `--builder`
+work in all modes.
+
 ## Clean global caches
 
 `clean_caches` previews supported global developer caches. It runs from HOME

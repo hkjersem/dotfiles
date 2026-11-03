@@ -20,7 +20,7 @@ SCRIPT_FUNCTION = re.compile(
     r'(?: --[\w-]+)* "\$@"; \}$', re.M)
 # Tools a help request must never run.
 TOOLS = ("bun", "corepack", "fnm", "git", "node", "npm", "npx", "pnpm",
-         "softwareupdate", "mas", "brew", "sudo", "osascript", "defaults")
+         "softwareupdate", "mas", "brew", "sudo", "osascript", "defaults", "docker")
 
 
 def script_commands():
@@ -378,10 +378,19 @@ zpty -d z
         flags = self.complete(["prune_branches"], " --")["prune_branches"]
         self.assertTrue({"--include-detached", "--older-than"}.issubset(flags), flags)
 
+    def test_docker_cleaner_is_listed_and_completes_selection(self):
+        offered = self.complete(["dotfiles-help"], " cleanup ")["dotfiles-help"]
+        self.assertIn("clean_docker", offered)
+        self.assertEqual(self.complete(["clean_docker"], " --")["clean_docker"],
+                         {"--only", "--older-than", "--context", "--builder", "--inspect", "--dry-run", "--help"})
+        self.assertEqual(self.complete(["clean_docker"], " --only ")["clean_docker"],
+                         {"build-cache", "dangling-images"})
+
     def test_duration_values_offer_examples_and_units_for_typed_numbers(self):
         cases = (("prune_branches", " --stale-after "),
                  ("prune_branches", " --older-than "),
                  ("wipe_clean", " --older-than "),
+                 ("clean_docker", " --older-than "),
                  ("files", " leftovers --older-than "),
                  ("files", " changed --since "),
                  ("pmu", " --cooldown "),

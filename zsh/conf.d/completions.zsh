@@ -4,7 +4,7 @@
 # flags as indented "  -x, --flag  description" lines. flag-highlight.zsh reads
 # the same list.
 typeset -ga dotfiles_commands=(
-  agent-awake agent-sessions audit-repo clean_caches codex-resume copy_clean
+  agent-awake agent-sessions audit-repo clean_caches clean_docker codex-resume copy_clean
   dotfiles-audit dotfiles-defaults dotfiles-help dotfiles-install dotfiles-profile dotfiles-update
   files history-delete install_node nosync npm_globals_diff npm_release_age
   pma pmc pmh pmi pml pmr pmu prune_branches roadmaps wipe wipe_clean
@@ -141,6 +141,21 @@ _dotfiles_clean_caches() {
     '(-n --dry-run)'{-n,--dry-run}'[Preview without prompting or cleaning]'
 }
 compdef _dotfiles_clean_caches clean_caches
+
+_dotfiles_docker_cleaners() {
+  _values -s , 'cleaner' build-cache dangling-images
+}
+_dotfiles_clean_docker() {
+  _arguments \
+    '(-h --help)'{-h,--help}'[Show help]' \
+    '(--inspect)--only[Select comma-separated cleaners]:cleaners:_dotfiles_docker_cleaners' \
+    '(--inspect)--older-than[Retain recently used cache or recently created images]:age:_dotfiles_age' \
+    '--context[Docker context]:context:' \
+    '--builder[Buildx builder; defaults to context name]:builder:' \
+    '(-n --dry-run --only --older-than)--inspect[Show storage and inspection guidance]' \
+    '(--inspect -n --dry-run)'{-n,--dry-run}'[Show the cleanup plan without prompting or cleaning]'
+}
+compdef _dotfiles_clean_docker clean_docker
 
 _dotfiles_profile() {
   _arguments \
