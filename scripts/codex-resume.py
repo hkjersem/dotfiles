@@ -58,7 +58,10 @@ caffeinate -i, so the Mac does not idle-sleep before the run, and waits until
 three seconds after the requested local minute. Late starts send immediately
 and are logged as late. Completion or failure unloads the job and releases the
 sleep assertion. --now does not inhibit sleep, and closing the lid still puts
-the Mac to sleep. Scheduled output and errors go to
+the Mac to sleep unless agent-awake is installed: a scheduled run then asks it
+to wake the Mac from 90 seconds early and keep it awake until the run ends. Waits
+re-read the clock every 30 seconds, so a run starts as soon as the Mac wakes.
+Scheduled output and errors go to
 ~/Library/Logs/codex-resume.log, without custom messages; a scheduled message
 is stored in the LaunchAgent plist.
 
@@ -68,7 +71,9 @@ as not running when it is absent, has reset, or reports 0% with a reset a full
 window ahead; the live response without a running window is unverified.
 
 --list shows your unarchived chats on this Mac from the Codex app's sidebar
-catalogue, newest first, without subagent or review threads. --chat picks one
+catalogue, plus new chats it has not caught up with (such as one whose first
+turn a usage limit stopped), newest first, without subagent or review threads
+or threads without a message. --chat picks one
 by id, id prefix, or name: the whole name, part of it, or the starts of its
 words in any order; several matches are listed with their last activity
 instead of guessing. --project picks a project by its folder name (or full
@@ -104,6 +109,7 @@ import uuid
 from xml.parsers.expat import ExpatError
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import agent_awake  # noqa: E402
 import output  # noqa: E402
 import command_help  # noqa: E402
 
@@ -135,6 +141,8 @@ USAGE_LIMIT_ERROR = "usage_limit_exceeded"
 SCRIPT_PATH = Path(__file__).resolve()
 TIME_PATTERN = re.compile(r"([01][0-9]|2[0-3])[:.]?([0-5][0-9])\Z")
 SCHEDULE_DELAY_SECONDS = 3
+WAIT_STEP_SECONDS = 30
+WAKE_SOURCE = "codex-resume"
 RESET_MARGIN_SECONDS = 60
 MIN_RESET_CHECK_MINUTES = 5
 # A check or send this far past its planned time is logged as late, as after sleep.
@@ -771,12 +779,17 @@ def late_note(planned, now=None):
     return f"{duration} late; the Mac was probably asleep or off"
 
 
+def sleep_until(moment, now=None):
+    # Short naps re-read the clock, so after a scheduled wake the job does not finish a nap that may not
+    # have counted the time the Mac was asleep.
+    now = now or datetime.now(moment.tzinfo)
+    while (delay := (moment - now).total_seconds()) > 0:
+        time.sleep(min(delay, WAIT_STEP_SECONDS))
+        now = datetime.now(moment.tzinfo)
+
+
 def wait_until_scheduled_time(timestamp, now=None):
-    scheduled = datetime.fromisoformat(timestamp) + timedelta(seconds=SCHEDULE_DELAY_SECONDS)
-    now = now or datetime.now(scheduled.tzinfo)
-    delay = (scheduled - now).total_seconds()
-    if delay > 0:
-        time.sleep(delay)
+    sleep_until(datetime.fromisoformat(timestamp) + timedelta(seconds=SCHEDULE_DELAY_SECONDS), now)
 
 
 def early_reset_state(used_up):
@@ -819,7 +832,7 @@ def wait_for_early_reset(timestamp, minutes, used_up):
         if final:
             wait_until_scheduled_time(timestamp)
         else:
-            time.sleep(max(0, (next_check - datetime.now(deadline.tzinfo)).total_seconds()))
+            sleep_until(next_check)
         late = late_note(deadline if final else next_check)
         try:
             state, detail = early_reset_state(used_up)
@@ -1484,8 +1497,11 @@ def schedule(scheduled, message=None, chat=None, project=None, start_window=Fals
         "StandardErrorPath": str(LOG_PATH),
     }
     install_agent(plist, PLIST_PATH)
+    woken = agent_awake.request_wake(WAKE_SOURCE, scheduled) is not None
     print(scheduled_summary(scheduled, message, None if project is not None else chat, project, start_window,
                             every))
+    if woken:
+        print("agent-awake wakes the Mac for it, also with the lid closed.")
 
 
 def chat_label(chat):
@@ -1727,6 +1743,7 @@ def main(arguments):
         status()
         return 0
     if options.cancel:
+        agent_awake.cancel_wakes(WAKE_SOURCE)
         if remove_agent():
             print(f"  {output.mark('ok')} Scheduled Codex resume cancelled.")
         else:
@@ -1752,6 +1769,7 @@ def main(arguments):
             print(f"{log_stamp()}Stopped: {error}", file=sys.stderr, flush=True)
             return 1
         finally:
+            agent_awake.cancel_wakes(WAKE_SOURCE)
             if PLIST_PATH.exists():
                 PLIST_PATH.unlink()
                 launchctl("bootout", f"{agent_domain()}/{LABEL}")

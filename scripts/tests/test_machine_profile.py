@@ -88,7 +88,7 @@ class MachineProfileTests(unittest.TestCase):
         # Isolate command discovery from the real machine's optional tools.
         for tool in ("cat", "mkdir", "mktemp", "mv", "rm", "realpath", "dirname",
                      "basename", "grep", "sed", "awk", "tr", "ls", "readlink", "sort",
-                     "uname"):
+                     "uname", "cmp"):
             self.bin.joinpath(tool).symlink_to(shutil.which(tool))
         self.mock = "#!" + sys.executable + "\n" + MOCK_TOOL
         for tool in ("brew", "npm", "fnm", "pnpm", "bash", "zsh", "softwareupdate", "xcode-select"):
@@ -102,7 +102,10 @@ class MachineProfileTests(unittest.TestCase):
             self.env.pop(key, None)
         self.env.update(HOME=str(self.home), PATH=str(self.bin),
                         PROFILE_TEST_ROOT=str(self.root),
-                        PROFILE_TEST_LOG=str(self.log))
+                        PROFILE_TEST_LOG=str(self.log),
+                        # Keep this Mac's agent-awake installation out of the audit.
+                        AGENT_AWAKE_PLIST=str(self.root / "absent.plist"),
+                        AGENT_AWAKE_HELPER=str(self.root / "helper.sh"))
 
     def write_mock(self, path):
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -542,6 +545,19 @@ class MachineProfileTests(unittest.TestCase):
         self.assertFalse(self.calls("nav-pilot"))
         self.assertFalse(self.calls("gcloud"))
         self.assertEqual(self.profile.read_text(), "personal\n")
+
+    def test_audit_checks_the_agent_awake_helper_only_where_it_is_installed(self):
+        self.assertNotIn("agent-awake", self.run_script("scripts/audit.sh").stdout)
+        Path(self.env["AGENT_AWAKE_PLIST"]).write_text("installed")
+        repository = self.dotfiles / "scripts/agent-awake-daemon.sh"
+        repository.write_text("version 2\n")
+        helper = Path(self.env["AGENT_AWAKE_HELPER"])
+        for installed, expected in (("version 1\n", ["  ! Root helper outdated (run agent-awake --install)"]),
+                                    ("version 2\n", ["  ✓ All checks passed"])):
+            with self.subTest(installed=installed):
+                helper.write_text(installed)
+                section = self.run_script("scripts/audit.sh").stdout.split("─ agent-awake ", 1)[1]
+                self.assertEqual(section.split("\n─", 1)[0].splitlines()[1:], expected)
 
     def test_audit_recognizes_homebrew_python_alias(self):
         result = self.run_script("scripts/audit.sh")

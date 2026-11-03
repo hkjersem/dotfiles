@@ -97,6 +97,15 @@ REAL_OPEN_CHAT = codex_resume.open_chat
 
 class CodexResumeTests(unittest.TestCase):
     def setUp(self):
+        # Keep agent-awake wake requests out of this Mac's ~/.cache and away from its root helper.
+        state = tempfile.TemporaryDirectory()
+        self.addCleanup(state.cleanup)
+        self.wakes = Path(state.name) / "wake"
+        for name, value in (("wakes_dir", lambda: self.wakes),
+                            ("DAEMON_PLIST", Path(state.name) / "absent.plist")):
+            patcher = patch.object(codex_resume.agent_awake, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
         # Never reach the real Codex CLI: a local chat would otherwise queue a real message.
         guard = patch.object(codex_resume, "app_server_request",
                              side_effect=AssertionError("unexpected Codex app server request"))
@@ -244,6 +253,43 @@ class CodexResumeTests(unittest.TestCase):
                 "--scheduled", "2026-10-16T16:30:00+02:00",
             ])
             launchctl.assert_any_call("bootstrap", codex_resume.agent_domain(), str(plist_path))
+
+    def test_schedule_asks_agent_awake_for_a_wake_only_when_it_is_installed(self):
+        at_half_past_four = datetime.fromisoformat("2026-10-16T16:30:00+02:00")
+        for installed in (False, True):
+            with self.subTest(installed=installed), tempfile.TemporaryDirectory() as temporary:
+                with (
+                    patch.object(codex_resume, "PLIST_PATH", Path(temporary) / "job.plist"),
+                    patch.object(codex_resume, "LOG_PATH", Path(temporary) / "codex-resume.log"),
+                    patch.object(codex_resume, "launchctl"),
+                    patch.object(codex_resume.agent_awake, "installed", return_value=installed),
+                    redirect_stdout(io.StringIO()) as printed,
+                ):
+                    codex_resume.schedule(at_half_past_four)
+                    codex_resume.schedule(at_half_past_four + timedelta(hours=1))
+                wakes = sorted(path.name for path in self.wakes.glob("*")) if self.wakes.exists() else []
+                # The later schedule replaces the first: 16.10.2026 kl. 17.30 +02:00, as `date -u -r` confirms.
+                self.assertEqual(wakes, ["codex-resume.1792164600"] if installed else [])
+                self.assertEqual("lid closed" in printed.getvalue(), installed)
+        with patch.object(codex_resume, "remove_agent", return_value=True), redirect_stdout(io.StringIO()):
+            self.assertEqual(codex_resume.main(["--cancel"]), 0)
+        self.assertEqual(list(self.wakes.glob("*")), [])
+
+    def test_waits_nap_briefly_so_a_wake_from_sleep_is_noticed(self):
+        start = datetime.fromisoformat("2026-10-16T16:00:00+02:00")
+        clock = [start]
+        naps = []
+
+        def nap(seconds):
+            naps.append(seconds)
+            # The Mac sleeps through the second nap for an hour.
+            clock[0] += timedelta(seconds=seconds, hours=1 if len(naps) == 2 else 0)
+
+        with patch.object(codex_resume.time, "sleep", side_effect=nap), \
+                patch.object(codex_resume, "datetime", wraps=datetime) as fake:
+            fake.now.side_effect = lambda zone=None: clock[0]
+            codex_resume.sleep_until(start + timedelta(minutes=30))
+        self.assertEqual(naps, [30, 30])
 
     def test_invalid_schedule_does_not_create_a_job(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -2138,10 +2184,12 @@ class CodexResumeTests(unittest.TestCase):
     def test_recurring_reset_says_when_a_check_ran_late(self):
         checks, sends, lines = self.run_recurring_reset(
             [self.reset_limits(12)], minutes_to_reset=70, asleep_minutes=150)
-        self.assertEqual(checks, [110])
+        # Waits nap 30 seconds at a time, so the check planned 40 minutes before the reset runs as soon as
+        # the Mac wakes, 0.5 + 150 minutes after the job started 70 minutes before it.
+        self.assertEqual(checks, [80.5])
         self.assertEqual(sends, 0)
         self.assertRegex(lines[-1], r"already in use \(5-hour: 12% used.*; "
-                                    r"2 h 30 min late; the Mac was probably asleep or off\); not sending\.$")
+                                    r"2 h 0 min late; the Mac was probably asleep or off\); not sending\.$")
 
     def test_recurring_reset_judges_only_the_limits_that_were_used_up(self):
         # The weekly limit ran out mid-window; the 5-hour window's earlier use is not a new session.

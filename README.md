@@ -99,6 +99,23 @@ Use `--status`, `--cancel`, or `--help`. See
 [docs/codex-resume.md](docs/codex-resume.md) for targeting chats, how
 messages are delivered, and requirements.
 
+## Keep the Mac awake for agents
+
+`agent-awake` keeps a MacBook awake, also with the lid closed, while Copilot
+CLI, Claude Code or Codex is working on a turn, and lets it sleep again when
+the work is done. Open sessions that are not working don't count. It also
+wakes the Mac for scheduled `codex-resume` runs. It is opt-in per Mac and needs
+an administrator password once.
+
+```sh
+agent-awake --install
+agent-awake --status
+agent-awake --uninstall
+```
+
+See [docs/agent-awake.md](docs/agent-awake.md) for how it decides, its
+limits, and testing.
+
 ## Machine profile
 
 The first `dotfiles-install` or `dotfiles-update` asks whether this is a `personal`
@@ -531,8 +548,9 @@ session ID prefix, title, terminal app, launcher, owning shell PID and restorati
 Live sessions come first, followed by waiting sessions and other records;
 empty sections are omitted. Each section is sorted by project path, session
 ID and shell PID.
-`Live, tracked` means the record has a matching live shell and saved
-conversation; `Waiting to restore` means its shell has gone and the next terminal in that project can
+Titles use the same lookup as `agent-awake --status`. `Live, tracked` means
+the record has a matching live shell and saved conversation; `Waiting to
+restore` means its shell has gone and the next terminal in that project can
 resume it. Unknown sessions, missing history, expired records and restore
 claims are shown separately. The command never claims or cleans records.
 It reports the latest saved observation, not an instantaneous inspection of
@@ -552,10 +570,18 @@ uses its normal five-second interval. Saved process start times and log
 creation timestamps prevent a reused PID from selecting an unrelated session;
 rotated Copilot logs are included. Process-local files are only reused at
 restoration while the original process identity can still be verified.
-The wrappers expose a launch tag and agent kind for optional prompt hooks;
-cplt explicitly forwards only those two environment variables through its
-filter. If a process-local source is gone, the newest valid hook or follower
-observation is used.
+When the optional `agent-awake` hooks are installed, submitted prompts also
+publish the session ID immediately in `~/.cache/agent-sessions`. These
+observations do not depend on an awake hold or the root helper; log following
+still works without the hooks or when no prompt was submitted.
+The hook can fill in the selected session for an already tracked launch.
+It cannot register a session launched before tracking was loaded or through
+`command copilot`, `command claude` or `command cplt`: those processes lack
+the wrapper's launch tag. Resume such a chat through a wrapper in a new
+terminal to start tracking it.
+The cplt wrapper explicitly forwards only the two session-tag environment
+variables through its environment filter. If a process-local source is gone,
+the newest valid hook or follower observation is used.
 Once the selected session is observed, its new record replaces the restore
 attempt's retry record. A later crash or terminal hangup cannot resurrect that
 old record. Only a launch whose selected session was never observed is eligible

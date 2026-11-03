@@ -399,6 +399,7 @@ zpty -d z
         self.assertEqual(offered["dotfiles-defaults"], {"--dns", "--help"})
         self.assertEqual(offered["dotfiles-audit"], {"--help"})
         self.assertEqual(offered["dotfiles-profile"], {"--choose", "--help"})
+        self.assertEqual(offered["agent-awake"], {"--install", "--uninstall", "--status", "--battery", "--help"})
         for command in script_commands():
             with self.subTest(command=command):
                 self.assertIn("--help", offered.get(command, set()))

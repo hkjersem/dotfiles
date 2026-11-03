@@ -148,6 +148,10 @@ instead. It must be one line and not start with `/`.
 A scheduled resume prevents idle sleep while it waits, through `caffeinate -i`;
 the display still turns off and the screen locks. macOS shows a "Background
 Items Added" notification for each scheduled job. Closing the lid still puts
-the Mac to sleep; a run that starts late says so in the log. The recurring
-check doesn't prevent sleep. Logs: `~/Library/Logs/codex-resume.log`. Requirements and implementation notes
+the Mac to sleep, unless [agent-awake](agent-awake.md) is installed: then the
+job asks it to wake the Mac from 90 seconds before the scheduled time, also with the
+lid closed, and keep it awake until the message is sent. The job checks the
+clock every 30 seconds, so it runs as soon as the Mac wakes. A run that starts
+late says so in the log. The recurring check doesn't prevent sleep or request
+wakes. Logs: `~/Library/Logs/codex-resume.log`. Requirements and implementation notes
 are in [`scripts/codex-resume.py`](../scripts/codex-resume.py).

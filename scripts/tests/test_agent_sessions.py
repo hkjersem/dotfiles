@@ -113,6 +113,11 @@ for i, target in enumerate(([session] if session else []) + switches):
     if not os.environ.get("AGENT_TEST_EMPTY"):
         (folder / "events.jsonl").write_text("{}\\n")
     lock.touch()
+if os.environ.get("AGENT_TEST_HOOK") and (session or switches):
+    import subprocess
+    subprocess.run(["/usr/bin/python3", "-B", os.environ["AGENT_TEST_HOOK"],
+                    "--hook", "start", "copilot"],
+                   input=json.dumps({"sessionId": target}), text=True, check=True)
 if os.environ.get("AGENT_TEST_HANG"):
     time.sleep(float(os.environ.get("AGENT_TEST_HANG_SECONDS", "30")))
 if os.environ.get("AGENT_TEST_INPUT"):
@@ -1025,6 +1030,37 @@ _agent_session_follow "{marker}" $$ copilot
                 self.open_and_close(self.project)
                 self.assertEqual(len(self.calls()), calls_before + 1)
                 self.assertEqual(self.args()[-1], ["claude", "--resume", ID_B])
+
+    def test_cplt_prompt_hook_receives_context_through_env_filter(self):
+        pid, fd = self.interactive_shell(
+            self.project, AGENT_TEST_HANG="1", AGENT_TEST_SWITCH=ID_A,
+            AGENT_TEST_HOOK=str(REPO / "scripts/agent-awake.py"),
+        )
+        os.write(fd, b"cplt --resume\n")
+        observed = self.tmp / ".cache/agent-sessions"
+        self.drain(fd, lambda _: observed.exists() and any(
+            path.read_text() == f"{ID_A}\n" for path in observed.iterdir()))
+        args = self.args()[0]
+        for key in ("DOTFILES_AGENT_SESSION", "DOTFILES_AGENT_KIND"):
+            self.assertEqual(args.count(key), 1)
+            self.assertEqual(args[args.index(key) - 1], "--pass-env")
+        self.hang_up(pid, fd)
+
+    def test_awake_prompt_hook_observes_the_wrapped_session(self):
+        pid, fd = self.interactive_shell(
+            self.project, AGENT_TEST_HANG="1", AGENT_TEST_SWITCH=ID_A,
+            AGENT_TEST_HOOK=str(REPO / "scripts/agent-awake.py"),
+        )
+        os.write(fd, b"copilot --resume\n")
+        observed = self.tmp / ".cache/agent-sessions"
+        self.drain(fd, lambda _: observed.exists() and any(
+            path.read_text() == f"{ID_A}\n" for path in observed.iterdir()))
+        self.hang_up(pid, fd)
+        pid, fd = self.interactive_shell(self.project)
+        self.wait_for_calls(fd, 2)
+        self.exit_shell(pid, fd)
+        self.assertEqual(self.args()[-1], ["copilot", f"--resume={ID_A}"])
+        self.assertEqual(list(observed.iterdir()), [])
 
     def test_resume_is_skipped_when_disabled_or_stale(self):
         marker = self.write_marker(ID_A, self.project)

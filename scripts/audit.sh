@@ -514,6 +514,20 @@ else
 fi
 section_end
 
+# agent-awake is opt-in per Mac, so it is only checked where it is installed. Its root helper runs a
+# root-owned copy of the script, which a pull does not update. Tests point these paths elsewhere.
+AGENT_AWAKE_PLIST=${AGENT_AWAKE_PLIST:-/Library/LaunchDaemons/com.hkjersem.agent-awake.plist}
+AGENT_AWAKE_HELPER=${AGENT_AWAKE_HELPER:-/Library/PrivilegedHelperTools/com.hkjersem.agent-awake.sh}
+if [ -f "$AGENT_AWAKE_PLIST" ]; then
+    section_start "agent-awake"
+    if cmp -s "$AGENT_AWAKE_HELPER" "$DOTFILES/scripts/agent-awake-daemon.sh"; then
+        ok "Root helper up to date"
+    else
+        warn "Root helper outdated (run agent-awake --install)"
+    fi
+    section_end
+fi
+
 # ──────────────────────────────────────────────────────
 # 8. SKILLS (npx skills — github.com/vercel-labs/skills)
 # ──────────────────────────────────────────────────────
