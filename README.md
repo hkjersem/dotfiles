@@ -583,8 +583,23 @@ Failed automatic launches keep their record for the next terminal to retry.
 
 To set a machine-local Copilot model through an explicit CLI flag, add
 `DOTFILES_COPILOT_MODEL='<model-id>'` to `~/.zshrc_local`, using your chosen
-model's CLI identifier.
-Both `copilot` and `cplt` (when running Copilot) use it for manual launches.
+model's CLI identifier. For folder-specific defaults, add an associative map:
+
+```zsh
+typeset -A DOTFILES_COPILOT_MODELS
+DOTFILES_COPILOT_MODELS=(
+  "$HOME/Developer/project-a" '<model-id>'
+  "$HOME/Developer/project-b" '<another-model-id>'
+)
+```
+
+Both `copilot` and `cplt` (when running Copilot) use these for manual launches.
+The map matches the current shell directory and its descendants, with the
+most specific folder winning over `DOTFILES_COPILOT_MODEL`. Paths are literal,
+not patterns; use absolute paths as above. An empty mapped value uses Copilot's
+own default for that folder. Directory flags such as `-C` or `cplt -d` do not
+change which entry matches. These defaults are passed through `--model`,
+including when an organization setting overrides Copilot's native model config.
 Automatic session restoration leaves model selection to the saved session.
 An explicit `--model` takes precedence; subcommands
 and other agents are unchanged. Leave the variable unset or empty to use
