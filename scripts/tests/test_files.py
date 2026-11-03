@@ -466,6 +466,48 @@ class FilesTests(unittest.TestCase):
         self.assertTrue(any("entries inspected" in text for text in events), events)
         self.assertEqual(events[-2:], ["cleared", "report"])
 
+    def test_slow_scans_show_progress_for_every_path_report(self):
+        for command in FILES.COMMANDS.keys() - {"caches"}:
+            events = []
+            clock = iter(index * 0.3 for index in range(1000))
+            with self.subTest(command=command), \
+                    contextlib.redirect_stdout(io.StringIO()), \
+                    patch.object(FILES.time, "monotonic", side_effect=lambda: next(clock)), \
+                    patch.object(FILES.sys.stdout, "isatty", return_value=True), \
+                    patch.object(FILES.sys.stderr, "isatty", return_value=True), \
+                    patch.object(FILES.output, "progress", side_effect=lambda text: events.append(text)), \
+                    patch.object(FILES.output, "progress_done", side_effect=lambda: events.append("cleared")), \
+                    patch.object(FILES.output, "context", side_effect=lambda *args: events.append("report")):
+                self.assertEqual(FILES.main([command, "-r", str(self.root)]), 0)
+            self.assertTrue(any(event.startswith("Scanning:") for event in events), events)
+            self.assertEqual(events[-2:], ["cleared", "report"])
+
+    def test_hashing_updates_progress_with_bytes_and_clears_on_interruption(self):
+        events = []
+        clock = iter(index * 0.3 for index in range(1000))
+        with contextlib.redirect_stdout(io.StringIO()), \
+                patch.object(FILES.time, "monotonic", side_effect=lambda: next(clock)), \
+                patch.object(FILES.sys.stdout, "isatty", return_value=True), \
+                patch.object(FILES.sys.stderr, "isatty", return_value=True), \
+                patch.object(FILES.output, "progress", side_effect=lambda text: events.append(text)), \
+                patch.object(FILES.output, "progress_done"):
+            self.assertEqual(FILES.main(["duplicates", "-r", str(self.root)]), 0)
+        self.assertTrue(any(event.startswith("Hashing: 4 bytes read") for event in events), events)
+
+        def interrupted(entry, progress):
+            progress.update(entry.path, 4, phase="Hashing", unit="bytes read")
+            raise KeyboardInterrupt
+
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()), \
+                patch.object(FILES.time, "monotonic", side_effect=lambda: next(clock)), \
+                patch.object(FILES.sys.stdout, "isatty", return_value=True), \
+                patch.object(FILES.sys.stderr, "isatty", return_value=True), \
+                patch.object(FILES, "digest", side_effect=interrupted), \
+                patch.object(FILES.output, "progress"), \
+                patch.object(FILES.output, "progress_done") as done:
+            self.assertEqual(FILES.main(["duplicates", str(self.root)]), 130)
+        self.assertGreaterEqual(done.call_count, 1)
+
     def test_fast_or_redirected_sizes_has_no_progress(self):
         for terminal, step in ((True, 0), (False, 3)):
             with self.subTest(terminal=terminal):
@@ -717,8 +759,8 @@ class FilesTests(unittest.TestCase):
         entry.path.write_bytes(b"same")
         original_digest = FILES.digest
 
-        def mutate_after_read(candidate):
-            value = original_digest(candidate)
+        def mutate_after_read(candidate, progress=None):
+            value = original_digest(candidate, progress)
             if candidate.relative.name == "different.txt":
                 entry.path.write_bytes(b"changed")
             return value
@@ -853,10 +895,10 @@ class FilesTests(unittest.TestCase):
         (self.root / "copy.txt").write_bytes(b"same")
         original = FILES.digest
 
-        def denied(entry):
+        def denied(entry, progress=None):
             if entry.relative.name == "a.txt":
                 raise PermissionError(13, "Permission denied", str(entry.path))
-            return original(entry)
+            return original(entry, progress)
 
         with patch.object(FILES, "digest", side_effect=denied):
             text = self.run_report("duplicates")

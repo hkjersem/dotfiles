@@ -91,9 +91,11 @@ last written at least 24 hours ago from this cache directory. No background
 service runs; files remain while the command is unused. Cached results do not
 reflect added, removed or changed files.
 
-On a terminal, size scans lasting over two seconds show an updating progress
-line with the current folder and entry count. It clears before the report or
-on interruption; redirected output stays plain.
+On a terminal, every report's scan shows an updating progress line after two
+seconds. Duplicate hashing reports bytes read from the current file, and
+empty-folder checks and duplicate verification also update progress.
+The line clears before the report or on interruption; fast runs and redirected
+output stay quiet. Cached size reports do not scan.
 
 ## Possible leftovers
 

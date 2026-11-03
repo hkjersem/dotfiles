@@ -220,14 +220,14 @@ class ScanProgress:
         self.next_update = time.monotonic() + 2
         self.shown = False
 
-    def update(self, folder, count):
+    def update(self, folder, count, *, phase="Scanning", unit="entries inspected"):
         if not self.enabled:
             return
         now = time.monotonic()
         if now < self.next_update:
             return
         self.next_update = now + 0.2
-        text = f"Scanning: {count:,} entries inspected | {display(folder.relative_to(self.root))}"
+        text = f"{phase}: {count:,} {unit} | {display(folder.relative_to(self.root))}"
         width = max(1, shutil.get_terminal_size().columns - 1)
         if len(text) > width:
             text = text[:max(0, width - 3)] + "..."[:width]
@@ -237,6 +237,7 @@ class ScanProgress:
     def close(self):
         if self.shown:
             output.progress_done()
+            self.shown = False
 
 
 def scan(root, recursive, excludes, *, clean=False, warnings=None, progress=None, prune_matches=None,
@@ -560,7 +561,7 @@ def signature(info):
     return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
 
 
-def digest(entry):
+def digest(entry, progress=None):
     # Refuse symlink swaps and non-regular replacements, and detect writes during hashing.
     fd = os.open(entry.path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     with os.fdopen(fd, "rb") as source:
@@ -568,14 +569,18 @@ def digest(entry):
         if not stat.S_ISREG(before.st_mode) or signature(before) != signature(entry.info):
             raise OSError(f"file changed during scan: {display(entry.path)}")
         value = hashlib.sha256()
+        hashed = 0
         while chunk := source.read(1024 * 1024):
             value.update(chunk)
+            hashed += len(chunk)
+            if progress:
+                progress.update(entry.path, hashed, phase="Hashing", unit="bytes read")
         if signature(os.fstat(source.fileno())) != signature(before):
             raise OSError(f"file changed during hashing: {display(entry.path)}")
     return value.digest()
 
 
-def duplicate_groups(files, warnings=None):
+def duplicate_groups(files, warnings=None, progress=None):
     warnings = warnings if warnings is not None else {}
     by_size = defaultdict(list)
     seen = set()
@@ -591,7 +596,7 @@ def duplicate_groups(files, warnings=None):
         hashes = defaultdict(list)
         for entry in candidates:
             try:
-                hashes[digest(entry)].append(entry)
+                hashes[digest(entry, progress)].append(entry)
             except PermissionError as exc:
                 warnings[entry.path] = exc
         groups.extend(group for group in hashes.values() if len(group) > 1)
@@ -601,6 +606,8 @@ def duplicate_groups(files, warnings=None):
         readable = []
         for entry in group:
             try:
+                if progress:
+                    progress.update(entry.path, len(readable), phase="Verifying", unit="files checked")
                 if signature(entry.path.lstat()) != signature(entry.info):
                     raise OSError(f"file changed during scan: {display(entry.path)}")
                 readable.append(entry)
@@ -696,7 +703,7 @@ def report(args):
     cache_path = size_cache_path(root, args) if sizes else None
     if sizes:
         clean_size_cache(cache_path.parent)
-    progress = ScanProgress(root, sizes)
+    progress = ScanProgress(root, not cached)
     try:
         if cached:
             totals, warnings, cloud_paths, created = load_size_cache(cache_path)
@@ -744,15 +751,19 @@ def report(args):
                 if args.recursive or len(name.parts) == 1]
     elif args.command == "empty":
         rows = [("File", entry_name(entry)) for entry in files if not entry.info.st_size]
-        for entry in folders:
-            if entry.path in warnings or cloud_only(entry.info):
-                continue
-            try:
-                with os.scandir(entry.path) as children:
-                    if next(children, None) is None:
-                        rows.append(("Folder", display(entry.relative)))
-            except PermissionError as exc:
-                warnings[entry.path] = exc
+        try:
+            for count, entry in enumerate(folders, 1):
+                progress.update(entry.path, count, phase="Checking", unit="folders inspected")
+                if entry.path in warnings or cloud_only(entry.info):
+                    continue
+                try:
+                    with os.scandir(entry.path) as children:
+                        if next(children, None) is None:
+                            rows.append(("Folder", display(entry.relative)))
+                except PermissionError as exc:
+                    warnings[entry.path] = exc
+        finally:
+            progress.close()
         rows.sort(key=lambda row: row[1])
         rows = [(kind, output.listing_name(name, kind.lower())) for kind, name in rows]
     elif args.command == "types":
@@ -764,7 +775,11 @@ def report(args):
         rows = [(f"{count:>6}  {human_size(size):>12}", display(extension))
                 for extension, (count, size) in sorted(totals.items(), key=lambda item: (-item[1][0], item[0]))]
     elif args.command == "duplicates":
-        groups = duplicate_groups([entry for entry in files if not cloud_only(entry.info)], warnings)
+        try:
+            groups = duplicate_groups([entry for entry in files if not cloud_only(entry.info)],
+                                      warnings, progress)
+        finally:
+            progress.close()
 
     scope = ("all folders" if args.recursive else "child folders") if sizes else (
         "recursive" if args.recursive else "non-recursive")
