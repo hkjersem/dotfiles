@@ -782,12 +782,6 @@ def report(args):
         context.append("incomplete")
     output.context(*context)
     output.section(args.command.capitalize())
-    cloud_count = sum(cloud_only(entry.info) for entry in entries) + len(cloud_paths)
-    if cloud_count:
-        noun = "entry" if cloud_count == 1 else "entries"
-        output.note(f"{cloud_count} cloud-only {noun}; cloud-only folders are not traversed.")
-        if args.command == "duplicates":
-            output.note("Cloud-only files are not hashed or downloaded.")
     if args.command == "sizes":
         output.note(("Logical file bytes; " if args.logical else "Allocated file bytes; ") +
                     ("direct files only." if args.direct else "includes all subfolders."))
@@ -821,6 +815,15 @@ def report(args):
     limit = getattr(args, "limit", 0)
     if limit and total > limit:
         output.note(f"Showing {limit} of {total}; use --limit 0 to show all.")
+    cloud_count = sum(cloud_only(entry.info) for entry in entries) + len(cloud_paths)
+    if cloud_count:
+        noun = "entry" if cloud_count == 1 else "entries"
+        output.note(f"{cloud_count:,} cloud-only {noun} " +
+                    output.paint("(exclude with --local-only)", "dim"))
+        if args.verbose:
+            output.note("Cloud-only contents are not downloaded; cloud-only folders are not traversed.")
+            if args.command == "duplicates":
+                output.note("Cloud-only files are not hashed.")
     report_warnings(warnings, root, args.verbose)
 
 

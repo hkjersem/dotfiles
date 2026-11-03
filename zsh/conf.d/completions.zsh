@@ -89,11 +89,14 @@ _dotfiles_files() {
   elif [[ $words[2] == caches ]]; then
     _arguments \
       '(-h --help)'{-h,--help}'[Show help]' \
+      '(-v --verbose)'{-v,--verbose}'[Show warning paths]' \
       '--limit[Maximum rows; 0 shows all]:limit:' \
       '1:report:'
   elif (( CURRENT > 2 )); then
     local -a options=(
       '(-h --help)'{-h,--help}'[Show help]'
+      '(-v --verbose)'{-v,--verbose}'[Show warning paths; leftovers also includes tool-managed matches]'
+      '--local-only[Exclude cloud-only files and folders]'
       '(-r --recursive)'{-r,--recursive}'[Inspect nested entries; sizes also lists nested folders]'
       '--clean[Exclude generated artifacts]'
       '--clean-git[Exclude generated artifacts and Git metadata]'

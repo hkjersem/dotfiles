@@ -345,7 +345,11 @@ zpty -d z
         self.assertIn("--direct", self.complete(["files"], " sizes --")["files"])
         self.assertIn("--logical", self.complete(["files"], " sizes --")["files"])
         self.assertIn("--cached", self.complete(["files"], " sizes --")["files"])
-        self.assertEqual(self.complete(["files"], " caches --")["files"], {"--help", "--limit"})
+        self.assertEqual(self.complete(["files"], " caches --")["files"], {"--help", "--limit", "--verbose"})
+        for name in names - {"caches"}:
+            with self.subTest(command=name):
+                offered = self.complete(["files"], f" {name} --")["files"]
+                self.assertTrue({"--local-only", "--verbose"}.issubset(offered), offered)
         self.assertIn("--older-than", self.complete(["files"], " leftovers --")["files"])
 
     def test_files_exclude_flag_can_be_completed_repeatedly(self):

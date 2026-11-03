@@ -104,6 +104,12 @@ class FilesTests(unittest.TestCase):
                     text = self.run_report(command, "-r", "--limit", "0")
                     self.assertIn("remote.txt [cloud-only]", text)
                     self.assertIn("local.txt", text)
+                    self.assertGreater(text.index("1 cloud-only entry"), text.index("remote.txt [cloud-only]"))
+                    self.assertIn("(exclude with --local-only)", text)
+                    self.assertNotIn("folders are not traversed", text)
+                    verbose = self.run_report(command, "-r", "--verbose", "--limit", "0")
+                    self.assertIn("Cloud-only contents are not downloaded", verbose)
+                    self.assertIn("cloud-only folders are not traversed", verbose)
                     filtered = self.run_report(command, "-r", "--local-only", "--limit", "0")
                     self.assertNotIn("remote.txt", filtered)
                     self.assertIn("local.txt", filtered)
@@ -115,7 +121,9 @@ class FilesTests(unittest.TestCase):
                 text = self.run_report("duplicates", "-r")
             self.assertNotIn(remote, [call.args[0].path for call in digest.call_args_list])
             self.assertIn("local.txt", text)
-            self.assertIn("Cloud-only files are not hashed", text)
+            self.assertNotIn("Cloud-only files are not hashed", text)
+            verbose = self.run_report("duplicates", "-r", "--verbose")
+            self.assertIn("Cloud-only files are not hashed", verbose)
 
     def test_sizes_local_filter_and_cached_cloud_folder_labels(self):
         remote, folder = self.root / "sub/large.bin", self.root / "cloud-folder"

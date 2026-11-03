@@ -46,6 +46,8 @@ other Git-ignored project files. `leftovers` always excludes `.git`.
 
 All reports summarize unreadable entries by reason. Add `--verbose` (`-v`) to
 show each affected path; the report remains marked incomplete either way.
+Cloud-only counts appear below the results with a `--local-only` hint;
+`--verbose` adds the explanation of cloud traversal and duplicate hashing.
 Affected child folder sizes show `Unknown`, not zero. An unreadable target
 folder, other I/O errors, or detected changes during duplicate hashing fail
 explicitly. Reports are snapshots, not a transactional view of changing folders.
