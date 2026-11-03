@@ -56,6 +56,7 @@ class Sandbox:
             "PATH": os.pathsep.join([str(tools), str(Path(sys.executable).parent), "/usr/bin", "/bin"]),
             "TERM": "xterm",
             "LANG": "en_US.UTF-8",
+            "PYTHONDONTWRITEBYTECODE": "1",
         }
 
     def files(self):
@@ -319,6 +320,12 @@ zpty -d z
         self.assertTrue({"..", "cpwd", "rr", "emptytrash"}.issubset(shell), shell)
         self.assertFalse({"pml", "unstage"} & shell, shell)
         self.assertEqual(self.complete(["dotfiles-help"], " zsh Ctrl-R")["dotfiles-help"], {"Ctrl-R"})
+
+    def test_cheat_sheet_completes_unambiguous_cleanup_choices(self):
+        offered = self.complete(["dotfiles-help"], " cleanup")["dotfiles-help"]
+        self.assertIn("cleanup", offered)
+        self.assertIn("shell cleanup", self.complete(["dotfiles-help"], " ")["dotfiles-help"])
+        self.assertEqual(self.complete(["dotfiles-help"], " shell cleanup ")["dotfiles-help"], {"cleanup"})
 
     def test_cheat_sheet_preserves_multiple_query_words_and_handles_no_matches(self):
         for suffix, expected in (

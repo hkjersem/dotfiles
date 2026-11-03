@@ -396,6 +396,11 @@ def main(argv=None):
     args = parser.parse_args(argv)
     topic = "packages" if args.packages else None
     query = list(args.query)
+    if len(query) == 1 and " " in query[0]:
+        # Completion may insert a qualified lookup as a single quoted word.
+        head, tail = query[0].split(" ", 1)
+        if head in TOPICS:
+            query = [head, tail]
     if query and query[0] in TOPICS:
         selected = query.pop(0)
         if topic and topic != selected:
@@ -420,10 +425,12 @@ def main(argv=None):
     if args.list:
         if topic is None and not query:
             for name, topic_description in TOPICS.items():
-                print(f"{name}:{topic_description}")
+                print(f"{name}:Topic - {topic_description}")
         for command in commands:
             name = command.name.removeprefix("git ") if topic == "git" else command.name
-            print(f"{name}:{command.purpose}")
+            if topic is None and not query and name in TOPICS:
+                name = f"{command.topic} {name}"
+            print(f"{name}:Command - {command.purpose}")
         return 0
     detailed = bool(topic or query)
     output.context("Read-only reference", "examples are not executed")

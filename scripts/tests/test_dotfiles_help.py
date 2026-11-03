@@ -185,6 +185,19 @@ class DotfilesHelpTests(unittest.TestCase):
         self.assertIn("cleanup:", self.run_help("--list").stdout)
         self.assertNotIn("cleanup:", packages)
 
+    def test_completion_names_distinguish_topics_from_colliding_commands(self):
+        lines = self.run_help("--list").stdout.splitlines()
+        names = [line.split(":", 1)[0] for line in lines]
+        self.assertEqual(len(names), len(set(names)))
+        self.assertIn("cleanup:Topic - Clean caches, artifacts and branches", lines)
+        self.assertIn("shell cleanup:Command - Run cleanupds and then cleanupad", lines)
+        topic = self.run_help("cleanup").stdout
+        command = self.run_help("shell cleanup").stdout
+        self.assertIn("Preview global developer caches", topic)
+        self.assertNotIn("Run cleanupds and then cleanupad", topic)
+        self.assertIn("Run cleanupds and then cleanupad", command)
+        self.assertNotIn("Preview global developer caches", command)
+
     def test_unknown_search_and_options_fail_without_actions(self):
         for args in (("nothing-matches-this",), ("--unknown",)):
             with self.subTest(args=args):
