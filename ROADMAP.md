@@ -33,7 +33,7 @@ favouring portable, auditable changes over one-off fixes on a single machine.
 
 ## Now
 
-- [Move the global pnpm default to 12](roadmap/pnpm-12-default.md) · verifying · investigation · Decide when to switch corepack's global pnpm default from 11 to 12, then check the package-manager scripts against it.
+_Nothing in progress._
 
 ## Next
 

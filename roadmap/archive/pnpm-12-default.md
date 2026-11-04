@@ -1,13 +1,13 @@
 ---
 title: Move the global pnpm default to 12
-status: verifying
+status: done
 summary: Decide when to switch corepack's global pnpm default from 11 to 12, then check the package-manager scripts against it.
 kind: investigation
 ---
 
 # Move the global pnpm default to 12
 
-[Roadmap](../ROADMAP.md)
+[Roadmap](../../ROADMAP.md)
 
 ## Outcome
 
@@ -72,3 +72,9 @@ Release notes: the pnpm 12.0.0 to 12.14.0 GitHub releases.
   ran clean. With `.nvmrc` set to 22, `node` resolved to fnm's v22.23.3, and
   `pnpm shim ls` reported no shims. A project pinning `yarn@4.18.0` ran it
   through corepack. `audit.sh` reported no issues.
+
+## Evidence
+
+- 2026-11-04: Accepted; all acceptance checks passed. The maintained package
+  manager documentation describes the version defaults and manual switching:
+  [Package-manager versions](../../docs/package-managers.md#package-manager-versions).
