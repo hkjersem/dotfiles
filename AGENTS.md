@@ -23,7 +23,7 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 | `scripts/agent-sessions.py` | Read-only table of tracked terminal sessions, their titles and restoration status; invoked by `agent-sessions`. Reads records and observations without claiming, resuming or deleting them |
 | `scripts/lib/agent_sessions.py` | Shared agent session paths, title lookup and reverse transcript readers, used by `agent-sessions` and `agent-awake` |
 | `scripts/roadmaps.py` | Summary of due, awaiting-acceptance and in-progress items across roadmap-skill roadmaps listed in machine-local `~/.config/dotfiles/roadmap-paths`; `--check` validates and `--sync` refreshes generated index blocks for explicit paths only; imports the skill's `roadmap.py`. Invoked by the `roadmaps` shell function |
-| `docs/` (other pages) | Detailed reference that would make the README too long: `audit-repo.md`, `prune-branches.md`, `package-managers.md`, `agent-skills.md`, `agent-awake.md`. The README keeps a summary of each and links to it; update both when behaviour changes |
+| `docs/` (other pages) | Detailed reference that would make the README too long: `audit-repo.md`, `prune-branches.md`, `package-managers.md`, `agent-skills.md`, `agent-awake.md`, `cleanup.md`. The README keeps a summary of each and links to it; update both when behaviour changes |
 | `scripts/lib/tool-updates.sh` | Shared custom update/sync routines for installed tools on either profile; standard Homebrew tools only need a Brewfile declaration |
 | `bash/aliases` | Shell aliases (sourced by zshrc) |
 | `bash/bashrc` | Bash config |

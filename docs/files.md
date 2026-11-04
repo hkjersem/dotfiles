@@ -144,7 +144,7 @@ installed runtimes; they are not selected by `mise cache prune`.
 Corepack entries contain installed package-manager versions, not just
 disposable downloads. Cargo entries can include edited source and offline
 dependencies. Both remain report-only; see
-[global cache cleanup](../README.md#clean-global-caches) for the boundaries.
+[global cache cleanup](cleanup.md#clean-global-caches) for the boundaries.
 
 This subcommand accepts `--include-configured`, `--limit`, `--verbose` and `--help`, not a target path.
 When caches are found, it ends with a hint to preview cleanup with
