@@ -16,7 +16,7 @@
 #   "  $OUT_OK text"        status lines: ✓ done or passed, ! warning, ✗ failed, • info entry in a list
 #   "  $ERR_FAIL text" >&2  the same marks for stderr: ERR_WARN, ERR_FAIL
 #   "    ${DIM}text${RESET}"  detail under a status line, aligned with its text
-#   out_note "text"         a standalone note, such as a verdict, aligned without a mark
+#   out_note "text" [indent]  a dim explanatory note, default indentation 4
 #   out_row "$OUT_OK" "Label" "detail"   a status line with a label padded to a column
 #   out_table_header "%-20s  %s" "A" "B"   a bold table header row; use the same format for the rows
 #   out_summary ISSUES WARNINGS "All good"   the Summary section of an audit: counts, or the all-good line
@@ -93,7 +93,7 @@ out_progress_done() {
 }
 
 out_note() {
-  printf '    %s\n' "$1"
+  printf '%*s%s%s%s\n' "${2:-4}" '' "$DIM" "$1" "$RESET"
 }
 
 out_listing_name() {

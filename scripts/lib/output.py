@@ -87,8 +87,9 @@ def progress_done(stream=None):
         print("\r\033[K", end="", file=stream, flush=True)
 
 
-def note(text, stream=None):
-    print(f"    {text}", file=stream or sys.stdout)
+def note(text, stream=None, indent=4):
+    stream = stream or sys.stdout
+    print(f"{' ' * indent}{paint(text, 'dim', stream)}", file=stream)
 
 
 def row(kind, label, detail, stream=None):

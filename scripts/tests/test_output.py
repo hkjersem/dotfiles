@@ -27,6 +27,7 @@ out_dry_run "Run x to apply."
 out_dry_run
 out_context "a" "b c"
 out_note "note"
+out_note "aligned" 16
 out_row "$OUT_WARN" "Label" "detail"
 out_table_header "%-6s  %s" "A" "B"
 out_summary 0 0 "All good"
@@ -111,6 +112,7 @@ def python_output(terminal, no_color):
         output.dry_run()
         output.context("a", "b c")
         output.note("note")
+        output.note("aligned", indent=16)
         output.row("warn", "Label", "detail")
         output.table_header("%-6s  %s", "A", "B")
         output.summary(0, 0, "All good")
@@ -179,6 +181,7 @@ for kind in folder symlink file; do out_listing_name name "$kind"; printf '\\n';
             "Dry run — nothing will be changed.",
             "a │ b c",
             "    note",
+            "                aligned",
             "  ! Label                  detail",
             "  A       B",
             "",
@@ -197,6 +200,17 @@ for kind in folder symlink file; do out_listing_name name "$kind"; printf '\\n';
         self.assertIn("  \033[0;31m✗\033[0m text", colored)
         self.assertIn("\033[1m━ Name ━", colored)
         self.assertIn("  \033[1mA       B\033[0m\n", colored)
+        self.assertIn("    \033[2mnote\033[0m\n", colored)
+        self.assertIn("                \033[2maligned\033[0m\n", colored)
+
+    def test_notes_are_dim_only_on_their_own_terminal_stream(self):
+        for terminal, no_color in ((True, ""), (True, "1"), (False, "")):
+            with self.subTest(terminal=terminal, no_color=no_color):
+                stream = Terminal() if terminal else io.StringIO()
+                with patch.dict(os.environ, {"NO_COLOR": no_color}):
+                    output.note("Explanation", stream)
+                expected = "    \033[2mExplanation\033[0m\n" if terminal and not no_color else "    Explanation\n"
+                self.assertEqual(stream.getvalue(), expected)
 
     def test_stderr_marks_follow_whether_stderr_is_a_terminal(self):
         self.assertEqual(bash_stderr(False), "! ✗\n")
