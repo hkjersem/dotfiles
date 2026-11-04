@@ -20,6 +20,7 @@ from unittest.mock import Mock, patch
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "files.py"
+sys.path.insert(0, str(SCRIPT.parent))
 SPEC = importlib.util.spec_from_file_location("files_command", SCRIPT)
 FILES = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = FILES
@@ -31,10 +32,14 @@ class FilesTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
+        self.root = Path(self.temporary.name).resolve()
         self.cache = tempfile.TemporaryDirectory()
         self.addCleanup(self.cache.cleanup)
-        environment = patch.dict(os.environ, {"XDG_CACHE_HOME": self.cache.name})
+        environment = patch.dict(os.environ, {
+            "XDG_CACHE_HOME": str(Path(self.cache.name).resolve()),
+            "COREPACK_HOME": str(self.root / "corepack"), "CARGO_HOME": str(self.root / ".cargo"),
+            "MISE_CACHE_DIR": str(self.root / "mise-cache"), "MISE_DATA_DIR": str(self.root / "mise-data"),
+        })
         environment.start()
         self.addCleanup(environment.stop)
         (self.root / "a.txt").write_bytes(b"same")
@@ -311,12 +316,19 @@ class FilesTests(unittest.TestCase):
         text = self.run_caches()
         self.assertIn("No known cache folders found", text)
         self.assertNotIn("clean_caches", text)
-        uv = Path(self.cache.name) / "uv"
+        uv = Path(self.cache.name).resolve() / "uv"
         uv.mkdir()
         (uv / "cached").write_bytes(b"cache")
         text = self.run_caches()
         self.assertIn(str(uv), text)
         self.assertIn("uv", text)
+        pnpm = Path(self.cache.name).resolve() / "pnpm"
+        pnpm.mkdir()
+        (pnpm / "metadata").write_bytes(b"metadata")
+        text = self.run_caches()
+        self.assertIn(str(pnpm), text)
+        self.assertIn("pnpm cache", text)
+        self.assertIn("not how much cleanup would free", text)
 
     def test_caches_help_does_not_inspect_or_run_tools(self):
         with patch.object(FILES, "cache_locations", side_effect=AssertionError("scan")), \
@@ -329,6 +341,81 @@ class FilesTests(unittest.TestCase):
                 with self.assertRaises(SystemExit) as caught:
                     FILES.main(args)
                 self.assertEqual(caught.exception.code, 2)
+
+    def test_configured_caches_query_shared_discovery_and_merge_identical_locations(self):
+        from lib import cache_cleaners
+        npm = self.root / ".npm"
+        npm.mkdir()
+        payload = npm / "data"
+        payload.write_bytes(b"keep downloads")
+        calls = []
+
+        def native(command, **kwargs):
+            calls.append(command)
+            self.assertEqual(command, ["uv", "cache", "dir"])
+            self.assertEqual(kwargs["cwd"], self.root)
+            return subprocess.CompletedProcess(command, 0, str(npm), "")
+
+        with patch.object(cache_cleaners, "selected_cleaners", side_effect=lambda name:
+                          [cache_cleaners.BY_NAME["uv"]] if name == "uv" else []), \
+                patch.object(cache_cleaners.shutil, "which", return_value="/mock/uv"), \
+                patch.object(cache_cleaners.subprocess, "run", side_effect=native):
+            text = self.run_caches("--include-configured")
+        self.assertEqual(text.count("~/.npm"), 1)
+        self.assertIn("known location", text)
+        self.assertIn("configured: uv via uv", text)
+        self.assertIn("                configured: uv via uv\n", text)
+        self.assertIn("─ Notes ", text)
+        self.assertIn("Parent folders include nested rows", text)
+        self.assertIn("Configured location queries", text)
+        self.assertEqual(calls, [["uv", "cache", "dir"]])
+        self.assertEqual(payload.read_bytes(), b"keep downloads")
+
+    def test_failed_configured_query_keeps_known_inventory_and_exits_nonzero(self):
+        from lib import cache_cleaners
+        npm = self.root / ".npm"
+        npm.mkdir()
+        (npm / "data").write_bytes(b"keep")
+
+        def discover(name):
+            if name == "npm":
+                raise OSError("query failed")
+            return []
+
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with patch.object(Path, "home", return_value=self.root), \
+                patch.object(cache_cleaners, "selected_cleaners", side_effect=discover), \
+                contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            code = FILES.main(["caches", "--include-configured"])
+        self.assertEqual(code, 1)
+        self.assertIn("~/.npm", stdout.getvalue())
+        self.assertIn("query failed", stdout.getvalue())
+        self.assertIn("inventory is incomplete", stderr.getvalue())
+        self.assertEqual((npm / "data").read_bytes(), b"keep")
+
+    def test_corepack_and_cargo_overrides_are_report_only_and_preserve_sources_and_binaries(self):
+        cargo = self.root / "custom-cargo"
+        corepack = self.root / "custom-corepack"
+        mise = self.root / "mise-data"
+        files = [cargo / "registry/src/edited.rs", cargo / "git/checkouts/edited.rs",
+                 cargo / "bin/tool", corepack / "v1/pnpm/tool",
+                 mise / "downloads/go/archive", mise / "installs/go/bin/go"]
+        for path in files:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"keep edits and tools")
+        with patch.dict(os.environ, {"CARGO_HOME": str(cargo), "COREPACK_HOME": str(corepack)}), \
+                patch.object(FILES.subprocess, "run", side_effect=AssertionError("tool ran")):
+            text = self.run_caches()
+        self.assertIn("~/custom-cargo/registry", text)
+        self.assertIn("~/custom-cargo/git", text)
+        self.assertIn("~/custom-corepack/v1", text)
+        self.assertIn("Installed package-manager versions", text)
+        self.assertIn("Report only: may include edited source", text)
+        self.assertIn("~/mise-data/downloads", text)
+        self.assertIn("outside mise cache prune", text)
+        self.assertNotIn("~/mise-data/installs", text)
+        self.assertNotIn("~/custom-cargo/bin", text)
+        self.assertTrue(all(path.read_bytes() == b"keep edits and tools" for path in files))
 
     def test_clean_excludes_nested_pytest_cache(self):
         (self.root / "sub/.pytest_cache").mkdir()

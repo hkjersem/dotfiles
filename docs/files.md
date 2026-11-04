@@ -26,6 +26,7 @@ results keep explicit `File` and `Folder` labels. Redirected output and
 | `files types -r` | Counts and bytes by final extension, case-insensitive; dotfiles without a suffix have no extension |
 | `files duplicates -r` | SHA-256 content matches, grouped by size first; skips empty files and counts hard links once |
 | `files caches` | Rank existing developer cache folders by allocated bytes, including nested contents |
+| `files caches --include-configured` | Also query installed tools for configured global paths, with source labels |
 | `files leftovers -r` | Possible agent/temporary leftovers with sizes, File/Folder, latest descendant modification and match reason |
 
 Listings show up to 20 rows or duplicate groups; `--limit 0` shows all.
@@ -121,14 +122,31 @@ remain visible, without implying they should be deleted.
 
 ## Developer caches
 
-`caches` checks known default locations for npm, pnpm, Bun, Homebrew, pip, uv
-(honouring `XDG_CACHE_HOME`), Go, Gradle, Cargo, Playwright and Xcode DerivedData.
+`caches` checks known locations for npm, pnpm, Bun, Homebrew, pip, uv,
+Corepack, mise, Go, Gradle, Cargo, Playwright and Xcode DerivedData.
+Applicable paths honour `XDG_CACHE_HOME`, `COREPACK_HOME`, `MISE_CACHE_DIR`, `MISE_DATA_DIR`
+and `CARGO_HOME`.
 It always scans recursively and does not use the size snapshot cache.
 Missing folders are omitted; inaccessible folders show `Unknown` with warnings,
-and symlink roots are reported but not followed. Custom tool cache locations
-are not discovered, and no package managers or cleanup tools run.
+and symlink roots/ancestors are reported but not followed. By default, custom
+tool cache locations are not queried and no package managers run.
 
-This subcommand accepts `--limit`, `--verbose` and `--help`, not a target path.
+Add `--include-configured` to query installed tools from HOME using the same discovery
+as `clean_caches`. npm/Yarn versions under fnm and Corepack are included;
+matching paths appear once with all their source labels. Known locations are
+retained so caches left by missing tools stay visible. Missing tools are
+listed explicitly; failed queries mark the report incomplete and exit nonzero.
+Nested rows overlap, so do not sum them. Queries can refresh tool metadata,
+but never invoke cleanup commands or install missing tools.
+
+mise installer downloads are reported separately from metadata caches and
+installed runtimes; they are not selected by `mise cache prune`.
+Corepack entries contain installed package-manager versions, not just
+disposable downloads. Cargo entries can include edited source and offline
+dependencies. Both remain report-only; see
+[global cache cleanup](../README.md#clean-global-caches) for the boundaries.
+
+This subcommand accepts `--include-configured`, `--limit`, `--verbose` and `--help`, not a target path.
 When caches are found, it ends with a hint to preview cleanup with
 `clean_caches --dry-run`.
 
@@ -142,5 +160,6 @@ files sizes -r --clean-git
 files sizes -r --clean-git --cached --limit 0
 files duplicates -r --limit 0 ~/Downloads
 files leftovers -r --older-than 7d --verbose
+files caches --include-configured --limit 0
 files changed --help
 ```

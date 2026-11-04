@@ -87,6 +87,8 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 | `scripts/prune-age.py` | Optional branch/worktree retention check for prune_branches --older-than; reuses descendant modification scanning, excluding .git metadata, and fails closed on unreadable ages |
 | `scripts/lib/file_sizes.py` | Native macOS `getattrlistbulk` directory reader used by `files sizes`; batches file-byte metadata without per-file stat calls or compiled helpers |
 | `scripts/lib/pm-utils.sh` | Shared package-manager duration and configuration parsing helpers, also used by repository audit |
+| `scripts/lib/cache_cleaners.py` | Shared configured cache discovery, native cleaners and cleanup previews, used by `files caches --include-configured` and `clean_caches` |
+| `scripts/lib/orphan_caches.py` | Recognised conventional orphan-cache artifact plans and descriptor-anchored deletion; preserves Go fuzz inputs and unknown entries |
 | `macos/applications.sh` | Bootstrap script — installs brew formulae and tools |
 | `macos/install.sh` | Full machine setup entry point (calls applications.sh etc.) |
 | `macos/update.sh` | Update installed tools |

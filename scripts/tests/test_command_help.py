@@ -352,7 +352,8 @@ zpty -d z
         self.assertIn("--direct", self.complete(["files"], " sizes --")["files"])
         self.assertIn("--logical", self.complete(["files"], " sizes --")["files"])
         self.assertIn("--cached", self.complete(["files"], " sizes --")["files"])
-        self.assertEqual(self.complete(["files"], " caches --")["files"], {"--help", "--limit", "--verbose"})
+        self.assertEqual(self.complete(["files"], " caches --")["files"],
+                         {"--help", "--limit", "--verbose", "--include-configured"})
         for name in names - {"caches"}:
             with self.subTest(command=name):
                 offered = self.complete(["files"], f" {name} --")["files"]
@@ -371,7 +372,7 @@ zpty -d z
 
     def test_cache_cleaner_names_and_pruning_flags_are_completed(self):
         self.assertEqual(self.complete(["clean_caches"], " --")["clean_caches"],
-                         {"--only", "--deep", "--dry-run", "--sort", "--help"})
+                         {"--only", "--deep", "--orphaned", "--dry-run", "--sort", "--help"})
         self.assertIn("size", self.complete(["clean_caches"], " --sort ")["clean_caches"])
         names = self.complete(["clean_caches"], " --only ")["clean_caches"]
         self.assertTrue({"npm", "uv", "gradle", "go-modules"}.issubset(names), names)

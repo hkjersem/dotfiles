@@ -274,6 +274,7 @@ and repeatable `--exclude GLOB`. Listings default to 20 rows; `--limit 0` shows 
 | `files types -r` | Counts and bytes by extension |
 | `files duplicates -r` | Group identical nonempty files |
 | `files caches` | Rank known developer caches |
+| `files caches --include-configured` | Also query configured global locations, with source labels |
 | `files leftovers -r` | Possible agent/temporary leftovers; not deletion recommendations |
 
 Use `--clean` to exclude generated artifacts, or `--clean-git` to exclude
@@ -375,6 +376,15 @@ work in all modes.
 
 `clean_caches` previews supported global developer caches. It runs from HOME
 regardless of your current folder; use `wipe_clean` for project-local output.
+Go cleanup prefers Go on PATH, otherwise discovers already-installed mise Go
+versions from HOME (active first, otherwise newest stable). The executable is
+pinned through the cache-path recheck and cleanup. Discovery is offline, and Go
+toolchain auto-downloads are disabled; nothing is installed or updated.
+When Go is unavailable on PATH and in mise, existing conventional Go cache paths are reported as
+unverified defaults with cleanup blocked (exit status 1). No configuration is
+inferred, Go is not installed, and these paths are never deleted as a fallback.
+An absent default path is reported as no cache directory, not a failed check;
+this does not rule out caches at custom locations.
 Cleaning requires explicit `--only` selection and single-key `[y/N]`
 confirmation. `--dry-run` previews without prompting or cleaning.
 `--deep` permits expensive cleaners but does not select them.
@@ -398,6 +408,96 @@ invalid locations and incomplete size scans are errors; failed preflight
 checks prevent all cleaning. Failed cleaners are reported and make the
 command exit nonzero, while remaining selected cleaners are still attempted.
 
+npm and Yarn discovery checks PATH, every fnm Node installation, and existing
+Corepack packages without invoking Corepack download shims. fnm's npm is run
+with its matching Node; duplicate cache locations are cleaned only once.
+Yarn Classic queries `cache dir`. Modern Yarn is forced into global-cache
+mode for both `config get cacheFolder` and `cache clean`; project-local
+`.yarn/cache` folders and installed global packages are not selected.
+Invalid queries or cache paths enclosing installed tools block cleanup.
+
+Bun discovery checks PATH, `BUN_INSTALL/bin/bun` (default `~/.bun/bin/bun`),
+every fnm Node installation, and already-installed mise Bun (active first,
+otherwise newest stable). Executables are resolved and duplicate queried
+cache paths are cleaned once. No Bun installation or update is performed.
+All-cache previews omit unavailable cleaners without known cache folders and
+measure their existing known cache locations under `Report-only storage`,
+with no duplicate `Skipped cleaners` entry.
+That section also shows Corepack tools, Cargo storage and mise downloads when
+present, explaining why they are not cleanup targets. These rows are never
+included in cleanup or confirmation. Explicitly selecting an unavailable
+cleaner remains an error. General explanations appear under `Notes`.
+When orphan cleanup is supported, the report-only row gives its explicit
+`--orphaned --dry-run` command. This is a separate content-verification step,
+not a claim that the whole reported folder is eligible for deletion.
+
+For missing Bun, npm, pip or Go, explicit orphan cleanup is available:
+
+```sh
+clean_caches --only bun --orphaned --dry-run
+clean_caches --only bun --orphaned
+```
+
+`--orphaned` requires an explicit allowlisted `--only` selection and refuses
+when the tool is discovered; use native cleanup without the flag instead.
+Only conventional HOME locations are considered, not inferred custom paths.
+It removes recognised Bun package/manifest entries, npm's `_cacache`, pip's
+`http`, `http-v2` and `wheels`, or Go's hash-sharded build artifacts and
+`log.txt`. Cache roots, unknown entries, npm logs/npx environments, pip
+self-check data and Go fuzz inputs are preserved. Bun package manifests and
+version aliases must match its cache layout; unsupported layouts stay.
+
+The preview shows only selected artifact bytes and lists preserved entries.
+After confirmation, every plan and tool check is repeated before deletion.
+Descriptor-anchored removal never follows cached symlinks; symlink roots or
+ancestors are rejected. Close all cache users first: missing executables do
+not prove inactivity, and changes can still cause partial cleanup errors.
+Downloads may be needed again and offline-only artifacts may be lost.
+uv, pnpm stores, Corepack tools, Cargo sources, Go modules and mise storage
+are not eligible for orphan cleanup. Fuzz-cache deletion is not included.
+
+For pnpm, the preview includes the configured store and sibling store
+generations (for example `v10` and `v11`), plus the separate metadata/execution
+cache folder, counted once. A store format is not a CLI major: pnpm 11 and 12
+can share `v11`. The current pnpm is preferred; other generations use the
+newest already-installed compatible Corepack pnpm per major, discovered under
+`COREPACK_HOME` (default `$XDG_CACHE_HOME/node/corepack`, or
+`~/.cache/node/corepack` when unset). Executables and versions
+are pinned and paths rechecked before native pruning. Missing compatible
+versions, invalid packages, symlinks and overlapping store/cache paths block
+cleanup; no versions are downloaded or installed.
+
+Native pnpm pruning removes eligible store contents, cached registry metadata
+and expired dlx/pnx entries, not the entire cache folder. Unexpired execution
+caches and installed package-manager/Node versions are not blanket-deleted.
+Corepack downloads and package-manager version switching are disabled for
+cleaner subprocesses. Custom project stores outside the configured store root
+are not discovered.
+
+`files caches` stays tool-free by default. `files caches --include-configured` also
+queries discovered tools from HOME using the same discovery as the cleaners,
+merges identical locations with source labels, and reports unavailable tools
+and failed queries. Known defaults are retained so orphaned caches remain
+visible. Nested rows can overlap; there is no reclaimable-space total.
+Failed queries make the command exit nonzero. Tool queries may refresh their
+own metadata; they never invoke a cleanup command or install a tool.
+
+`clean_caches --only mise` uses native `mise cache prune`, respecting
+`cache_prune_age` and environment-cache TTL. It previews the metadata cache,
+environment cache and any external task-cache root. Installed tools, config
+and general state are protected from overlapping cache roots. Discovery
+disables opportunistic mise age pruning; the actual cleanup honours your
+normal retention settings. Installer downloads under `MISE_DATA_DIR/downloads`
+are reported separately; they and installed runtimes are not removed wholesale.
+
+Corepack's `v1` directory is reported as **installed package-manager versions**:
+`corepack cache clean` removes those packages, so it is deliberately not a
+cleaner. Cargo registry/Git locations honour `CARGO_HOME` and remain report-only.
+They may contain edited source and dependencies needed offline. Stable Cargo
+has automatic retention (since Rust 1.88); manual global garbage collection
+currently requires nightly `cargo clean gc -Zgc`, so no nightly toolchain or
+third-party cleaner is installed or invoked here.
+
 Xcode's default `~/Library/Developer/Xcode/DerivedData` is removed directly;
 custom DerivedData locations are not discovered. Deep cleaners also allow
 direct deletion of Gradle's `caches` under `GRADLE_USER_HOME` (default
@@ -406,7 +506,7 @@ direct deletion of Gradle's `caches` under `GRADLE_USER_HOME` (default
 Project-local Playwright mode (`0`) and relative paths are refused, as is a
 Playwright folder holding entries besides `<browser>-<revision>` names and
 Playwright bookkeeping (`.links`, `__dirlock`, `.DS_Store`).
-Symlink cache paths and ancestors, home/root/working-directory ancestors,
+Symlink cache paths and ancestors, home/root and ancestors of home,
 and non-directory targets are refused.
 
 Cleared downloads need downloading again; build caches need rebuilding.

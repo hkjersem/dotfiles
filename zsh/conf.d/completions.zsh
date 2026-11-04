@@ -90,6 +90,7 @@ _dotfiles_files() {
     _arguments \
       '(-h --help)'{-h,--help}'[Show help]' \
       '(-v --verbose)'{-v,--verbose}'[Show warning paths]' \
+      '--include-configured[Also query installed tools for configured global cache locations]' \
       '--limit[Maximum rows; 0 shows all]:limit:' \
       '1:report:'
   elif (( CURRENT > 2 )); then
@@ -130,7 +131,7 @@ _dotfiles_wipe_clean() {
 compdef _dotfiles_wipe_clean wipe_clean
 
 _dotfiles_cache_names() {
-  _values -s , 'cleaner' npm pnpm brew bun yarn pip uv go-build go-modules gradle playwright xcode
+  _values -s , 'cleaner' npm pnpm brew bun yarn pip uv go-build go-modules gradle playwright xcode mise
 }
 _dotfiles_clean_caches() {
   _arguments \
@@ -138,6 +139,7 @@ _dotfiles_clean_caches() {
     '--only[Select comma-separated cleaners]:cleaners:_dotfiles_cache_names' \
     '--sort[Show largest caches first]:order:(size)' \
     '--deep[Allow expensive download and build cache cleaners]' \
+    '--orphaned[Remove recognised conventional cache artifacts only when the tool is unavailable]' \
     '(-n --dry-run)'{-n,--dry-run}'[Preview without prompting or cleaning]'
 }
 compdef _dotfiles_clean_caches clean_caches

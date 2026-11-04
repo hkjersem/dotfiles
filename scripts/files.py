@@ -132,6 +132,7 @@ def parser():
                "  --direct  Count direct files only for sizes (default includes all subfolders)\n"
                "  --logical  Count logical file bytes instead of allocated bytes for sizes\n"
                "  --cached  Reuse the last sizes snapshot (expires after 24 hours); never rescan\n"
+               "  --include-configured  Also query installed tools for global cache paths (caches only)\n"
                "  --since AGE  Modification age for changed (m, h, d, w)\n"
                "  --older-than AGE  No modification within AGE for leftovers, including descendants\n"),
     )
@@ -142,6 +143,8 @@ def parser():
                              help="show warning paths" +
                              (" and tool-managed matches" if name == "leftovers" else ""))
         if name == "caches":
+            command.add_argument("--include-configured", dest="configured", action="store_true",
+                                 help="also query installed tools from HOME; label and deduplicate locations")
             command.add_argument("--limit", type=limit_arg, default=20, metavar="N",
                                  help="maximum rows (default: 20; 0 shows all)")
             continue
@@ -490,10 +493,14 @@ def scan_sizes(root, recursive, direct, excludes, *, logical=False, clean=False,
 def cache_locations():
     home = Path.home()
     xdg_cache = Path(os.environ.get("XDG_CACHE_HOME", str(home / ".cache")))
+    corepack = Path(os.environ.get("COREPACK_HOME", xdg_cache / "node/corepack"))
+    cargo = Path(os.environ.get("CARGO_HOME", home / ".cargo"))
+    mise_data = Path(os.environ.get("MISE_DATA_DIR", Path(os.environ.get(
+        "XDG_DATA_HOME", home / ".local/share")) / "mise"))
     return [
         ("npm", home / ".npm"),
         ("pnpm store", home / "Library/pnpm/store"),
-        ("pnpm cache", home / "Library/Caches/pnpm"),
+        ("pnpm cache", Path(os.environ.get("XDG_CACHE_HOME", home / "Library/Caches")) / "pnpm"),
         ("Bun", home / ".bun/install/cache"),
         ("Homebrew", home / "Library/Caches/Homebrew"),
         ("pip", home / "Library/Caches/pip"),
@@ -501,8 +508,12 @@ def cache_locations():
         ("Go build", home / "Library/Caches/go-build"),
         ("Go modules", home / "go/pkg/mod"),
         ("Gradle", home / ".gradle/caches"),
-        ("Cargo registry", home / ".cargo/registry"),
-        ("Cargo Git", home / ".cargo/git"),
+        ("Corepack tools", corepack / "v1"),
+        ("mise cache", Path(os.environ.get("MISE_CACHE_DIR", Path(os.environ.get(
+            "XDG_CACHE_HOME", home / "Library/Caches")) / "mise"))),
+        ("mise downloads", mise_data / "downloads"),
+        ("Cargo registry", cargo / "registry"),
+        ("Cargo Git", cargo / "git"),
         ("Playwright", home / "Library/Caches/ms-playwright"),
         ("Xcode DerivedData", home / "Library/Developer/Xcode/DerivedData"),
     ]
@@ -511,22 +522,39 @@ def cache_locations():
 def report_caches(args):
     results = []
     warnings = {}
+    locations = [(label, path, "known location") for label, path in cache_locations()]
+    skipped, errors = [], []
+    if args.configured:
+        from lib.cache_cleaners import configured_locations
+        configured, skipped, errors = configured_locations()
+        locations.extend(configured)
+    grouped = {}
+    for label, path, source in locations:
+        key = Path(os.path.abspath(path))
+        if key not in grouped:
+            grouped[key] = (label, path, [])
+        if source not in grouped[key][2]:
+            grouped[key][2].append(source)
     progress = ScanProgress(Path("/"), True)
     home = Path.home()
     try:
-        for label, path in cache_locations():
+        for label, path, sources in grouped.values():
             try:
                 info = path.lstat()
+                # Check ancestors too: a configured path must not traverse a link.
+                for parent in path.parents:
+                    if parent.is_symlink():
+                        raise OSError(f"Symlink cache ancestor skipped: {display(parent)}")
             except FileNotFoundError:
                 continue
-            except PermissionError as exc:
+            except OSError as exc:
                 warnings[path] = exc
-                results.append((label, path, None))
+                results.append((label, path, None, sources))
                 continue
             if not stat.S_ISDIR(info.st_mode):
                 if stat.S_ISLNK(info.st_mode):
                     warnings[path] = OSError("Symlink cache skipped; links are never followed")
-                    results.append((label, path, None))
+                    results.append((label, path, None, sources))
                 continue
             denied = {}
             try:
@@ -537,24 +565,52 @@ def report_caches(args):
                 denied[path] = exc
                 size = None
             warnings.update(denied)
-            results.append((label, path, size))
+            results.append((label, path, size, sources))
     finally:
         progress.close()
     results.sort(key=lambda item: (item[2] is None, -(item[2] or 0), item[0]))
-    output.context(display(home), "known developer caches", *(['incomplete'] if warnings else []))
+    output.context(display(home), "known and configured developer caches" if args.configured else "known developer caches",
+                   *(['incomplete'] if warnings or errors else []))
     output.section("Caches")
     output.table_header("%12s  %-18s  %s", "Bytes", "Cache", "Folder")
-    for label, path, size in results[:args.limit or None]:
+    for label, path, size, sources in results[:args.limit or None]:
         name = "~/" + str(path.relative_to(home)) if path.is_relative_to(home) else str(path)
         print(f"  {human_size(size) if size is not None else 'Unknown':>12}  {label:<18}  "
               f"{output.listing_name(display(name), 'folder')}")
+        if args.configured:
+            for source in sources:
+                output.note(display(source), indent=16)
+        if label == "Corepack tools":
+            output.note("Installed package-manager versions; not a disposable download-only cache.", indent=16)
+        elif label.startswith("Cargo"):
+            output.note("Report only: may include edited source/offline dependencies; no stable manual GC enabled.",
+                        indent=16)
+        elif label == "mise downloads":
+            output.note("Installer downloads; report only, outside mise cache prune.", indent=16)
+        elif label == "pnpm store":
+            output.note("Includes all store generations; cleanup previews them separately.", indent=16)
     if not results:
         output.note("No known cache folders found.")
     if args.limit and len(results) > args.limit:
         output.note(f"Showing {args.limit} of {len(results)}; use --limit 0 to show all.")
     if results:
+        output.section("Notes")
+        output.note("Sizes show disk usage, not how much cleanup would free.")
+        if args.configured:
+            output.note("Parent folders include nested rows; do not add their sizes together.")
+            output.note("Tool location queries may refresh the tools' own metadata.")
+        else:
+            output.note("Custom tool paths are not queried; use --include-configured to include them.")
         output.note("Preview cleanup: clean_caches --dry-run")
+    if skipped or errors:
+        output.section("Configured location queries")
+        for label, reason in skipped:
+            output.row("warn", label, reason)
+        for label, reason in errors:
+            output.row("fail", label, reason)
     report_warnings(warnings, home, args.verbose)
+    if errors:
+        raise OSError("configured cache queries failed; inventory is incomplete")
 
 
 def signature(info):
