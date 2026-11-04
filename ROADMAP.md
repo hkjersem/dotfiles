@@ -47,6 +47,7 @@ _Nothing committed._
 
 ## Later
 
+- [agent-resume for Codex and Claude Code](roadmap/agent-resume.md) · idea · One agent-resume command that resumes stopped Codex and Claude Code sessions, replacing codex-resume.
 - [Shell history sync between Macs](roadmap/shell-history-sync.md) · idea · investigation · Merge zsh history between my Macs on demand over the local network, with no cloud service.
 - [Verify the Node 26 LTS switch](roadmap/node-26-lts-switch.md) · planned · investigation · Check that the first dotfiles-update after Node 26 becomes LTS installs it cleanly with corepack, globals and package managers working. · when: Node 26 becomes LTS (planned 2026-10-28) and dotfiles-update has run
 <!-- roadmap:end -->
