@@ -488,19 +488,21 @@ without tracking activity, and never while their shell is still running.
 Failed automatic launches keep their record for the next terminal to retry.
 `CPLT_NO_RESUME=1` turns resuming off.
 
-To set a machine-local Copilot model through an explicit CLI flag, add
-`DOTFILES_COPILOT_MODEL='<model-id>'` to `~/.zshrc_local`, using your chosen
-model's CLI identifier. For folder-specific defaults, add an associative map:
+To set a machine-local Copilot model through an explicit CLI flag, create
+`~/.config/dotfiles/copilot-models.zsh`, using your chosen model's CLI identifier:
 
 ```zsh
-typeset -A DOTFILES_COPILOT_MODELS
-DOTFILES_COPILOT_MODELS=(
+DOTFILES_COPILOT_MODEL='<model-id>'
+typeset -A DOTFILES_COPILOT_MODELS=(
   "$HOME/Developer/project-a" '<model-id>'
   "$HOME/Developer/project-b" '<another-model-id>'
 )
 ```
 
-Both `copilot` and `cplt` (when running Copilot) use these for manual launches.
+Both `copilot` and `cplt` (when running Copilot) read this file on each manual
+launch; changes need no shell restart. The file is sourced as zsh configuration,
+so keep only trusted settings in it. A missing file leaves Copilot's own default
+unchanged; a file that fails to load aborts the launch with an error.
 The map matches the current shell directory and its descendants, with the
 most specific folder winning over `DOTFILES_COPILOT_MODEL`. Paths are literal,
 not patterns; use absolute paths as above. An empty mapped value uses Copilot's

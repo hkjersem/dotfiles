@@ -259,7 +259,15 @@ _agent_session_run() {
   local -a context_args
   local -x DOTFILES_AGENT_SESSION= DOTFILES_AGENT_KIND=$agent
 
-  if [[ $agent == copilot ]]; then
+  if [[ $agent == copilot && -z $_agent_session_restoring ]]; then
+    local DOTFILES_COPILOT_MODEL= model_config=$HOME/.config/dotfiles/copilot-models.zsh
+    local -A DOTFILES_COPILOT_MODELS
+    if [[ -e $model_config || -L $model_config ]]; then
+      if ! source "$model_config"; then
+        print -u2 -- "Error: could not load $model_config."
+        return 1
+      fi
+    fi
     model=${DOTFILES_COPILOT_MODEL:-}
     for folder in "${(@k)DOTFILES_COPILOT_MODELS}"; do
       resolved=${folder:A}
@@ -449,8 +457,7 @@ _agent_session_resume() {
   local f cwd launcher line pid started claim id agent app activity file owner ret=0
   local _agent_session_resume_claim
   # Automatic restores leave model selection to the saved session.
-  local DOTFILES_COPILOT_MODEL=
-  local -A DOTFILES_COPILOT_MODELS
+  local _agent_session_restoring=1
   local -a launcher_args resume claims
   for file in "$_agent_sessions_dir"/*.*(N.m+6); do
     f=${file:h}/${${file:t}%%.*}
