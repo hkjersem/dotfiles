@@ -234,6 +234,179 @@ class NosyncTests(unittest.TestCase):
         self.assertEqual(list(self.root.iterdir()), [])
         self.assertEqual(self.writes, [])
 
+    def test_gitignore_inspects_and_marks_ignored_folders_with_exclusions(self):
+        self.folder(".venv/lib/python")
+        self.folder("src/__pycache__")
+        self.folder("src/node_modules/pkg")
+        self.folder(".data/cache")
+        self.folder("logs")
+        (self.root / ".gitignore").write_text(
+            ".venv/\n__pycache__/\nnode_modules/\n.data/\n*.py[cod]\n",
+            encoding="utf-8",
+        )
+
+        status, output, errors = self.run_nosync(
+            "--gitignore", "--exclude", ".data", "--inspect",
+        )
+        self.assertEqual(status, 0, errors)
+        expected = [
+            "  ! NOT SET   ./.venv",
+            "  ! NOT SET   ./src/__pycache__",
+            "  ! NOT SET   ./src/node_modules",
+        ]
+        self.assertEqual(output.splitlines(), expected)
+        self.assertEqual(self.writes, [])
+        self.assertNotIn("./.venv/lib", self.reads)
+        self.assertNotIn("./.data", self.reads)
+
+        status, output, errors = self.run_nosync(
+            "--gitignore", ".gitignore", "--exclude", ".data",
+        )
+        self.assertEqual(status, 0, errors)
+        self.assertEqual(
+            self.writes,
+            [("./.venv", b"1"), ("./src/__pycache__", b"1"), ("./src/node_modules", b"1")],
+        )
+        self.assertEqual(
+            output.splitlines(),
+            [
+                "  ✓ SET       ./.venv",
+                "  ✓ SET       ./src/__pycache__",
+                "  ✓ SET       ./src/node_modules",
+            ],
+        )
+
+    def test_gitignore_ignores_global_excludes_file(self):
+        self.folder(".global-cache")
+        self.folder("project/.global-cache")
+        (self.root / ".gitignore").write_text("nothing\n", encoding="utf-8")
+        global_ignore = self.root / "config" / "git" / "ignore"
+        global_ignore.parent.mkdir(parents=True)
+        global_ignore.write_text(".global-cache/\n", encoding="utf-8")
+
+        with patch.dict(os.environ, {"XDG_CONFIG_HOME": str(self.root / "config")}):
+            status, output, errors = self.run_nosync("--gitignore", "--inspect")
+
+        self.assertEqual(status, 0, errors)
+        self.assertEqual(output, "    No matching folders found below the current directory\n")
+        self.assertEqual(self.writes, [])
+
+    def test_gitignore_exclusion_inside_ignored_parent_is_not_marked(self):
+        self.folder(".data/keep")
+        self.folder(".data/cache")
+        (self.root / ".gitignore").write_text(".data/\n", encoding="utf-8")
+
+        status, output, errors = self.run_nosync(
+            "--gitignore", "--exclude", ".data/keep", "--inspect",
+        )
+
+        self.assertEqual(status, 0, errors)
+        self.assertEqual(output, "  ! NOT SET   ./.data/cache\n")
+        self.assertNotIn("./.data/keep", self.reads)
+        self.assertNotIn("./.data\n", output)
+
+    def test_gitignore_exclusion_inside_already_marked_parent_fails_before_writes(self):
+        self.folder(".data/keep")
+        (self.root / ".gitignore").write_text(".data/\n", encoding="utf-8")
+        self.values["./.data"] = b"1"
+
+        status, output, errors = self.run_nosync(
+            "--gitignore", "--exclude", ".data/keep",
+        )
+
+        self.assertEqual(status, 1)
+        self.assertEqual(output, "")
+        self.assertIn("cannot honor --exclude inside already marked folder", errors)
+        self.assertEqual(self.writes, [])
+
+    def test_clean_targets_uses_shared_directory_list_recursively(self):
+        self.folder(".venv/lib")
+        self.folder("nested/venv/lib")
+        self.folder("nested/__pycache__")
+        self.folder(".git/venv")
+        self.folder("ordinary")
+
+        status, output, errors = self.run_nosync("--clean-targets", "--inspect")
+        self.assertEqual(status, 0, errors)
+        self.assertEqual(
+            output.splitlines(),
+            [
+                "  ! NOT SET   ./.venv",
+                "  ! NOT SET   ./nested/__pycache__",
+                "  ! NOT SET   ./nested/venv",
+            ],
+        )
+        self.assertEqual(self.writes, [])
+        self.assertNotIn("./.venv/lib", self.reads)
+        self.assertNotIn("./.git", self.reads)
+
+        status, output, errors = self.run_nosync("--clean-targets")
+        self.assertEqual(status, 0, errors)
+        self.assertCountEqual(
+            self.writes,
+            [("./.venv", b"1"), ("./nested/__pycache__", b"1"), ("./nested/venv", b"1")],
+        )
+
+    def test_clean_targets_can_exclude_exact_relative_paths(self):
+        self.folder(".venv/lib")
+        self.folder("nested/venv/lib")
+        self.folder("nested/__pycache__")
+        status, output, errors = self.run_nosync(
+            "--clean-targets", "--exclude", ".venv", "--inspect",
+        )
+        self.assertEqual(status, 0, errors)
+        self.assertEqual(
+            output.splitlines(),
+            ["  ! NOT SET   ./nested/__pycache__", "  ! NOT SET   ./nested/venv"],
+        )
+        self.assertNotIn("./.venv", self.reads)
+
+    def test_clean_target_containing_exclusion_is_not_marked(self):
+        self.folder(".venv/keep/__pycache__")
+        self.folder(".venv/cache/__pycache__")
+
+        status, output, errors = self.run_nosync(
+            "--clean-targets", "--exclude", ".venv/keep", "--inspect",
+        )
+
+        self.assertEqual(status, 0, errors)
+        self.assertEqual(output, "  ! NOT SET   ./.venv/cache/__pycache__\n")
+        self.assertNotIn("./.venv/keep", self.reads)
+        self.assertNotIn("./.venv\n", output)
+
+    def test_clean_targets_can_be_combined_with_exact_folder_names(self):
+        self.folder("nested/venv")
+        self.folder("nested/custom-cache")
+        status, output, errors = self.run_nosync(
+            "--clean-targets", "--recursive", "custom-cache", "--inspect",
+        )
+        self.assertEqual(status, 0, errors)
+        self.assertEqual(
+            output.splitlines(),
+            ["  ! NOT SET   ./nested/custom-cache", "  ! NOT SET   ./nested/venv"],
+        )
+
+    def test_gitignore_and_clean_targets_are_mutually_exclusive(self):
+        with contextlib.redirect_stderr(io.StringIO()) as errors, self.assertRaises(SystemExit) as raised:
+            nosync.main(["--gitignore", "--clean-targets"])
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("--gitignore and --clean-targets cannot be combined", errors.getvalue())
+
+    def test_gitignore_search_errors_do_not_mark_any_folders(self):
+        self.folder(".venv")
+        status, output, errors = self.run_nosync("--gitignore", "missing.ignore")
+        self.assertEqual(status, 1)
+        self.assertEqual(output, "")
+        self.assertIn("Could not complete recursive folder search", errors)
+        self.assertEqual(self.writes, [])
+
+    def test_exclude_requires_gitignore_or_clean_targets(self):
+        with contextlib.redirect_stderr(io.StringIO()) as errors, self.assertRaises(SystemExit) as raised:
+            nosync.main(["--exclude", ".data"])
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("--exclude requires --gitignore or --clean-targets", errors.getvalue())
+        self.assertEqual(self.writes, [])
+
     def test_search_errors_never_apply_partial_discovery(self):
         self.folder("build")
         self.folder("unreadable")

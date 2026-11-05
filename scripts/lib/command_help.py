@@ -95,8 +95,12 @@ COMMANDS = (
             ("files sizes", "files large -r", "files duplicates -r", "files caches",
              "files caches --include-configured", "files leftovers")),
     Command("nosync", "files", "Inspect or prevent iCloud syncing for folders",
-            "Changes folder attributes unless --inspect is given.",
-            ("nosync --inspect", "nosync -r --inspect node_modules", "nosync node_modules"), True),
+            "Changes folder attributes unless --inspect is given. --gitignore uses Git ignore rules; "
+            "--clean-targets uses the shared generated-directory list. Both support --exclude "
+            "to omit exact relative paths and their contents.",
+            ("nosync --inspect", "nosync node_modules",
+             "nosync --gitignore --inspect",
+             "nosync --clean-targets --exclude .venv --inspect"), True),
     Command("copy_clean", "files", "Copy or ZIP a project without generated artifacts",
             "Creates a copy or archive; excludes the artifacts also targeted by wipe_clean.",
             ("copy_clean", "copy_clean --zip", "copy_clean --ignore-git"), True),
