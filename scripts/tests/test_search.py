@@ -183,6 +183,7 @@ class SearchTests(unittest.TestCase):
         self.assertIn("./bundle.js\n", text)
         self.assertIn("1:... ", text)
         self.assertIn("needle", text)
+        self.assertNotIn("\x1b[", text)
 
     def test_terminal_without_paths_searches_current_directory(self):
         (self.project / "source.py").write_text("needle\n")
@@ -200,6 +201,27 @@ class SearchTests(unittest.TestCase):
             os.close(slave)
         self.assertIn("./source.py\n", text)
         self.assertIn("1:needle", text)
+
+    def test_terminal_colors_cover_headings_numbers_and_each_snippet_match(self):
+        (self.project / "source.py").write_text(
+            "short needle\n" + "x" * 300 + "needle" + "y" * 400 + "needle\n"
+        )
+        master, slave = pty.openpty()
+        env = dict(self.env)
+        env.pop("NO_COLOR", None)
+        try:
+            result = subprocess.run(
+                ["/usr/bin/python3", str(REPO / "scripts/search.py"), "needle", "."],
+                cwd=self.project, env=env, stdout=slave, stderr=subprocess.PIPE, timeout=30,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            text = os.read(master, 16384).decode().replace("\r\n", "\n")
+        finally:
+            os.close(master)
+            os.close(slave)
+        self.assertIn("\x1b[0;36m./source.py\x1b[0m", text)
+        self.assertIn("\x1b[0;32m1\x1b[0m:", text)
+        self.assertEqual(text.count("\x1b[0;31mneedle\x1b[0m"), 3)
 
     def test_stdin_search_no_matches_and_unsupported_options(self):
         result = self.run_search("needle", input_text="x" * 300 + "needle\n")

@@ -15,6 +15,7 @@ CLEAN_TARGETS = SCRIPT_DIR / "lib" / "clean-targets.sh"
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(SCRIPT_DIR / "lib"))
 import command_help  # noqa: E402
+import output as terminal_output  # noqa: E402
 
 
 def nonnegative(value):
@@ -168,9 +169,26 @@ def matching_line(event, trim):
     return text, spans
 
 
+def render_match(text, spans, left, right):
+    pieces = []
+    position = left
+    for start, end in spans:
+        if end <= left or start >= right:
+            continue
+        start, end = max(left, start), min(right, end)
+        start = max(position, start)
+        if end <= start:
+            continue
+        pieces.append(escape_controls(text[position:start]))
+        pieces.append(terminal_output.paint(escape_controls(text[start:end]), "red"))
+        position = end
+    pieces.append(escape_controls(text[position:right]))
+    return "".join(pieces)
+
+
 def snippet(text, spans, width):
     if width == 0 or len(text) <= width or not spans:
-        return [text]
+        return [render_match(text, spans, 0, len(text))]
 
     spans.sort()
     groups = []
@@ -192,7 +210,7 @@ def snippet(text, spans, width):
         left = max(0, right - window_width)
         prefix = "... " if left else ""
         suffix = " ..." if right < len(text) else ""
-        rendered.append(prefix + text[left:right] + suffix)
+        rendered.append(prefix + render_match(text, spans, left, right) + suffix)
     return rendered
 
 
@@ -205,7 +223,7 @@ def write_record(event, args, headings, heading_state):
         lines = snippet(text, spans, args.snippet_width)
         separator = ":"
     else:
-        lines = [decode_text(data["lines"]).removesuffix("\n").removesuffix("\r")]
+        lines = [escape_controls(decode_text(data["lines"]).removesuffix("\n").removesuffix("\r"))]
         separator = "-"
 
     output = []
@@ -214,14 +232,14 @@ def write_record(event, args, headings, heading_state):
         if heading_state[0] != path:
             if heading_state[0] is not None:
                 output.append("\n")
-            output.append(escape_controls(path) + "\n")
+            output.append(terminal_output.paint(escape_controls(path), "cyan") + "\n")
             heading_state[0] = path
-        prefix = f"{line_number}{separator}"
+        prefix = terminal_output.paint(str(line_number), "green") + separator
     else:
         prefix = (f"{escape_controls(path)}:{line_number}{separator}" if not is_stdin
                   else f"{line_number}{separator}")
     for line in lines:
-        output.append(prefix + escape_controls(line) + "\n")
+        output.append(prefix + line + "\n")
     sys.stdout.buffer.write("".join(output).encode("utf-8", "surrogateescape"))
 
 
