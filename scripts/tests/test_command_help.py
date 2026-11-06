@@ -125,6 +125,27 @@ class CommandHelpTests(unittest.TestCase):
                         self.assertEqual(sandbox.tool_calls(), "")
                         self.assertEqual(sandbox.files(), before)
 
+    def test_search_help_is_offline_and_rg_remains_native(self):
+        with tempfile.TemporaryDirectory() as root:
+            sandbox = Sandbox(root)
+            native = sandbox.root / "bin/rg"
+            native.write_text(f'#!/bin/sh\necho "native rg" >> "{sandbox.calls}"\nexit 23\n')
+            native.chmod(0o755)
+            help_result = subprocess.run(
+                ["/bin/bash", "-c", 'source "$HOME/.aliases"; search --help'],
+                cwd=sandbox.project, env=sandbox.env, capture_output=True, text=True, timeout=30,
+            )
+            self.assertEqual(help_result.returncode, 0, help_result.stderr)
+            self.assertIn("  --no-clean", help_result.stdout)
+            self.assertIn("  -M, --max-columns WIDTH", help_result.stdout)
+            self.assertEqual(sandbox.tool_calls(), "")
+            native_result = subprocess.run(
+                ["/bin/bash", "-c", 'source "$HOME/.aliases"; rg native-check'],
+                cwd=sandbox.project, env=sandbox.env, capture_output=True, text=True, timeout=30,
+            )
+            self.assertEqual(native_result.returncode, 23)
+            self.assertEqual(sandbox.tool_calls(), "native rg\n")
+
     def test_help_renderer_failures_are_reported_without_running_tools_or_changing_files(self):
         with tempfile.TemporaryDirectory() as root:
             sandbox = Sandbox(root)
@@ -367,6 +388,15 @@ zpty -d z
         ):
             with self.subTest(suffix=suffix):
                 self.assertEqual(self.complete(["dotfiles-help"], suffix)["dotfiles-help"], expected)
+
+    def test_search_completes_only_common_flags(self):
+        expected = {
+            "--help", "--ignore-case", "--glob", "--max-columns", "--line-number",
+            "--no-trim", "--no-clean",
+        }
+        self.assertEqual(self.complete(["search"], " --")["search"], expected)
+        flags = self.complete(["search"], " -")["search"]
+        self.assertEqual(flags, {"-h", "-i", "-g", "-M", "-n", "--no-trim", "--no-clean"})
 
     def test_files_subcommands_and_flags_are_completed(self):
         names = {"count", "large", "changed", "sizes", "empty", "types", "duplicates", "caches", "leftovers"}

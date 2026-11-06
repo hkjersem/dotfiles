@@ -218,6 +218,13 @@ COMMANDS = (
     Command("L", "shell", "Read output one screen at a time",
             "Zsh global alias for | less. Press q to exit; quote a literal 'L' argument.",
             ("dotfiles-help shell L",), group="Pipes and text"),
+    Command("search", "shell", "Search file contents with concise match snippets",
+            "Respects .gitignore and excludes .git and shared clean targets "
+            "(dependencies, builds, caches). -g filters paths without re-enabling those exclusions; "
+            "--no-clean includes clean targets. Leading spaces and tabs are trimmed for display; "
+            "--no-trim preserves them. Long lines show 200-character snippets; -M 0 shows full lines.",
+            ('search "foo"', 'search -in "foo" src',
+             'search -g "*.py" -g \'!test_*\' "foo"', 'search --no-clean "foo"')),
     Command("urlencode", "shell", "Encode text for use in a URL",
             "Uses Python quote_plus; spaces become +.", ("urlencode 'hello world'",), group="Pipes and text"),
     Command("ip", "shell", "Look up the public IP address",

@@ -8,6 +8,7 @@ alias rr="rm -rf"
 
 # Default options
 alias rsync="rsync -vh"
+search() { python3 "$HOME/.dotfiles/scripts/search.py" "$@"; }
 
 # Zsh global aliases expand after a command as well as at its start.
 if [[ -n ${ZSH_VERSION:-} ]]; then

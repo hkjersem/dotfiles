@@ -215,6 +215,12 @@ and `dotfiles-help shell L` to page it. Quote these letters when you mean them
 as literal arguments (`'G'`); they expand anywhere on a command line.
 They are not defined in Bash. The `g` shortcut is documented in the Git topic.
 
+`search` shows concise snippets for long matching lines, excluding `.git` and
+shared clean targets (dependencies, builds and caches). `-g` filters paths without disabling
+those exclusions; `--no-clean` includes clean targets, `--no-trim` preserves
+indentation, and `-M 0` shows full lines. See
+`dotfiles-help search` for examples.
+
 ## Delete a history entry
 
 In zsh, `h` lists native history; `history-delete 222` deletes the event numbered

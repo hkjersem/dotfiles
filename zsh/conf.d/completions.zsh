@@ -7,9 +7,49 @@ typeset -ga dotfiles_commands=(
   agent-awake agent-sessions audit-repo clean_caches clean_docker codex-resume copy_clean
   dotfiles-audit dotfiles-defaults dotfiles-help dotfiles-install dotfiles-profile dotfiles-update
   files history-delete install_node nosync npm_globals_diff npm_release_age
-  pma pmc pmh pmi pml pmr pmu prune_branches roadmaps wipe wipe_clean
+  pma pmc pmh pmi pml pmr pmu prune_branches roadmaps search wipe wipe_clean
 )
 compdef _gnu_generic $dotfiles_commands
+
+_dotfiles_search() {
+  if [[ $PREFIX == - ]]; then
+    local -a flags labels
+    flags=(-h -i -g -M -n --no-trim --no-clean)
+    labels=(
+      '-h, --help          Show help'
+      '-i, --ignore-case   Match case-insensitively'
+      '-g, --glob          Include or exclude paths'
+      '-M, --max-columns   Snippet width; 0 shows full lines'
+      '-n, --line-number   Show line numbers'
+      '--no-trim           Preserve leading spaces and tabs'
+      '--no-clean          Include shared clean targets'
+    )
+    local expl
+    _wanted options expl 'search option' compadd -d labels -a flags
+    return
+  fi
+  _arguments \
+    '(-h --help)'{-h,--help}'[Show help]' \
+    '(-i --ignore-case)'{-i,--ignore-case}'[Match case-insensitively]' \
+    '!(-S --smart-case)'{-S,--smart-case}'[Use smart case matching]' \
+    '!(-w --word-regexp)'{-w,--word-regexp}'[Match whole words]' \
+    '!(-F --fixed-strings)'{-F,--fixed-strings}'[Treat the pattern literally]' \
+    '*'{-g,--glob}'[Include or exclude paths]:path pattern:' \
+    '!*'{-t,--type}'[Search files of this type]:file type:' \
+    '!*'{-T,--type-not}'[Exclude files of this type]:file type:' \
+    '!*'{-A,--after-context}'[Show following lines]:lines:' \
+    '!*'{-B,--before-context}'[Show preceding lines]:lines:' \
+    '!*'{-C,--context}'[Show surrounding lines]:lines:' \
+    '!--hidden[Search hidden files and directories]' \
+    '!(-L --follow)'{-L,--follow}'[Follow symbolic links]' \
+    '(-M --max-columns)'{-M,--max-columns}'[Snippet width; 0 shows full lines]:width:' \
+    '(-n --line-number)'{-n,--line-number}'[Show line numbers]' \
+    '--no-trim[Preserve leading spaces and tabs]' \
+    '--no-clean[Include shared clean targets]' \
+    '1:search pattern:' \
+    '*:path:_files'
+}
+compdef _dotfiles_search search
 
 _dotfiles_help() {
   if [[ $PREFIX == -* ]]; then
