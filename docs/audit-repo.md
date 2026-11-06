@@ -27,6 +27,18 @@ registered paths are shown explicitly. Age is not used as evidence of safety.
 Large worktrees can take time; delayed terminal progress is shown. Existing
 `prune_branches` remains responsible for any approved cleanup.
 
+## CI results
+
+With GitHub Actions workflows and a remote, the build section reads the current
+branch's last 20 runs through `gh run list`, which contacts GitHub even with
+`--no-package-manager`. A passing latest run is a check; a failed, timed-out or
+unstartable latest run is an issue, with the number of consecutive failed runs
+and the date the streak began, so a branch that has been red for days stands
+out. Cancelled or skipped runs and newer in-progress runs are reported as notes.
+Without `gh`, on a detached HEAD, or when `gh` cannot read the runs (for example
+when not logged in), the check is skipped with a note. Only the remote's last
+recorded results are shown; local commits are not tested.
+
 ## Package-manager execution
 
 Use `--no-package-manager` for local checks without running a package manager or

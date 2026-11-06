@@ -142,7 +142,7 @@ else
 fi
 
 AUDIT_TMP=$(mktemp -d) || exit 1
-trap 'rm -f "$AUDIT_TMP/tracked" "$AUDIT_TMP/stderr" "$AUDIT_TMP/sizes" "$AUDIT_TMP/status" "$AUDIT_TMP/upstream-ids" "$AUDIT_TMP/doc-files.z" "$AUDIT_TMP/doc-files" "$AUDIT_TMP/doc-paths" "$AUDIT_TMP/doc-links" "$AUDIT_TMP/roadmaps"; rm -rf "$AUDIT_TMP/merge-objects"; rmdir "$AUDIT_TMP"' EXIT
+trap 'rm -f "$AUDIT_TMP/tracked" "$AUDIT_TMP/stderr" "$AUDIT_TMP/sizes" "$AUDIT_TMP/status" "$AUDIT_TMP/upstream-ids" "$AUDIT_TMP/doc-files.z" "$AUDIT_TMP/doc-files" "$AUDIT_TMP/doc-paths" "$AUDIT_TMP/doc-links" "$AUDIT_TMP/roadmaps" "$AUDIT_TMP/ci-runs"; rm -rf "$AUDIT_TMP/merge-objects"; rmdir "$AUDIT_TMP"' EXIT
 
 command_error() {
   local line
@@ -1168,12 +1168,87 @@ section_end
 # ══════════════════════════════════════════════════════════════════════════════
 section_start "Build Signals"
 
+# Recent GitHub Actions results for the current branch, read through gh, which contacts GitHub.
+# Consecutive failures are counted so a long-red branch stands out.
+CI_RUN_LIMIT=20
+ci_results() {
+  local branch result kind
+  if ! command -v gh &>/dev/null; then
+    info "GitHub CLI not installed — CI results not checked"
+    return
+  fi
+  if ! branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null); then
+    info "Detached HEAD — CI results not checked"
+    return
+  fi
+  if ! gh run list --branch "$branch" --limit "$CI_RUN_LIMIT" \
+       --json status,conclusion,createdAt,displayTitle >"$AUDIT_TMP/ci-runs" 2>"$AUDIT_TMP/stderr"; then
+    info "CI results unavailable for ${branch}"
+    command_error
+    return
+  fi
+  result=$(python3 - "$branch" "$CI_RUN_LIMIT" "$AUDIT_TMP/ci-runs" <<'PY'
+import json
+import sys
+from datetime import datetime
+
+branch, limit, path = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+FAILED = ("failure", "timed_out", "startup_failure")
+try:
+    with open(path) as stream:
+        runs = json.load(stream)
+    if not isinstance(runs, list):
+        raise ValueError
+    done = [run for run in runs if run.get("status") == "completed"]
+
+    def day(run):
+        moment = datetime.fromisoformat(run["createdAt"].replace("Z", "+00:00"))
+        return f"{moment.astimezone():%d.%m.%Y}"
+
+    def title(run):
+        text = run.get("displayTitle") or ""
+        return text if len(text) <= 60 else text[:59] + "…"
+
+    if not done:
+        print(f"info\t{'CI running on' if runs else 'No CI runs on'} {branch}")
+        sys.exit()
+    latest = done[0]
+    running = " (a newer run is in progress)" if runs[0] is not latest else ""
+    if latest.get("conclusion") == "success":
+        print(f"ok\tLatest CI run on {branch} passed ({day(latest)}){running}")
+    elif latest.get("conclusion") in FAILED:
+        streak = 0
+        while streak < len(done) and done[streak].get("conclusion") in FAILED:
+            streak += 1
+        if streak == 1:
+            print(f"fail\tLatest CI run on {branch} failed ({day(latest)}): {title(latest)}{running}")
+        else:
+            count = f"{streak}+" if streak == len(done) and len(runs) >= limit else str(streak)
+            print(f"fail\tCI failing on {branch}: last {count} runs, since {day(done[streak - 1])}; "
+                  f"latest: {title(latest)}{running}")
+    else:
+        print(f"info\tLatest CI run on {branch}: {latest.get('conclusion') or 'no result'} "
+              f"({day(latest)}){running}")
+except (OSError, ValueError, KeyError, TypeError, AttributeError):
+    print(f"info\tCI results unreadable for {branch}")
+PY
+  ) || { info "CI results unreadable for ${branch}"; return; }
+  kind=${result%%$'\t'*}
+  result=${result#*$'\t'}
+  case "$kind" in
+    ok) ok "$result" ;;
+    fail) fail "$result" ;;
+    *) info "$result" ;;
+  esac
+}
+
 # CI config — regardless of language
 if [[ -z "$HAS_REMOTE" ]]; then
   info "No remote — CI check skipped"
 elif [[ -d ".github/workflows" ]] && git ls-files ".github/workflows/*.yml" ".github/workflows/*.yaml" 2>/dev/null | grep -q .; then
   CI_COUNT=$(git ls-files ".github/workflows/*.yml" ".github/workflows/*.yaml" 2>/dev/null | wc -l | tr -d ' ')
   ok "GitHub Actions: ${CI_COUNT} workflow(s)"
+  ci_results
 elif [[ -f ".travis.yml" || -f ".circleci/config.yml" || -f "Jenkinsfile" || -f ".gitlab-ci.yml" ]]; then
   ok "CI config found"
 else

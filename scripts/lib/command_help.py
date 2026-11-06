@@ -121,7 +121,7 @@ COMMANDS = (
             "Fetches and asks before deleting. Never deletes never-pushed branches; preview first.",
             ("prune_branches --dry-run", "prune_branches --older-than 30d"), True),
     Command("audit-repo", "repos", "Triage Git activity, workspaces, tests and dependencies",
-            "Read-only; audit and outdated checks may use the network.",
+            "Read-only; audit, outdated and CI-result checks may use the network.",
             ("audit-repo", "audit-repo --workspaces", "audit-repo --skip-security")),
     Command("roadmaps", "repos", "Find due, awaiting-acceptance and in-progress roadmap items",
             "Read-only by default; --sync writes generated indexes for explicitly supplied paths.",

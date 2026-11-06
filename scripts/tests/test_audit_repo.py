@@ -80,6 +80,7 @@ class AuditRepoTests(unittest.TestCase):
             }}})},
             "pnpm_outdated": {"stdout": "{}"},
             "pnpm_config": {"stdout": "4320"},
+            "gh_run": {"stdout": "[]"},
         }
         self.git = shutil.which("git")
         self.env = dict(os.environ, HOME=str(self.home),
@@ -92,7 +93,7 @@ class AuditRepoTests(unittest.TestCase):
             self.env.pop(key, None)
         subprocess.run([self.git, "init", "--quiet", str(self.project)],
                        env=self.env, check=True, capture_output=True)
-        for name in ("git", "npm", "pnpm", "bun", "yarn", "node", "corepack"):
+        for name in ("git", "npm", "pnpm", "bun", "yarn", "node", "corepack", "gh"):
             tool = self.bin / name
             tool.write_text("#!" + sys.executable + "\n" + MOCK_TOOL)
             tool.chmod(0o755)
@@ -565,6 +566,48 @@ class AuditRepoTests(unittest.TestCase):
         self.write(".github/workflows/ci.yml", "on: push\n")
         result = self.run_audit("--skip-security")
         self.assertIn("GitHub Actions: 1 workflow(s)", result.stdout)
+
+    def test_ci_results_report_the_branch_failure_streak(self):
+        self.write("app.py", "pass\n")
+        self.write(".github/workflows/ci.yml", "on: push\n")
+        # A local-only repository never asks GitHub.
+        result = self.run_audit("--skip-security")
+        self.assertIn("No remote — CI check skipped", result.stdout)
+        self.assertNotIn('"gh"', self.log.read_text())
+        self.add_remote()
+        branch = subprocess.check_output([self.git, "-C", str(self.project), "symbolic-ref", "--short", "HEAD"],
+                                         env=self.env, text=True).strip()
+
+        def run(conclusion, day, title="change", status="completed"):
+            return {"status": status, "conclusion": conclusion if status == "completed" else "",
+                    "createdAt": f"2026-11-{day:02d}T12:00:00Z", "displayTitle": title}
+
+        for runs, expected, code in (
+            ([run("success", 6)], f"✓ Latest CI run on {branch} passed (06.11.2026)", 0),
+            ([run("failure", 6, "fix it")], f"✗ Latest CI run on {branch} failed (06.11.2026): fix it", 1),
+            ([run("", 7, status="in_progress"), run("failure", 6, "latest"), run("timed_out", 5),
+              run("success", 4), run("failure", 3)],
+             f"✗ CI failing on {branch}: last 2 runs, since 05.11.2026; latest: latest "
+             "(a newer run is in progress)", 1),
+            ([run("failure", 20 - index) for index in range(20)],
+             f"✗ CI failing on {branch}: last 20+ runs, since 01.11.2026; latest: change", 1),
+            ([run("cancelled", 6)], f"• Latest CI run on {branch}: cancelled (06.11.2026)", 0),
+            ([], f"• No CI runs on {branch}", 0),
+        ):
+            with self.subTest(expected=expected):
+                self.state["gh_run"] = {"stdout": json.dumps(runs)}
+                result = self.run_audit("--skip-security")
+                self.assertIn(expected, result.stdout)
+                self.assertEqual(result.returncode, code, result.stdout)
+        calls = [json.loads(line) for line in self.log.read_text().splitlines()]
+        self.assertIn(["gh", ["run", "list", "--branch", branch, "--limit", "20",
+                              "--json", "status,conclusion,createdAt,displayTitle"]], calls)
+
+        self.state["gh_run"] = {"stderr": "gh: not logged in", "status": 1}
+        result = self.run_audit("--skip-security")
+        self.assertIn(f"• CI results unavailable for {branch}", result.stdout)
+        self.assertIn("gh: not logged in", result.stdout)
+        self.assertNotIn("CI failing", result.stdout)
 
     def test_documentation_names_placement_and_link_casing(self):
         self.state.update(commits=[], authors="")

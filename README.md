@@ -383,7 +383,8 @@ This opt-in report reuses `prune_branches` safety checks and the native size
 scanner; it never deletes workspaces or discovers unrelated clones.
 
 `audit-repo` reports Git activity, ownership concentration, frequently changed
-files, source sizes, test-file conventions, and build configuration. Run it
+files, source sizes, test-file conventions, build configuration, and recent
+GitHub Actions results for the current branch. Run it
 inside a repository or select one explicitly; a subdirectory is resolved to
 the Git root. It also lists what `prune_branches` would delete, review, or
 keep, based on remote-tracking refs from the last fetch; it never fetches or
@@ -413,9 +414,10 @@ can run Git hooks or merge drivers and disables Git lazy fetching.
 configuration commands.
 
 Findings are triage indicators, not a security verdict. Exit status is 1 for
-concrete issues (such as vulnerabilities or npm's always-failing placeholder
-`test` script) or checks that could not run, and 0 otherwise; warnings alone
-do not fail the command. See [docs/audit-repo.md](docs/audit-repo.md) for what
+concrete issues (such as vulnerabilities, a failing latest CI run, or npm's
+always-failing placeholder `test` script) or checks that could not run, and 0
+otherwise; warnings alone do not fail the command. See
+[docs/audit-repo.md](docs/audit-repo.md) for what
 each check covers and how to read the results.
 
 ## Testing
