@@ -472,6 +472,53 @@ _agent_session_resume_on_redraw() {
   _agent_session_resume </dev/tty
 }
 
+# Sets REPLY to the newest of file $1 and the activity files of record $2.
+_agent_session_latest() {
+  local file
+  REPLY=$1
+  for file in "$2.current" "$_agent_sessions_observed/${2:t}"; do
+    [[ -f $file && $file -nt $REPLY ]] && REPLY=$file
+  done
+}
+
+# Sets REPLY to the session record $1 last followed, or to empty if none.
+_agent_session_followed() {
+  local file=$_agent_sessions_observed/${1:t}
+  REPLY=
+  [[ -f $1.current ]] && IFS= read -r REPLY < "$1.current"
+  if [[ -f $file && ( ! -f $1.current || $file -nt $1.current ) ]]; then
+    IFS= read -r REPLY < "$file"
+  fi
+}
+
+# Record $1, claimed as $2, is superseded when another record holds session $3
+# and is in use or was active later, so each session comes back at most once,
+# from the terminal that used it last.
+_agent_session_superseded() {
+  emulate -L zsh -o extended_glob
+  local f=$1 claim=$2 id=$3 g base gid pid started activity
+  _agent_session_latest "$claim" "$f"
+  activity=$REPLY
+  for g in "$_agent_sessions_dir"/^*.*(N.) "$_agent_sessions_dir"/*.<->(N.); do
+    base=${g%.<->}
+    [[ $g == "$claim" || ${base:t} == "${f:t}" ]] && continue
+    _agent_session_is_uuid "${base:t}" || continue
+    pid= started= gid=
+    { IFS= read -r; IFS= read -r; IFS= read -r; IFS= read -r pid
+      IFS= read -r started; IFS= read -r gid } < "$g"
+    _agent_session_followed "$base"
+    [[ -n $REPLY ]] && gid=$REPLY
+    [[ $gid == "$id" ]] || continue
+    # Another terminal is resuming it.
+    [[ $g != "$base" ]] && kill -0 ${g:e} 2>/dev/null && return 0
+    [[ $g == "$base" && $pid == <-> ]] && kill -0 $pid 2>/dev/null &&
+      [[ -z $started || $started == "$(_agent_session_started $pid)" ]] && return 0
+    _agent_session_latest "$g" "$base"
+    [[ $REPLY -nt $activity ]] && return 0
+  done
+  return 1
+}
+
 _agent_session_resume() {
   emulate -L zsh -o extended_glob
   add-zsh-hook -d precmd _agent_session_resume
@@ -505,10 +552,8 @@ _agent_session_resume() {
       IFS= read -r app } < "$f"
     [[ $pid == <-> ]] && kill -0 $pid 2>/dev/null &&
       [[ -z $started || $started == "$(_agent_session_started $pid)" ]] && continue
-    activity=$f
-    for file in "$f.current" "$_agent_sessions_observed/${f:t}"; do
-      [[ -f $file && $file -nt $activity ]] && activity=$file
-    done
+    _agent_session_latest "$f" "$f"
+    activity=$REPLY
     if _agent_session_expired "$activity"; then
       _agent_session_forget "$f"
       continue
@@ -534,12 +579,14 @@ _agent_session_resume() {
     fi
     claim=$f.$$
     command mv -- "$f" "$claim" 2>/dev/null || continue
-    [[ -f $f.current ]] && IFS= read -r id < "$f.current"
-    file=$_agent_sessions_observed/${f:t}
-    if [[ -f $file && ( ! -f $f.current || $file -nt $f.current ) ]]; then
-      IFS= read -r id < "$file"
-    fi
+    _agent_session_followed "$f"
+    [[ -n $REPLY ]] && id=$REPLY
     if ! _agent_session_is_uuid "$id"; then
+      rm -f -- "$claim"
+      _agent_session_forget "$f"
+      continue
+    fi
+    if _agent_session_superseded "$f" "$claim" "$id"; then
       rm -f -- "$claim"
       _agent_session_forget "$f"
       continue

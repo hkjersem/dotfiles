@@ -481,7 +481,9 @@ into the directory with `cd` does not. Switching session with
 terminal closed comes back, even if you only resumed it without writing
 anything. A session you never wrote to cannot be resumed. Several terminals
 in one repository each get one session back, oldest first; which tab gets
-which is not guaranteed. VS Code can revive terminals it never shows, so
+which is not guaranteed. A session comes back at most once: a record is
+dropped when another terminal has its session open or used it later.
+VS Code can revive terminals it never shows, so
 there a hidden terminal waits until it gets a real size, checking while its
 prompt is empty. Entering a shell command cancels that wait. Exiting the
 agent normally means it is not resumed. Records are dropped after 7 days

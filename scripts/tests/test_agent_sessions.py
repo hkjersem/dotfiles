@@ -703,6 +703,39 @@ class AgentSessionsTest(unittest.TestCase):
         self.assertEqual(self.calls(), [])
         self.assertEqual(self.recorded(), [ID_A])
 
+    def test_session_held_by_a_later_closed_terminal_is_resumed_once(self):
+        older = self.write_marker(ID_A, self.project, launcher="copilot", age=120)
+        newer = self.write_marker(ID_B, self.project, launcher="copilot", age=60)
+        current = newer.with_name(f"{newer.name}.current")
+        current.write_text(f"{ID_A}\n")
+        stamp = time.time() - 30
+        os.utime(current, (stamp, stamp))
+        self.open_and_close(self.project)
+        self.open_and_close(self.project)
+        self.assertEqual(self.args(), [["copilot", f"--resume={ID_A}"]])
+        self.assertFalse(older.exists())
+        self.assertEqual(self.markers(), [])
+
+    def test_session_open_or_being_resumed_elsewhere_is_not_resumed_again(self):
+        started = " ".join(subprocess.run(
+            ["ps", "-o", "lstart=", "-p", str(os.getpid())],
+            capture_output=True, text=True, check=True).stdout.split())
+        for holder in ("open", "resuming"):
+            with self.subTest(holder=holder):
+                if holder == "open":
+                    other = self.write_marker(ID_A, self.project, pid=os.getpid(),
+                                              started=started, age=120)
+                else:
+                    claimed = self.write_marker(ID_A, self.project, age=120)
+                    other = claimed.with_name(f"{claimed.name}.{os.getpid()}")
+                    claimed.rename(other)
+                stale = self.write_marker(ID_A, self.project, launcher="copilot")
+                self.open_and_close(self.project)
+                self.assertEqual(self.calls(), [])
+                self.assertFalse(stale.exists())
+                self.assertTrue(other.exists())
+                other.unlink()
+
     def test_session_whose_shell_pid_was_reused_is_resumed(self):
         self.write_marker(ID_A, self.project, launcher="copilot", pid=os.getpid(),
                           started="Thu Jan  1 00:00:00 2026")
