@@ -11,6 +11,43 @@ typeset -ga dotfiles_commands=(
 )
 compdef _gnu_generic $dotfiles_commands
 
+_dotfiles_pm_package_scripts() {
+  local dir=$PWD manifest scripts
+  while [[ $dir != / ]]; do
+    if [[ -f $dir/package.json ]]; then
+      manifest=$dir/package.json
+      break
+    fi
+    dir=${dir:h}
+  done
+  [[ -n $manifest ]] || return 1
+
+  scripts=$(python3 -I -c '
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as manifest:
+    scripts = json.load(manifest).get("scripts", {})
+if isinstance(scripts, dict):
+    print("\n".join(name for name in scripts if isinstance(name, str)))
+' "$manifest" 2>/dev/null) || return 1
+  [[ -n $scripts ]] || return 1
+
+  local -a candidates
+  candidates=("${(@f)scripts}")
+  local expl
+  _wanted package-scripts expl 'package script' compadd -a candidates
+}
+
+_dotfiles_pm() {
+  if (( CURRENT == 3 )) && [[ ${words[2]} == run ]]; then
+    _dotfiles_pm_package_scripts || _default
+  else
+    _default
+  fi
+}
+compdef _dotfiles_pm pm
+
 _dotfiles_search() {
   if [[ $PREFIX == - ]]; then
     local -a flags labels
@@ -101,7 +138,48 @@ _dotfiles_duration_flags() {
   fi
   _gnu_generic
 }
-compdef _dotfiles_duration_flags prune_branches pmu audit-repo
+compdef _dotfiles_duration_flags prune_branches audit-repo
+
+# Dependency names the wrapper can act on, read from the workspace's package.json
+# files without running a package manager. Skips names already on the line.
+_dotfiles_pm_dependencies() {
+  local output
+  output=$(bash "$HOME/.dotfiles/scripts/package-manager/deps.sh" "$1" 2>/dev/null) || return 1
+  [[ -n $output ]] || return 1
+  local -a names typed
+  names=("${(@f)output}")
+  typed=("${(@)words[2,CURRENT-1]}" "${(@)words[CURRENT+1,-1]}")
+  names=(${names:|typed})
+  (( $#names )) || return 1
+  local expl
+  _wanted packages expl 'dependency' compadd -a names
+}
+
+# pmu takes one package, except with --actions, where it names an action.
+_dotfiles_pmu() {
+  if [[ $PREFIX != -* && ${words[CURRENT-1]} != --cooldown ]] && (( ! ${words[(I)--actions]} )); then
+    local word previous=
+    for word in "${(@)words[2,CURRENT-1]}"; do
+      [[ $word != -* && $previous != --cooldown ]] && { _dotfiles_duration_flags; return; }
+      previous=$word
+    done
+    _dotfiles_pm_dependencies update && return
+  fi
+  _dotfiles_duration_flags
+}
+compdef _dotfiles_pmu pmu
+
+_dotfiles_pmr() {
+  [[ $PREFIX != -* ]] && _dotfiles_pm_dependencies remove && return
+  _gnu_generic
+}
+compdef _dotfiles_pmr pmr
+
+_dotfiles_npm_release_age() {
+  (( CURRENT == 2 )) && [[ $PREFIX != -* ]] && _dotfiles_pm_dependencies update && return
+  _gnu_generic
+}
+compdef _dotfiles_npm_release_age npm_release_age
 
 _git-amend-date() {
   _arguments \

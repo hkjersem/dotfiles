@@ -7,6 +7,13 @@ for a command's examples and cautions, or `pmh update` to search by task.
 Zsh completes command names after `pmh`. `pm -h` still shows the detected
 package manager's native help; wrapper commands have their own `--help`.
 
+Zsh also completes names from `package.json` files without running a package
+manager or project code: `pm run <Tab>` lists the nearest package's scripts,
+`pmu <Tab>` and `npm_release_age <Tab>` list dependencies across the whole
+workspace, and `pmr <Tab>` lists the dependencies `pmr` would remove from
+where you are (the current pnpm workspace member, or every workspace package at
+the root). Script flags can't be completed, since only the script knows them.
+
 The README lists the commands. This page covers updates, pnpm workspaces,
 local libraries, and how `dotfiles-update` keeps package managers and Node
 current. The commands support npm, Bun and pnpm 10.29 or newer; options that

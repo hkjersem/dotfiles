@@ -61,6 +61,7 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 | `scripts/npm-release-age.sh` | Check days since release for an npm package or version |
 | `scripts/package-manager/` | Package manager scripts — invoked via `pm`, `pmx`, `pmu`, `pmi`, `pmr`, `pml`, `pmc`, `pma` shell commands |
 | `scripts/package-manager/_detect-pm.sh` | Sourced by `run.sh` and `bash/aliases` — detects bun, pnpm or npm for the current project |
+| `scripts/package-manager/deps.sh` | Read-only zsh completion helper: prints the dependency names `pmu` (`update`, whole workspace) or `pmr` (`remove`, current target) can act on, reusing the wrappers' root and workspace detection; reads `package.json` with jq and never runs a package manager |
 | `scripts/package-manager/audit.sh` | Audit/fix wrapper — `pma`; pnpm uses `--fix` on v10 and `--fix=update` on v11+, and only does a deep lockfile refresh with `--deep` |
 | `scripts/package-manager/clean.sh` | Cleanup wrapper — removes unused default pnpm catalog entries when no named catalogs exist, removes empty manifest sections, and reports pnpm catalog suggestions |
 | `scripts/package-manager/install.sh` | Install wrapper — runs npm/bun installs directly and makes `pmi` workspace-aware for pnpm roots; unknown packages fall back to root add and catalog rewrites only happen on explicit versions |

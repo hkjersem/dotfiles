@@ -1,6 +1,6 @@
 """Tests that every dotfiles command has safe --help output, and that zsh completes and highlights its flags."""
 
-from pathlib import Path
+import json
 import os
 import re
 import shutil
@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 
 
 REPO = Path(__file__).resolve().parents[2]
@@ -291,10 +292,17 @@ done
 zpty -d z
 """
 
-    def complete(self, commands, suffix=" --", native_git=False):
-        """Return the completions zsh offers after each command and suffix."""
+    def complete(self, commands, suffix=" --", native_git=False, files=None, cwd="."):
+        """Return the completions zsh offers after each command and suffix.
+
+        files maps project-relative paths to text, or to a dict written as JSON.
+        """
         with tempfile.TemporaryDirectory() as root:
             sandbox = Sandbox(root)
+            for name, content in (files or {}).items():
+                path = sandbox.project / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content if isinstance(content, str) else json.dumps(content))
             if native_git:
                 (sandbox.root / "bin/git").unlink()
                 sandbox.env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
@@ -312,7 +320,7 @@ zpty -d z
             driver = sandbox.root / "driver.zsh"
             driver.write_text(self.DRIVER)
             result = subprocess.run(
-                ["zsh", "-f", str(driver), suffix, *commands], cwd=sandbox.project,
+                ["zsh", "-f", str(driver), suffix, *commands], cwd=sandbox.project / cwd,
                 env={**sandbox.env, "ZDOTDIR": str(zdotdir)}, capture_output=True, text=True, timeout=120,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -353,6 +361,72 @@ zpty -d z
             with self.subTest(suffix=suffix):
                 offered = self.complete(["dotfiles-profile"], suffix)["dotfiles-profile"]
                 self.assertEqual(offered & {"personal", "work"}, expected)
+
+    def test_pm_completes_package_scripts_without_running_project_commands(self):
+        manifest = {"scripts": {
+            "build": "node build.js",
+            "lint:check": "eslint .",
+            "refresh-base-images": "node scripts/refresh-base-images.mjs",
+        }}
+        for suffix, expected in (
+            (" run ", set(manifest["scripts"])),
+            (" run ref", {"refresh-base-images"}),
+        ):
+            with self.subTest(suffix=suffix):
+                offered = self.complete(["pm"], suffix, files={"package.json": manifest})["pm"]
+                self.assertEqual(offered, expected)
+
+    PNPM_WORKSPACE = {
+        "package.json": {"packageManager": "pnpm@10.29.0",
+                         "devDependencies": {"typescript": "^5.9.0"}},
+        "pnpm-workspace.yaml": "packages:\n  - 'packages/*'\n",
+        "packages/web/package.json": {"name": "web",
+                                      "dependencies": {"react": "^19.0.0", "@navikt/ds-react": "^8.0.0"}},
+        "packages/api/package.json": {"name": "api", "peerDependencies": {"zod": "^4.0.0"}},
+    }
+
+    def test_pmu_completes_dependencies_from_the_whole_workspace(self):
+        everything = {"typescript", "react", "@navikt/ds-react", "zod"}
+        for cwd in (".", "packages/web"):
+            with self.subTest(cwd=cwd):
+                offered = self.complete(["pmu"], " ", files=self.PNPM_WORKSPACE, cwd=cwd)["pmu"]
+                self.assertEqual(offered, everything)
+
+    def test_pmr_completes_dependencies_it_would_remove_from_here(self):
+        for cwd, suffix, expected in (
+            (".", " ", {"typescript", "react", "@navikt/ds-react", "zod"}),
+            (".", " react ", {"typescript", "@navikt/ds-react", "zod"}),
+            ("packages/web", " ", {"react", "@navikt/ds-react"}),
+        ):
+            with self.subTest(cwd=cwd, suffix=suffix):
+                offered = self.complete(["pmr"], suffix, files=self.PNPM_WORKSPACE, cwd=cwd)["pmr"]
+                self.assertEqual(offered, expected)
+
+    def test_npm_workspace_dependencies_follow_each_wrapper_scope(self):
+        files = {
+            "package.json": {"workspaces": ["packages/*"], "dependencies": {"express": "^5.0.0"}},
+            "package-lock.json": "{}",
+            "packages/cli/package.json": {"name": "cli", "devDependencies": {"vitest": "^4.0.0"}},
+        }
+        self.assertEqual(self.complete(["pmu"], " ", files=files, cwd="packages/cli")["pmu"],
+                         {"express", "vitest"})
+        self.assertEqual(self.complete(["pmr"], " ", files=files)["pmr"], {"express"})
+        self.assertEqual(self.complete(["npm_release_age"], " ex", files=files)["npm_release_age"],
+                         {"express"})
+
+    def test_pmu_offers_dependencies_only_where_it_takes_a_package(self):
+        packages = {"typescript", "react", "@navikt/ds-react", "zod"}
+        for suffix in (" react ", " --actions ", " --cooldown "):
+            with self.subTest(suffix=suffix):
+                offered = self.complete(["pmu"], suffix, files=self.PNPM_WORKSPACE)["pmu"]
+                self.assertFalse(offered & packages, offered)
+        offered = self.complete(["pmu"], " --cooldown 7d ", files=self.PNPM_WORKSPACE)["pmu"]
+        self.assertEqual(offered, packages)
+
+    def test_pm_completion_does_not_import_project_modules(self):
+        # A project json.py without load() would shadow the standard module and hide every script.
+        files = {"package.json": {"scripts": {"build": "make"}}, "json.py": "raise SystemExit(1)\n"}
+        self.assertEqual(self.complete(["pm"], " run ", files=files)["pm"], {"build"})
 
     def test_cheat_sheet_completes_topics_commands_and_scoped_names(self):
         offered = self.complete(["dotfiles-help"], " ")["dotfiles-help"]
