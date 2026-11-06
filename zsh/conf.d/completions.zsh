@@ -11,42 +11,61 @@ typeset -ga dotfiles_commands=(
 )
 compdef _gnu_generic $dotfiles_commands
 
-_dotfiles_pm_package_scripts() {
-  local dir=$PWD manifest scripts
-  while [[ $dir != / ]]; do
-    if [[ -f $dir/package.json ]]; then
-      manifest=$dir/package.json
-      break
-    fi
-    dir=${dir:h}
-  done
-  [[ -n $manifest ]] || return 1
+# Durations, shared by commands that take an age
 
-  scripts=$(python3 -I -c '
-import json
-import sys
-
-with open(sys.argv[1], encoding="utf-8") as manifest:
-    scripts = json.load(manifest).get("scripts", {})
-if isinstance(scripts, dict):
-    print("\n".join(name for name in scripts if isinstance(name, str)))
-' "$manifest" 2>/dev/null) || return 1
-  [[ -n $scripts ]] || return 1
-
-  local -a candidates
-  candidates=("${(@f)scripts}")
-  local expl
-  _wanted package-scripts expl 'package script' compadd -a candidates
-}
-
-_dotfiles_pm() {
-  if (( CURRENT == 3 )) && [[ ${words[2]} == run ]]; then
-    _dotfiles_pm_package_scripts || _default
+_dotfiles_age() {
+  local number=$PREFIX
+  local -a ages
+  if [[ -n $number && $number != *[^0-9]* ]]; then
+    ages=("$number""m:Minutes" "$number""h:Hours" "$number""d:Days" "$number""w:Weeks")
   else
-    _default
+    ages=('30m:30 minutes' '1h:1 hour' '24h:24 hours' '7d:7 days'
+          '14d:14 days' '30d:30 days' '90d:90 days' '2w:2 weeks')
   fi
+  if [[ ${1:-} == cooldown && ( -z $PREFIX || $PREFIX == 0 ) ]]; then
+    ages+=('0:Disable cooldown')
+  fi
+  _describe 'duration (m minutes, h hours, d days, w weeks)' ages
 }
-compdef _dotfiles_pm pm
+
+_dotfiles_duration_flags() {
+  local previous=${words[CURRENT-1]}
+  case "$words[1]:$previous" in
+    pmu:--cooldown)
+      _dotfiles_age cooldown
+      return ;;
+    prune_branches:--older-than|prune_branches:--stale-after|audit-repo:--since)
+      _dotfiles_age
+      return ;;
+  esac
+  if [[ $words[1] == pmu && $PREFIX == --cooldown=* ]]; then
+    compset -P '*='
+    _dotfiles_age cooldown
+    return
+  fi
+  _gnu_generic
+}
+compdef _dotfiles_duration_flags prune_branches audit-repo
+
+# Help and search
+
+_dotfiles_help() {
+  if [[ $PREFIX == -* ]]; then
+    _gnu_generic
+    return
+  fi
+  local matches
+  local -a candidates scope
+  [[ $words[1] == pmh ]] && scope+=(--packages)
+  if (( CURRENT > 2 )); then
+    scope+=("${(@)words[2,CURRENT-1]}")
+  fi
+  matches=$(python3 "$HOME/.dotfiles/scripts/dotfiles-help.py" "${scope[@]}" --list) || return
+  [[ -n $matches ]] || return 1
+  candidates=("${(@f)matches}")
+  _describe 'topic or command' candidates
+}
+compdef _dotfiles_help dotfiles-help pmh
 
 _dotfiles_search() {
   if [[ $PREFIX == - ]]; then
@@ -88,57 +107,44 @@ _dotfiles_search() {
 }
 compdef _dotfiles_search search
 
-_dotfiles_help() {
-  if [[ $PREFIX == -* ]]; then
-    _gnu_generic
-    return
-  fi
-  local matches
-  local -a candidates scope
-  [[ $words[1] == pmh ]] && scope+=(--packages)
-  if (( CURRENT > 2 )); then
-    scope+=("${(@)words[2,CURRENT-1]}")
-  fi
-  matches=$(python3 "$HOME/.dotfiles/scripts/dotfiles-help.py" "${scope[@]}" --list) || return
-  [[ -n $matches ]] || return 1
-  candidates=("${(@f)matches}")
-  _describe 'topic or command' candidates
-}
-compdef _dotfiles_help dotfiles-help pmh
+# Package managers
 
-_dotfiles_age() {
-  local number=$PREFIX
-  local -a ages
-  if [[ -n $number && $number != *[^0-9]* ]]; then
-    ages=("$number""m:Minutes" "$number""h:Hours" "$number""d:Days" "$number""w:Weeks")
+_dotfiles_pm_package_scripts() {
+  local dir=$PWD manifest scripts
+  while [[ $dir != / ]]; do
+    if [[ -f $dir/package.json ]]; then
+      manifest=$dir/package.json
+      break
+    fi
+    dir=${dir:h}
+  done
+  [[ -n $manifest ]] || return 1
+
+  scripts=$(python3 -I -c '
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as manifest:
+    scripts = json.load(manifest).get("scripts", {})
+if isinstance(scripts, dict):
+    print("\n".join(name for name in scripts if isinstance(name, str)))
+' "$manifest" 2>/dev/null) || return 1
+  [[ -n $scripts ]] || return 1
+
+  local -a candidates
+  candidates=("${(@f)scripts}")
+  local expl
+  _wanted package-scripts expl 'package script' compadd -a candidates
+}
+
+_dotfiles_pm() {
+  if (( CURRENT == 3 )) && [[ ${words[2]} == run ]]; then
+    _dotfiles_pm_package_scripts || _default
   else
-    ages=('30m:30 minutes' '1h:1 hour' '24h:24 hours' '7d:7 days'
-          '14d:14 days' '30d:30 days' '90d:90 days' '2w:2 weeks')
+    _default
   fi
-  if [[ ${1:-} == cooldown && ( -z $PREFIX || $PREFIX == 0 ) ]]; then
-    ages+=('0:Disable cooldown')
-  fi
-  _describe 'duration (m minutes, h hours, d days, w weeks)' ages
 }
-
-_dotfiles_duration_flags() {
-  local previous=${words[CURRENT-1]}
-  case "$words[1]:$previous" in
-    pmu:--cooldown)
-      _dotfiles_age cooldown
-      return ;;
-    prune_branches:--older-than|prune_branches:--stale-after|audit-repo:--since)
-      _dotfiles_age
-      return ;;
-  esac
-  if [[ $words[1] == pmu && $PREFIX == --cooldown=* ]]; then
-    compset -P '*='
-    _dotfiles_age cooldown
-    return
-  fi
-  _gnu_generic
-}
-compdef _dotfiles_duration_flags prune_branches audit-repo
+compdef _dotfiles_pm pm
 
 # Dependency names the wrapper can act on, read from the workspace's package.json
 # files without running a package manager. Skips names already on the line.
@@ -181,14 +187,7 @@ _dotfiles_npm_release_age() {
 }
 compdef _dotfiles_npm_release_age npm_release_age
 
-_git-amend-date() {
-  _arguments \
-    '(-h --help)'{-h,--help}'[Show help]' \
-    '--shift[Subtract from each existing date instead of now]' \
-    '1:age or quoted date:_dotfiles_age' \
-    '2:commit:__git_commits'
-}
-zstyle ':completion:*:*:git:*' user-commands 'amend-date:Change commit dates'
+# Files and cleanup
 
 _dotfiles_files() {
   if (( CURRENT == 2 )) && [[ ${words[CURRENT]} != -* ]]; then
@@ -276,6 +275,17 @@ _dotfiles_clean_docker() {
     '(--inspect -n --dry-run)'{-n,--dry-run}'[Show the cleanup plan without prompting or cleaning]'
 }
 compdef _dotfiles_clean_docker clean_docker
+
+# Git and machine setup
+
+_git-amend-date() {
+  _arguments \
+    '(-h --help)'{-h,--help}'[Show help]' \
+    '--shift[Subtract from each existing date instead of now]' \
+    '1:age or quoted date:_dotfiles_age' \
+    '2:commit:__git_commits'
+}
+zstyle ':completion:*:*:git:*' user-commands 'amend-date:Change commit dates'
 
 _dotfiles_profile() {
   _arguments \
