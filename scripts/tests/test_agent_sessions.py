@@ -231,6 +231,7 @@ class AgentSessionsTest(unittest.TestCase):
         # would keep this terminal open after hang_up closes it.
         os.set_inheritable(fd, False)
         self.addCleanup(self._reap, pid, fd)
+        self.drain(fd, lambda output: b"% " in output)
         return pid, fd
 
     def _reap(self, pid, fd):

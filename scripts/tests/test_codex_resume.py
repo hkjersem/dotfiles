@@ -1369,33 +1369,34 @@ class CodexResumeTests(unittest.TestCase):
         self.usage.assert_not_called()
 
     def test_recurring_check_waits_for_a_reset_before_its_next_check_and_sends_a_minute_after(self):
-        # The resume is recorded when the wait actually ended, which can be late, as when the Mac slept.
-        resumed, output, state = self.recurring(["a"], allowed=[False, True], resets="2026-10-21T10:10:00+02:00",
-                                                sent="2026-10-21T16:00:00+02:00")
-        self.assertEqual(datetime.fromisoformat(self.wait.call_args.args[0]),
-                         datetime.fromisoformat("2026-10-21T10:11:00+02:00"))
-        self.assertEqual(resumed, ["a"])
-        self.assertEqual(datetime.fromisoformat(state["resumed"]["a"]),
-                         datetime.fromisoformat("2026-10-21T16:00:00+02:00"))
-        # Only chats still stuck after the wait are resumed, not one resumed meanwhile.
-        resumed, _, _ = self.recurring(["a", "b"], allowed=[False, True], resets="2026-10-21T10:10:00+02:00",
-                                       sent="2026-10-21T10:11:03+02:00", after_wait=["b"])
-        self.assertEqual(resumed, ["b"])
-        resumed, _, _ = self.recurring(["a"], allowed=[False], resets="2026-10-21T10:10:00+02:00",
-                                       sent="2026-10-21T10:11:03+02:00", after_wait=[])
-        self.assertEqual(resumed, [])
-        self.assertEqual(output.splitlines()[0], "[stamp] 1 chat(s) stopped at a usage limit; waiting until "
-                                                 f"{shown('2026-10-21T10:11:00+02:00')}, a minute after it resets.")
-        # A reset at or after the next check, a limit still used up after the wait, or a used-up limit with no
-        # reset time (or no recurring job to know the interval) is left to a later check.
-        for resets, allowed, minutes in (("2026-10-21T10:14:00+02:00", [False, True], 15),
-                                         ("2026-10-21T10:10:00+02:00", [False, False], 15),
-                                         (None, [False, True], 15),
-                                         ("2026-10-21T10:10:00+02:00", [False, True], None)):
-            with self.subTest(resets=resets, allowed=allowed, minutes=minutes):
-                resumed, _, state = self.recurring(["a"], allowed=allowed, resets=resets, minutes=minutes)
-                self.assertEqual((resumed, state["resumed"]), ([], {}))
-                self.assertEqual(self.wait.called, allowed == [False, False])
+        with local_zone("Europe/Oslo"):
+            # The resume is recorded when the wait actually ended, which can be late, as when the Mac slept.
+            resumed, output, state = self.recurring(["a"], allowed=[False, True], resets="2026-10-21T10:10:00+02:00",
+                                                    sent="2026-10-21T16:00:00+02:00")
+            self.assertEqual(datetime.fromisoformat(self.wait.call_args.args[0]),
+                             datetime.fromisoformat("2026-10-21T10:11:00+02:00"))
+            self.assertEqual(resumed, ["a"])
+            self.assertEqual(datetime.fromisoformat(state["resumed"]["a"]),
+                             datetime.fromisoformat("2026-10-21T16:00:00+02:00"))
+            # Only chats still stuck after the wait are resumed, not one resumed meanwhile.
+            resumed, _, _ = self.recurring(["a", "b"], allowed=[False, True], resets="2026-10-21T10:10:00+02:00",
+                                           sent="2026-10-21T10:11:03+02:00", after_wait=["b"])
+            self.assertEqual(resumed, ["b"])
+            resumed, _, _ = self.recurring(["a"], allowed=[False], resets="2026-10-21T10:10:00+02:00",
+                                           sent="2026-10-21T10:11:03+02:00", after_wait=[])
+            self.assertEqual(resumed, [])
+            self.assertEqual(output.splitlines()[0], "[stamp] 1 chat(s) stopped at a usage limit; waiting until "
+                                                     f"{shown('2026-10-21T10:11:00+02:00')}, a minute after it resets.")
+            # A reset at or after the next check, a limit still used up after the wait, or a used-up limit with no
+            # reset time (or no recurring job to know the interval) is left to a later check.
+            for resets, allowed, minutes in (("2026-10-21T10:14:00+02:00", [False, True], 15),
+                                             ("2026-10-21T10:10:00+02:00", [False, False], 15),
+                                             (None, [False, True], 15),
+                                             ("2026-10-21T10:10:00+02:00", [False, True], None)):
+                with self.subTest(resets=resets, allowed=allowed, minutes=minutes):
+                    resumed, _, state = self.recurring(["a"], allowed=allowed, resets=resets, minutes=minutes)
+                    self.assertEqual((resumed, state["resumed"]), ([], {}))
+                    self.assertEqual(self.wait.called, allowed == [False, False])
 
     def test_recurring_check_follows_the_chats_it_queued_before_the_app_server_failed(self):
         with self.assertRaisesRegex(RuntimeError, "app-server crashed"):
@@ -1469,28 +1470,29 @@ class CodexResumeTests(unittest.TestCase):
                 self.assertEqual(state["unattended"]["a"]["since"], later)
 
     def test_recurring_clears_the_clock_while_quota_or_scheduling_blocks_action(self):
-        start = "2026-10-21T10:00:00+02:00"
-        for barrier in ("quota", "capacity", "tier", "morning"):
-            with self.subTest(barrier=barrier):
-                _, _, state = self.recurring(["a"], queued=False, now=start)
-                options = {}
-                if barrier == "quota":
-                    options["allowed"] = False
-                elif barrier == "capacity":
-                    state["sends"] = [start] * 3
-                    options["limit_end"] = "2026-10-21T15:00:00+02:00"
-                elif barrier == "tier":
-                    state["window"] = {"start": start, "tier": 1, "early": False}
-                else:
-                    options.update(now="2026-10-21T23:00:00+02:00", morning="09:00")
-                resumed, _, state = self.recurring(
-                    ["a"], queued=False, state=state, **{"now": "2026-10-21T10:15:00+02:00", **options})
-                self.assertEqual(resumed, [])
-                self.assertEqual(state["unattended"], {})
-                later = "2026-10-22T10:00:00+02:00"
-                resumed, _, state = self.recurring(["a"], queued=False, state=state, now=later)
-                self.assertEqual(resumed, ["a"])
-                self.assertEqual(state["unattended"]["a"]["since"], later)
+        with local_zone("Europe/Oslo"):
+            start = "2026-10-21T10:00:00+02:00"
+            for barrier in ("quota", "capacity", "tier", "morning"):
+                with self.subTest(barrier=barrier):
+                    _, _, state = self.recurring(["a"], queued=False, now=start)
+                    options = {}
+                    if barrier == "quota":
+                        options["allowed"] = False
+                    elif barrier == "capacity":
+                        state["sends"] = [start] * 3
+                        options["limit_end"] = "2026-10-21T15:00:00+02:00"
+                    elif barrier == "tier":
+                        state["window"] = {"start": start, "tier": 1, "early": False}
+                    else:
+                        options.update(now="2026-10-21T23:00:00+02:00", morning="09:00")
+                    resumed, _, state = self.recurring(
+                        ["a"], queued=False, state=state, **{"now": "2026-10-21T10:15:00+02:00", **options})
+                    self.assertEqual(resumed, [])
+                    self.assertEqual(state["unattended"], {})
+                    later = "2026-10-22T10:00:00+02:00"
+                    resumed, _, state = self.recurring(["a"], queued=False, state=state, now=later)
+                    self.assertEqual(resumed, ["a"])
+                    self.assertEqual(state["unattended"]["a"]["since"], later)
 
     def test_expired_chats_do_not_block_another_tier(self):
         chats = ["a", ("b", "!B")]
