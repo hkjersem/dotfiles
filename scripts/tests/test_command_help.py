@@ -67,6 +67,37 @@ class Sandbox:
 
 
 class CommandHelpTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("zsh"), "zsh is required")
+    def test_sudo_expands_aliases_without_forwarding_zsh_modifiers(self):
+        cases = (
+            ("sudo ll", ["ls", "-lA"]),
+            ('sudo cp "source file" "destination file"', ["cp", "source file", "destination file"]),
+            ("sudo literal '*'", ["ls", "*"]),
+            ("sudo -n /usr/bin/true", ["-n", "/usr/bin/true"]),
+            ("sudo --help", ["--help"]),
+            ("sudo", []),
+        )
+        with tempfile.TemporaryDirectory() as root:
+            sandbox = Sandbox(root)
+            (sandbox.root / "bin/sudo").write_text(
+                '#!/bin/sh\nfor arg do printf "%s\\n" "$arg"; done\nexit 23\n'
+            )
+            for command, expected in cases:
+                with self.subTest(command=command):
+                    result = subprocess.run(
+                        [shutil.which("zsh"), "-f"],
+                        input='alias sudo="sudo "\n'
+                              'alias cp="nocorrect cp"\n'
+                              'alias literal="noglob nocorrect ls"\n'
+                              'source "$HOME/.aliases"\n'
+                              'source "$HOME/.aliases"\n'
+                              + command + "\n",
+                        cwd=sandbox.project, env=sandbox.env,
+                        capture_output=True, text=True, timeout=10,
+                    )
+                    self.assertEqual(result.returncode, 23, result.stderr)
+                    self.assertEqual(result.stdout.splitlines(), expected)
+
     def test_every_script_command_is_completed(self):
         self.assertGreater(len(script_commands()), 10)
         self.assertTrue({

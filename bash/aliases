@@ -52,8 +52,18 @@ alias cleanup="cleanupds && cleanupad"
 alias quit="exit"
 alias week="date +%V"
 
-# Enable aliases to be sudo’ed
-alias sudo='sudo '
+# Expand command aliases after sudo, stripping Zsh-only precommand modifiers.
+if [[ -n ${ZSH_VERSION:-} ]]; then
+  function sudo {
+    while [[ ${1:-} == nocorrect || ${1:-} == noglob ]]; do
+      shift
+    done
+    command sudo "$@"
+  }
+  alias sudo='nocorrect sudo '
+else
+  alias sudo='sudo '
+fi
 
 # Dotfiles management
 dotfiles-help() { python3 "$HOME/.dotfiles/scripts/dotfiles-help.py" "$@"; }
