@@ -182,9 +182,13 @@ A small, single-purpose change needs no plan; say it fits one commit.
 ## Committing
 
 Commit only when the request includes it, such as "tidy and commit". The
-request authorizes staging and committing the change, not pushing, amending,
-or rewriting history. Then, without further confirmation unless a boundary is
-ambiguous:
+request authorizes committing the work it refers to: what this conversation
+produced, or what the user names. Other pending changes in the same worktree,
+such as earlier unfinished features, notes or experiments, are outside that
+authorization, even though the tidy pass reviews them. If it is unclear what
+belongs to this work, list the candidates and ask before committing. The
+request never authorizes pushing, amending, or rewriting history. Then, without
+further confirmation unless a boundary is ambiguous:
 
 1. Finish the tidy pass and its checks first.
 2. For each planned commit, make the index contain exactly that commit: stage
