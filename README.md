@@ -425,10 +425,13 @@ available. Some fixtures also use `/usr/bin/python3`, `/usr/bin/ruby`, and macOS
 copy/archive tools. No Python test packages need to be installed.
 
 ```sh
-python3 -B -m unittest discover -s scripts/tests
+TZ=UTC python3 -B -m unittest discover -s scripts/tests
 # One suite:
-python3 -B -m unittest discover -s scripts/tests -p 'test_package_updates.py'
+TZ=UTC python3 -B -m unittest discover -s scripts/tests -p 'test_package_updates.py'
 ```
+
+CI runs in UTC, so `TZ=UTC` makes local runs catch tests that only pass in the
+Mac's own time zone. Tests that depend on local time pin their zone themselves.
 
 Tests use disposable fixtures and mocked package-manager/network operations,
 not live installations. Shell regressions run under `/bin/bash` to exercise

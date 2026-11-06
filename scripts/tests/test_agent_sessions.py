@@ -208,6 +208,11 @@ class AgentSessionsTest(unittest.TestCase):
         current = record and record.with_name(f"{record.name}.current")
         return current.read_text().strip() if current and current.exists() else None
 
+    def started(self, pid):
+        """When pid started, as the shells under test read it: ps prints local time, so use their environment."""
+        return " ".join(subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], env=self.env,
+                                       capture_output=True, text=True, check=True).stdout.split())
+
     def run_zsh(self, script, **env):
         result = subprocess.run(
             ["zsh", "-f", "-c", f"source {MODULE}\n{script}"],
@@ -696,10 +701,7 @@ class AgentSessionsTest(unittest.TestCase):
         self.assertFalse({ID_A, ID_B} & set(self.markers()))
 
     def test_session_running_in_another_terminal_is_not_resumed(self):
-        started = subprocess.run(["ps", "-o", "lstart=", "-p", str(os.getpid())],
-                                 capture_output=True, text=True, check=True).stdout.split()
-        started = " ".join(started)
-        self.write_marker(ID_A, self.project, pid=os.getpid(), started=started)
+        self.write_marker(ID_A, self.project, pid=os.getpid(), started=self.started(os.getpid()))
         self.open_and_close(self.project)
         self.assertEqual(self.calls(), [])
         self.assertEqual(self.recorded(), [ID_A])
@@ -718,9 +720,7 @@ class AgentSessionsTest(unittest.TestCase):
         self.assertEqual(self.markers(), [])
 
     def test_session_open_or_being_resumed_elsewhere_is_not_resumed_again(self):
-        started = " ".join(subprocess.run(
-            ["ps", "-o", "lstart=", "-p", str(os.getpid())],
-            capture_output=True, text=True, check=True).stdout.split())
+        started = self.started(os.getpid())
         for holder in ("open", "resuming"):
             with self.subTest(holder=holder):
                 if holder == "open":
@@ -744,10 +744,8 @@ class AgentSessionsTest(unittest.TestCase):
         self.assertEqual(self.args(), [["copilot", f"--resume={ID_A}"]])
 
     def test_old_record_of_a_live_shell_is_not_deleted(self):
-        started = subprocess.run(["ps", "-o", "lstart=", "-p", str(os.getpid())],
-                                 capture_output=True, text=True, check=True).stdout.split()
         marker = self.write_marker(ID_A, self.project, age=8 * 86400,
-                                   pid=os.getpid(), started=" ".join(started))
+                                   pid=os.getpid(), started=self.started(os.getpid()))
         self.open_and_close(self.project)
         self.assertTrue(marker.exists())
         self.assertEqual(self.calls(), [])

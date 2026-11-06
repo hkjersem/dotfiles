@@ -51,7 +51,7 @@ def seconds(text):
 
 
 def shown(moment):
-    """Format a fixed moment as the script shows it, in the local time zone, which differs in CI."""
+    """Format a fixed moment as the script shows it, in the local time zone the tests pin."""
     return f"{datetime.fromisoformat(moment).astimezone():%d.%m.%Y kl. %H.%M}"
 
 
@@ -100,6 +100,10 @@ RETRY_CHATS = codex_resume.retry_chats
 
 class CodexResumeTests(unittest.TestCase):
     def setUp(self):
+        # Scheduling and messages use the local time zone, which is UTC in CI; pin it so every test sees the same one.
+        zone = local_zone("Europe/Oslo")
+        zone.__enter__()
+        self.addCleanup(zone.__exit__, None, None, None)
         # Keep agent-awake wake requests out of this Mac's ~/.cache and away from its root helper.
         state = tempfile.TemporaryDirectory()
         self.addCleanup(state.cleanup)
@@ -149,7 +153,7 @@ class CodexResumeTests(unittest.TestCase):
             (("23:59", "23.59", "2359"), "2026-10-16T23:59:00+02:00"),
         ):
             for value in formats:
-                with self.subTest(value=value), local_zone("Europe/Oslo"):
+                with self.subTest(value=value):
                     self.assertEqual(
                         codex_resume.next_occurrence(value, now),
                         datetime.fromisoformat(expected),
@@ -157,29 +161,26 @@ class CodexResumeTests(unittest.TestCase):
 
     def test_next_occurrence_uses_today_if_time_is_ahead(self):
         now = datetime.fromisoformat("2026-10-16T13:00:00+02:00")
-        with local_zone("Europe/Oslo"):
-            self.assertEqual(
-                codex_resume.next_occurrence("16:30", now),
-                datetime.fromisoformat("2026-10-16T16:30:00+02:00"),
-            )
+        self.assertEqual(
+            codex_resume.next_occurrence("16:30", now),
+            datetime.fromisoformat("2026-10-16T16:30:00+02:00"),
+        )
 
     def test_next_occurrence_moves_elapsed_time_to_tomorrow(self):
         now = datetime.fromisoformat("2026-10-16T16:30:00+02:00")
-        with local_zone("Europe/Oslo"):
-            self.assertEqual(
-                codex_resume.next_occurrence("16:30", now),
-                datetime.fromisoformat("2026-10-17T16:30:00+02:00"),
-            )
+        self.assertEqual(
+            codex_resume.next_occurrence("16:30", now),
+            datetime.fromisoformat("2026-10-17T16:30:00+02:00"),
+        )
 
     def test_next_occurrence_keeps_the_local_time_across_a_daylight_saving_change(self):
-        with local_zone("Europe/Oslo"):
-            for now, expected in (
-                ("2026-10-24T23:00:00+02:00", "2026-10-25T09:00:00+01:00"),
-                ("2026-03-28T23:00:00+01:00", "2026-03-29T09:00:00+02:00"),
-            ):
-                with self.subTest(now=now):
-                    self.assertEqual(codex_resume.next_occurrence("09:00", datetime.fromisoformat(now)),
-                                     datetime.fromisoformat(expected))
+        for now, expected in (
+            ("2026-10-24T23:00:00+02:00", "2026-10-25T09:00:00+01:00"),
+            ("2026-03-28T23:00:00+01:00", "2026-03-29T09:00:00+02:00"),
+        ):
+            with self.subTest(now=now):
+                self.assertEqual(codex_resume.next_occurrence("09:00", datetime.fromisoformat(now)),
+                                 datetime.fromisoformat(expected))
 
     def test_scheduled_wait_targets_three_seconds_after_requested_minute(self):
         target = "2026-10-16T16:30:00+02:00"
@@ -961,7 +962,7 @@ class CodexResumeTests(unittest.TestCase):
         limits = [{"name": "5-hour", "minutes": 300, "used": 100,
                    "resets": datetime.fromisoformat("2026-10-28T13:08:00+01:00")}]
         for morning, last in ((None, "28 23.09"), ("09:00", "29 04.00")):
-            with (self.subTest(morning=morning), local_zone("Europe/Oslo"),
+            with (self.subTest(morning=morning),
                   patch.object(codex_resume, "stuck_chats", return_value=chats),
                   patch.object(codex_resume, "usage_limits", return_value=limits)):
                 found = codex_resume.stuck_overview(
@@ -1369,34 +1370,33 @@ class CodexResumeTests(unittest.TestCase):
         self.usage.assert_not_called()
 
     def test_recurring_check_waits_for_a_reset_before_its_next_check_and_sends_a_minute_after(self):
-        with local_zone("Europe/Oslo"):
-            # The resume is recorded when the wait actually ended, which can be late, as when the Mac slept.
-            resumed, output, state = self.recurring(["a"], allowed=[False, True], resets="2026-10-21T10:10:00+02:00",
-                                                    sent="2026-10-21T16:00:00+02:00")
-            self.assertEqual(datetime.fromisoformat(self.wait.call_args.args[0]),
-                             datetime.fromisoformat("2026-10-21T10:11:00+02:00"))
-            self.assertEqual(resumed, ["a"])
-            self.assertEqual(datetime.fromisoformat(state["resumed"]["a"]),
-                             datetime.fromisoformat("2026-10-21T16:00:00+02:00"))
-            # Only chats still stuck after the wait are resumed, not one resumed meanwhile.
-            resumed, _, _ = self.recurring(["a", "b"], allowed=[False, True], resets="2026-10-21T10:10:00+02:00",
-                                           sent="2026-10-21T10:11:03+02:00", after_wait=["b"])
-            self.assertEqual(resumed, ["b"])
-            resumed, _, _ = self.recurring(["a"], allowed=[False], resets="2026-10-21T10:10:00+02:00",
-                                           sent="2026-10-21T10:11:03+02:00", after_wait=[])
-            self.assertEqual(resumed, [])
-            self.assertEqual(output.splitlines()[0], "[stamp] 1 chat(s) stopped at a usage limit; waiting until "
-                                                     f"{shown('2026-10-21T10:11:00+02:00')}, a minute after it resets.")
-            # A reset at or after the next check, a limit still used up after the wait, or a used-up limit with no
-            # reset time (or no recurring job to know the interval) is left to a later check.
-            for resets, allowed, minutes in (("2026-10-21T10:14:00+02:00", [False, True], 15),
-                                             ("2026-10-21T10:10:00+02:00", [False, False], 15),
-                                             (None, [False, True], 15),
-                                             ("2026-10-21T10:10:00+02:00", [False, True], None)):
-                with self.subTest(resets=resets, allowed=allowed, minutes=minutes):
-                    resumed, _, state = self.recurring(["a"], allowed=allowed, resets=resets, minutes=minutes)
-                    self.assertEqual((resumed, state["resumed"]), ([], {}))
-                    self.assertEqual(self.wait.called, allowed == [False, False])
+        # The resume is recorded when the wait actually ended, which can be late, as when the Mac slept.
+        resumed, output, state = self.recurring(["a"], allowed=[False, True], resets="2026-10-21T10:10:00+02:00",
+                                                sent="2026-10-21T16:00:00+02:00")
+        self.assertEqual(datetime.fromisoformat(self.wait.call_args.args[0]),
+                         datetime.fromisoformat("2026-10-21T10:11:00+02:00"))
+        self.assertEqual(resumed, ["a"])
+        self.assertEqual(datetime.fromisoformat(state["resumed"]["a"]),
+                         datetime.fromisoformat("2026-10-21T16:00:00+02:00"))
+        # Only chats still stuck after the wait are resumed, not one resumed meanwhile.
+        resumed, _, _ = self.recurring(["a", "b"], allowed=[False, True], resets="2026-10-21T10:10:00+02:00",
+                                       sent="2026-10-21T10:11:03+02:00", after_wait=["b"])
+        self.assertEqual(resumed, ["b"])
+        resumed, _, _ = self.recurring(["a"], allowed=[False], resets="2026-10-21T10:10:00+02:00",
+                                       sent="2026-10-21T10:11:03+02:00", after_wait=[])
+        self.assertEqual(resumed, [])
+        self.assertEqual(output.splitlines()[0], "[stamp] 1 chat(s) stopped at a usage limit; waiting until "
+                                                 f"{shown('2026-10-21T10:11:00+02:00')}, a minute after it resets.")
+        # A reset at or after the next check, a limit still used up after the wait, or a used-up limit with no
+        # reset time (or no recurring job to know the interval) is left to a later check.
+        for resets, allowed, minutes in (("2026-10-21T10:14:00+02:00", [False, True], 15),
+                                         ("2026-10-21T10:10:00+02:00", [False, False], 15),
+                                         (None, [False, True], 15),
+                                         ("2026-10-21T10:10:00+02:00", [False, True], None)):
+            with self.subTest(resets=resets, allowed=allowed, minutes=minutes):
+                resumed, _, state = self.recurring(["a"], allowed=allowed, resets=resets, minutes=minutes)
+                self.assertEqual((resumed, state["resumed"]), ([], {}))
+                self.assertEqual(self.wait.called, allowed == [False, False])
 
     def test_recurring_check_follows_the_chats_it_queued_before_the_app_server_failed(self):
         with self.assertRaisesRegex(RuntimeError, "app-server crashed"):
@@ -1470,29 +1470,28 @@ class CodexResumeTests(unittest.TestCase):
                 self.assertEqual(state["unattended"]["a"]["since"], later)
 
     def test_recurring_clears_the_clock_while_quota_or_scheduling_blocks_action(self):
-        with local_zone("Europe/Oslo"):
-            start = "2026-10-21T10:00:00+02:00"
-            for barrier in ("quota", "capacity", "tier", "morning"):
-                with self.subTest(barrier=barrier):
-                    _, _, state = self.recurring(["a"], queued=False, now=start)
-                    options = {}
-                    if barrier == "quota":
-                        options["allowed"] = False
-                    elif barrier == "capacity":
-                        state["sends"] = [start] * 3
-                        options["limit_end"] = "2026-10-21T15:00:00+02:00"
-                    elif barrier == "tier":
-                        state["window"] = {"start": start, "tier": 1, "early": False}
-                    else:
-                        options.update(now="2026-10-21T23:00:00+02:00", morning="09:00")
-                    resumed, _, state = self.recurring(
-                        ["a"], queued=False, state=state, **{"now": "2026-10-21T10:15:00+02:00", **options})
-                    self.assertEqual(resumed, [])
-                    self.assertEqual(state["unattended"], {})
-                    later = "2026-10-22T10:00:00+02:00"
-                    resumed, _, state = self.recurring(["a"], queued=False, state=state, now=later)
-                    self.assertEqual(resumed, ["a"])
-                    self.assertEqual(state["unattended"]["a"]["since"], later)
+        start = "2026-10-21T10:00:00+02:00"
+        for barrier in ("quota", "capacity", "tier", "morning"):
+            with self.subTest(barrier=barrier):
+                _, _, state = self.recurring(["a"], queued=False, now=start)
+                options = {}
+                if barrier == "quota":
+                    options["allowed"] = False
+                elif barrier == "capacity":
+                    state["sends"] = [start] * 3
+                    options["limit_end"] = "2026-10-21T15:00:00+02:00"
+                elif barrier == "tier":
+                    state["window"] = {"start": start, "tier": 1, "early": False}
+                else:
+                    options.update(now="2026-10-21T23:00:00+02:00", morning="09:00")
+                resumed, _, state = self.recurring(
+                    ["a"], queued=False, state=state, **{"now": "2026-10-21T10:15:00+02:00", **options})
+                self.assertEqual(resumed, [])
+                self.assertEqual(state["unattended"], {})
+                later = "2026-10-22T10:00:00+02:00"
+                resumed, _, state = self.recurring(["a"], queued=False, state=state, now=later)
+                self.assertEqual(resumed, ["a"])
+                self.assertEqual(state["unattended"]["a"]["since"], later)
 
     def test_expired_chats_do_not_block_another_tier(self):
         chats = ["a", ("b", "!B")]
@@ -1664,22 +1663,21 @@ class CodexResumeTests(unittest.TestCase):
                                         stopped="2026-10-21T15:10:00+02:00")[0], ["!!b"])
 
     def test_at_night_chats_are_split_so_a_new_window_is_free_by_morning(self):
-        with local_zone("Europe/Oslo"):
-            night = {"morning": "09:00", "stopped": "2026-10-21T21:00:00+02:00"}
-            # A single chat waits for the window five hours before morning, which may start up to an hour late.
-            self.assertEqual(self.recurring(["a"], now="2026-10-21T23:30:00+02:00", **night)[0], [])
-            self.assertEqual(self.recurring(["a"], now="2026-10-22T04:00:00+02:00", **night)[0], ["a"])
-            self.assertEqual(self.recurring(["a"], now="2026-10-22T05:01:00+02:00", **night)[0], [])
-            self.assertEqual(self.recurring(["a"], now="2026-10-22T09:00:00+02:00", **night)[0], ["a"])
-            self.assertEqual(self.recurring(["a"], now="2026-10-21T22:59:00+02:00", **night)[0], ["a"])
-            self.assertEqual(self.recurring(["a"], now="2026-10-21T23:30:00+02:00")[0], ["a"])
-            # Two or more are split, the late window getting the larger half; the early one takes no later chats.
-            resumed, _, state = self.recurring(["a", "b", "c"], now="2026-10-21T23:30:00+02:00", **night)
-            self.assertEqual((resumed, state["window"]["early"]), (["a"], True))
-            self.assertEqual(self.recurring(["b", "c", "d"], state=state, now="2026-10-22T01:00:00+02:00",
-                                            **night)[0], [])
-            self.assertEqual(self.recurring(["b", "c"], state=state, now="2026-10-22T04:30:00+02:00",
-                                            **night)[0], ["b", "c"])
+        night = {"morning": "09:00", "stopped": "2026-10-21T21:00:00+02:00"}
+        # A single chat waits for the window five hours before morning, which may start up to an hour late.
+        self.assertEqual(self.recurring(["a"], now="2026-10-21T23:30:00+02:00", **night)[0], [])
+        self.assertEqual(self.recurring(["a"], now="2026-10-22T04:00:00+02:00", **night)[0], ["a"])
+        self.assertEqual(self.recurring(["a"], now="2026-10-22T05:01:00+02:00", **night)[0], [])
+        self.assertEqual(self.recurring(["a"], now="2026-10-22T09:00:00+02:00", **night)[0], ["a"])
+        self.assertEqual(self.recurring(["a"], now="2026-10-21T22:59:00+02:00", **night)[0], ["a"])
+        self.assertEqual(self.recurring(["a"], now="2026-10-21T23:30:00+02:00")[0], ["a"])
+        # Two or more are split, the late window getting the larger half; the early one takes no later chats.
+        resumed, _, state = self.recurring(["a", "b", "c"], now="2026-10-21T23:30:00+02:00", **night)
+        self.assertEqual((resumed, state["window"]["early"]), (["a"], True))
+        self.assertEqual(self.recurring(["b", "c", "d"], state=state, now="2026-10-22T01:00:00+02:00",
+                                        **night)[0], [])
+        self.assertEqual(self.recurring(["b", "c"], state=state, now="2026-10-22T04:30:00+02:00",
+                                        **night)[0], ["b", "c"])
 
     def test_resume_times_follow_tiers_windows_and_nights(self):
         def times(*names, now="2026-10-21T23:00:00+02:00"):
@@ -1687,16 +1685,15 @@ class CodexResumeTests(unittest.TestCase):
             planned = codex_resume.resume_times(chats, datetime.fromisoformat(now), [], None, "09:00")
             return {chat: f"{at:%H.%M}" for chat, at in planned.items()}
 
-        with local_zone("Europe/Oslo"):
-            # A tier that needs two windows must finish before the next tier starts.
-            self.assertEqual(times("a", "b", "c", "d", "!e", now="2026-10-21T12:00:00+02:00"),
-                             {"a": "12.00", "b": "12.00", "c": "12.00", "d": "17.00", "!e": "22.00"})
-            self.assertEqual(times("a"), {"a": "04.00"})
-            self.assertEqual(times("a", "b", "c"), {"a": "23.00", "b": "04.00", "c": "04.00"})
-            self.assertEqual(times("!a", "!!b"), {"!a": "23.00", "!!b": "04.00"})
-            self.assertEqual(times("!a", "!b"), {"!a": "23.00", "!b": "04.00"})
-            # An early window that starts late runs past the late one's start, so the rest wait for morning.
-            self.assertEqual(times("a", "b", now="2026-10-22T01:00:00+02:00"), {"a": "01.00", "b": "09.00"})
+        # A tier that needs two windows must finish before the next tier starts.
+        self.assertEqual(times("a", "b", "c", "d", "!e", now="2026-10-21T12:00:00+02:00"),
+                         {"a": "12.00", "b": "12.00", "c": "12.00", "d": "17.00", "!e": "22.00"})
+        self.assertEqual(times("a"), {"a": "04.00"})
+        self.assertEqual(times("a", "b", "c"), {"a": "23.00", "b": "04.00", "c": "04.00"})
+        self.assertEqual(times("!a", "!!b"), {"!a": "23.00", "!!b": "04.00"})
+        self.assertEqual(times("!a", "!b"), {"!a": "23.00", "!b": "04.00"})
+        # An early window that starts late runs past the late one's start, so the rest wait for morning.
+        self.assertEqual(times("a", "b", now="2026-10-22T01:00:00+02:00"), {"a": "01.00", "b": "09.00"})
 
     def test_usage_is_allowed_only_when_no_limit_is_used_up(self):
         for result, allowed in (
@@ -1777,7 +1774,7 @@ class CodexResumeTests(unittest.TestCase):
             ])
 
     def test_morning_is_stored_with_the_recurring_check_and_shown(self):
-        with tempfile.TemporaryDirectory() as temporary, local_zone("Europe/Oslo"):
+        with tempfile.TemporaryDirectory() as temporary:
             plist_path = Path(temporary) / "recurring.plist"
             with (patch.object(codex_resume, "RECURRING_PLIST_PATH", plist_path),
                   patch.object(codex_resume, "RECURRING_STATE_PATH", Path(temporary) / "recurring.json"),
@@ -2208,7 +2205,7 @@ class CodexResumeTests(unittest.TestCase):
                 self.assertEqual(error.exception.code, 2)
 
     RESETS_AT = "2026-10-20T14:25:00+02:00"
-    SHOWN_RESET = shown(RESETS_AT)
+    SHOWN_RESET = "20.10.2026 kl. 14.25"
 
     def reset_limits(self, five_hour, weekly=40, allowed=True):
         resets = int(datetime.fromisoformat(self.RESETS_AT).timestamp())

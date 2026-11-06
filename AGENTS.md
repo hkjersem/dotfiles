@@ -72,7 +72,7 @@ A dotfiles repository managed by [dotbot](https://github.com/anishathalye/dotbot
 | `scripts/package-manager/pnpm-update.sh` | pnpm wrapper — catalog read/write, `pnpm outdated`, augmentation |
 | `scripts/package-manager/npm-update.sh` | npm wrapper — workspace detection, `npm outdated`, augmentation, reads cooldown from project and global `~/.npmrc` |
 | `scripts/package-manager/bun-update.sh` | bun wrapper — `bun outdated`, augmentation, reads cooldown from `bunfig.toml` or `~/.bunfig.toml` |
-| `scripts/tests/` | Isolated shell-script regression tests, plus tests for scripts shipped by repo-authored skills — run with `python3 -B -m unittest discover -s scripts/tests` |
+| `scripts/tests/` | Isolated shell-script regression tests, plus tests for scripts shipped by repo-authored skills — run with `TZ=UTC python3 -B -m unittest discover -s scripts/tests` |
 | `scripts/lib/clean-targets.sh` | Shared generated-artifact lists and matching patterns for cleanup, clean-copy, repository-audit, and branch-pruning scripts |
 | `scripts/search.py` | Focused ripgrep-backed search with JSON match parsing, shared clean-target exclusions and concise snippets for long lines; --no-clean includes clean targets |
 | `scripts/prune-branches.sh` | Delete remotely confirmed stale branches and clean linked worktrees after [y/N] confirmation; --dry-run previews, --include-merged and --include-detached expand eligibility, --older-than retains recent candidates, --stale-after controls old-branch hints. Never deletes never-pushed branches or repositories without a remote. Aliased as prune_branches. See [docs/prune-branches.md](docs/prune-branches.md). |
