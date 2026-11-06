@@ -252,14 +252,34 @@ _agent_session_expired() {
 # agent's arguments for cplt. REPLY names the new record if a hangup kept it.
 _agent_session_run() {
   emulate -L zsh
-  local launcher=$1 agent=$2 sep id tracked marker follower ret tty fd arg model folder resolved best
+  local launcher=$1 agent=$2 sep id tracked marker follower ret tty fd arg model folder resolved best resuming session_id_arg prev
   shift 2
   sep=${@[(i)--]}
   local -a launcher_args=("${@[1,sep-1]}") agent_args=("${@[sep+1,-1]}")
   local -a context_args
   local -x DOTFILES_AGENT_SESSION= DOTFILES_AGENT_KIND=$agent
 
-  if [[ $agent == copilot && -z $_agent_session_restoring ]]; then
+  # Resume selectors must leave model selection to the saved session.
+  for arg in "${agent_args[@]}"; do
+    case $prev in
+      --session-id)
+        [[ $arg == -* ]] || session_id_arg=$arg
+        prev=
+        continue
+        ;;
+    esac
+    case $arg in
+      -r|--resume|--resume=*|--continue) resuming=1 ;;
+      --session-id) prev=$arg ;;
+      --session-id=*) session_id_arg=${arg#*=} ;;
+      --) break ;;
+    esac
+  done
+  if [[ -n $session_id_arg ]] && _agent_session_is_uuid "$session_id_arg" \
+      && [[ -f $_agent_sessions_copilot/$session_id_arg/events.jsonl ]]; then
+    resuming=1
+  fi
+  if [[ $agent == copilot && -z $_agent_session_restoring && -z $resuming ]]; then
     local DOTFILES_COPILOT_MODEL= model_config=$HOME/.config/dotfiles/copilot-models.zsh
     local -A DOTFILES_COPILOT_MODELS
     if [[ -e $model_config || -L $model_config ]]; then
@@ -284,6 +304,9 @@ _agent_session_run() {
         --model|--model=*) model=; break ;;
       esac
     done
+    # Copilot reapplies --model when /resume switches sessions, but an
+    # organization default model beats COPILOT_MODEL, so --model is the only
+    # way a local default takes effect.
     [[ -z $model ]] || agent_args=(--model "$model" "${agent_args[@]}")
   fi
 

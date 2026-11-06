@@ -381,6 +381,37 @@ class AgentSessionsTest(unittest.TestCase):
             ["cplt", *CONTEXT, "--", "--allow-all", "--continue", "--model=y"],
         ])
 
+    def test_resume_uses_session_model_instead_of_local_default(self):
+        self.model_config("claude-opus-5.5", {self.project: "folder"})
+        self.run_zsh(
+            f"copilot --resume {ID_A}; cplt -- --resume={ID_A}; "
+            "copilot --continue; cplt -- --continue",
+        )
+        self.assertEqual(self.args(), [
+            ["copilot", "--resume", ID_A],
+            ["cplt", *CONTEXT, "--", "--allow-all", f"--resume={ID_A}"],
+            ["copilot", "--continue"],
+            ["cplt", *CONTEXT, "--", "--allow-all", "--continue"],
+        ])
+
+    def test_session_id_uses_model_only_when_starting_a_new_session(self):
+        self.model_config("claude-opus-5.5", {self.project: "folder"})
+        existing = self.tmp / "copilot/session-state" / ID_A
+        existing.mkdir(parents=True)
+        (existing / "events.jsonl").write_text("{}\n")
+        new_cplt_session = str(uuid.uuid4())
+        self.run_zsh(
+            f"cplt -- --session-id={new_cplt_session}; copilot --session-id {ID_B}; "
+            f"copilot --session-id {ID_A}; cplt -- --session-id={ID_A}",
+        )
+        self.assertEqual(self.args(), [
+            ["cplt", *CONTEXT, "--", "--allow-all", "--model", "folder",
+             f"--session-id={new_cplt_session}"],
+            ["copilot", "--model", "folder", "--session-id", ID_B],
+            ["copilot", "--session-id", ID_A],
+            ["cplt", *CONTEXT, "--", "--allow-all", f"--session-id={ID_A}"],
+        ])
+
     def test_folder_models_use_most_specific_parent_and_global_fallback(self):
         nested = self.project / "nested folder"
         nested.mkdir()
@@ -390,18 +421,18 @@ class AgentSessionsTest(unittest.TestCase):
         linked.symlink_to(nested, target_is_directory=True)
         self.model_config(folders={self.project: "parent", str(nested) + "/": "nested"})
         self.run_zsh(
-            'copilot --continue; cplt -- --continue\n'
-            'cd "nested folder"; copilot --continue; cplt -- --continue\n'
-            'cd "$HOME/linked"; copilot --continue\n'
-            'cd "$HOME/project-other"; copilot --continue',
+            'copilot -p test; cplt -- -p test\n'
+            'cd "nested folder"; copilot -p test; cplt -- -p test\n'
+            'cd "$HOME/linked"; copilot -p test\n'
+            'cd "$HOME/project-other"; copilot -p test',
         )
         self.assertEqual(self.args(), [
-            ["copilot", "--model", "parent", "--continue"],
-            ["cplt", *CONTEXT, "--", "--allow-all", "--model", "parent", "--continue"],
-            ["copilot", "--model", "nested", "--continue"],
-            ["cplt", *CONTEXT, "--", "--allow-all", "--model", "nested", "--continue"],
-            ["copilot", "--model", "nested", "--continue"],
-            ["copilot", "--model", "global", "--continue"],
+            ["copilot", "--model", "parent", "-p", "test"],
+            ["cplt", "--", "--allow-all", "--model", "parent", "-p", "test"],
+            ["copilot", "--model", "nested", "-p", "test"],
+            ["cplt", "--", "--allow-all", "--model", "nested", "-p", "test"],
+            ["copilot", "--model", "nested", "-p", "test"],
+            ["copilot", "--model", "global", "-p", "test"],
         ])
 
     def test_folder_model_preserves_explicit_flags_and_other_commands(self):
@@ -420,12 +451,10 @@ class AgentSessionsTest(unittest.TestCase):
 
     def test_empty_folder_model_disables_global_default(self):
         self.model_config(folders={self.project: ""})
-        self.run_zsh(
-            'copilot --continue; cplt -- --continue',
-        )
+        self.run_zsh('copilot -p test; cplt -- -p test')
         self.assertEqual(self.args(), [
-            ["copilot", "--continue"],
-            ["cplt", *CONTEXT, "--", "--allow-all", "--continue"],
+            ["copilot", "-p", "test"],
+            ["cplt", "--", "--allow-all", "-p", "test"],
         ])
 
     def test_local_model_default_does_not_change_claude(self):
@@ -450,17 +479,17 @@ class AgentSessionsTest(unittest.TestCase):
                 expected = (["copilot"] if launcher == "copilot" else
                             ["cplt", "--agent", "copilot", *CONTEXT, "--", "--allow-all"])
                 self.assertEqual(self.args()[-1], [*expected, f"--resume={ID_A}"])
-                os.write(fd, b"copilot --continue\n")
+                os.write(fd, b"copilot -p new\n")
                 self.wait_for_calls(fd, count + 2)
                 self.exit_shell(pid, fd)
                 self.assertEqual(self.args()[-1],
-                                 ["copilot", "--model", "folder", "--continue"])
+                                 ["copilot", "--model", "folder", "-p", "new"])
                 self.assertEqual(self.markers(), [])
 
     def test_model_config_failure_does_not_launch_agent(self):
         self.model_config().write_text('return 1\n')
         result = subprocess.run(
-            ["zsh", "-f", "-c", f"source {MODULE}\ncopilot --continue"],
+            ["zsh", "-f", "-c", f"source {MODULE}\ncopilot"],
             cwd=self.project, env=self.env, capture_output=True, text=True, timeout=30,
         )
         self.assertNotEqual(result.returncode, 0)
@@ -470,25 +499,25 @@ class AgentSessionsTest(unittest.TestCase):
     def test_model_config_is_reloaded_between_launches(self):
         self.model_config("first")
         self.run_zsh(
-            'copilot --continue\n'
+            'copilot -p test\n'
             'print -r -- "DOTFILES_COPILOT_MODEL=second" > '
             '"$HOME/.config/dotfiles/copilot-models.zsh"\n'
-            'copilot --continue'
+            'copilot -p test'
         )
         self.assertEqual(self.args(), [
-            ["copilot", "--model", "first", "--continue"],
-            ["copilot", "--model", "second", "--continue"],
+            ["copilot", "--model", "first", "-p", "test"],
+            ["copilot", "--model", "second", "-p", "test"],
         ])
 
     def test_missing_model_config_ignores_old_shell_settings(self):
         self.run_zsh(
             'typeset -A DOTFILES_COPILOT_MODELS=("$PWD" old-folder)\n'
-            'copilot --continue; cplt -- --continue',
+            'copilot -p test; cplt -- -p test',
             DOTFILES_COPILOT_MODEL="old-default",
         )
         self.assertEqual(self.args(), [
-            ["copilot", "--continue"],
-            ["cplt", *CONTEXT, "--", "--allow-all", "--continue"],
+            ["copilot", "-p", "test"],
+            ["cplt", "--", "--allow-all", "-p", "test"],
         ])
 
     def test_untrackable_runs_get_no_session_id(self):

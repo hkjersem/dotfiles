@@ -475,7 +475,8 @@ writes through a tool's memory command land in this tracked file.
 `zsh/conf.d/agent-sessions.zsh` wraps `copilot`, `claude` and `cplt` when
 they are installed, for Copilot CLI and Claude Code sessions. If a session's
 terminal closes while it runs, such as when VS Code or iTerm2 quits, the next
-terminal opened in the same directory and terminal app resumes it. Switching session with
+terminal opened in the same directory and terminal app resumes it; changing
+into the directory with `cd` does not. Switching session with
 `/new`, `/clear` or `/resume` is followed, so the session in use when the
 terminal closed comes back, even if you only resumed it without writing
 anything. A session you never wrote to cannot be resumed. Several terminals
@@ -488,7 +489,7 @@ without tracking activity, and never while their shell is still running.
 Failed automatic launches keep their record for the next terminal to retry.
 `CPLT_NO_RESUME=1` turns resuming off.
 
-To set a machine-local Copilot model through an explicit CLI flag, create
+To set a machine-local default model for new Copilot sessions, create
 `~/.config/dotfiles/copilot-models.zsh`, using your chosen model's CLI identifier:
 
 ```zsh
@@ -499,18 +500,20 @@ typeset -A DOTFILES_COPILOT_MODELS=(
 )
 ```
 
-Both `copilot` and `cplt` (when running Copilot) read this file on each manual
-launch; changes need no shell restart. The file is sourced as zsh configuration,
+Both `copilot` and `cplt` (when running Copilot) read this file on each new
+session launch; changes need no shell restart. Resume selectors such as
+`--resume`, `--continue` and an existing `--session-id` leave model selection
+to the saved session. The file is sourced as zsh configuration,
 so keep only trusted settings in it. A missing file leaves Copilot's own default
 unchanged; a file that fails to load aborts the launch with an error.
 The map matches the current shell directory and its descendants, with the
 most specific folder winning over `DOTFILES_COPILOT_MODEL`. Paths are literal,
 not patterns; use absolute paths as above. An empty mapped value uses Copilot's
 own default for that folder. Directory flags such as `-C` or `cplt -d` do not
-change which entry matches. These defaults are passed through `--model`,
-including when an organization setting overrides Copilot's native model config.
-Automatic session restoration leaves model selection to the saved session.
-An explicit `--model` takes precedence; subcommands
+change which entry matches. Defaults are passed with `--model`, so they win
+over an organization's default model, which overrides `COPILOT_MODEL`.
+Copilot also reapplies that model when `/resume` switches session in the same
+window. An explicit `--model` takes precedence; subcommands
 and other agents are unchanged. Leave the variable unset or empty to use
 Copilot's own default. `command copilot` and `command cplt` bypass this too.
 
