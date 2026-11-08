@@ -54,7 +54,7 @@ with open(os.environ["AGENT_TEST_LOG"], "a") as log:
     log.write(json.dumps([Path(sys.argv[0]).name, os.getcwd()] + args) + "\\n")
 if os.environ.get("AGENT_TEST_FAIL_EARLY"):
     sys.exit(3)
-session = None
+session = os.environ.get("AGENT_TEST_INITIAL_SESSION")
 for i, arg in enumerate(args):
     if arg in ("--session-id", "--resume") and i + 1 < len(args):
         session = args[i + 1]
@@ -94,7 +94,12 @@ home = Path(os.environ["COPILOT_HOME"])
 process_log = home / "logs" / f"process-{int(time.time() * 1000)}-{os.getpid()}.log"
 for i, target in enumerate(([session] if session else []) + switches):
     if i:
-        time.sleep(1.1)
+        gate = os.environ.get("AGENT_TEST_SWITCH_GATE")
+        if gate:
+            while not Path(gate).exists():
+                time.sleep(0.01)
+        else:
+            time.sleep(1.1)
     target = session if target == "LAUNCHED" else target
     # AGENT_TEST_NO_LOG acts like Copilot versions that do not log this line.
     if not os.environ.get("AGENT_TEST_NO_LOG"):
@@ -943,12 +948,18 @@ _agent_session_follow "{marker}" $$ copilot
         self.assertEqual(self.args()[-1], ["copilot", f"--resume={ID_B}"])
 
     def test_picker_selection_before_first_regular_poll_is_captured(self):
+        gate = self.tmp / "switch-ready"
         pid, fd = self.interactive_shell(self.project, AGENT_TEST_HANG="1",
+                                         AGENT_TEST_INITIAL_SESSION=ID_B,
                                          AGENT_TEST_SWITCH=ID_A,
+                                         AGENT_TEST_SWITCH_GATE=str(gate),
                                          AGENT_SESSION_FOLLOW_INTERVAL="30")
         os.write(fd, b"copilot --resume\n")
         self.wait_for_calls(fd, 1)
+        self.drain(fd, lambda _: self.currents() == [ID_B])
+        gate.touch()
         self.drain(fd, lambda _: (self.tmp / "copilot/session-state" / ID_A / "events.jsonl").exists())
+        self.assertEqual(self.currents(), [ID_B])
         self.hang_up(pid, fd)
 
         pid, fd = self.interactive_shell(self.project)
