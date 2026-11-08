@@ -21,6 +21,7 @@ export FZF_DEFAULT_OPTS=$FZF_DEFAULT_OPTS'
 
 export FZF_CTRL_T_OPTS="
   --select-1 --exit-0
+  --info-command 'printf \"files | %s\" \"\$FZF_INFO\"'
   --preview 'bat -n --color=always {}'
   --bind 'ctrl-/:change-preview-window(down|right|)'
   --bind '?:toggle-preview'"
@@ -28,10 +29,13 @@ export FZF_CTRL_T_OPTS="
 export FZF_ALT_C_OPTS="
   --walker-skip .git,node_modules,target
   --select-1 --exit-0
+  --info-command 'printf \"directories | %s\" \"\$FZF_INFO\"'
   --preview 'tree -C {}'
   --preview-window hidden
   --bind 'ctrl-/:change-preview-window(down|right|)'
   --bind '?:toggle-preview'"
+
+export FZF_CTRL_R_OPTS="--info-command 'printf \"history | %s\" \"\$FZF_INFO\"'"
 
 # Fix ALT-C command for listing dirs (or just use CTRL-T to list files and dirs)
 bindkey "ç" fzf-cd-widget

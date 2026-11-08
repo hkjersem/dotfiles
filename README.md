@@ -198,6 +198,9 @@ pmh                         # Package-manager cheat sheet
 pmh update                  # Search within package-manager commands
 ```
 
+The fzf pickers show `files`, `directories` or `history` beside their match
+counts for Ctrl-T, Alt-C and Ctrl-R respectively.
+
 Zsh completes topic and command names with Tab, including command names after
 a topic (`dotfiles-help packages <Tab>`). `pmh` completes only package-manager
 commands. Each script command's own `--help` remains the reference for all its

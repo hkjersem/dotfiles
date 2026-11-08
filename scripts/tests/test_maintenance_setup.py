@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 import sys
@@ -30,6 +31,43 @@ elif name == "pnpm" and args[:2] == ["config", "set"]:
 elif name == "git" and args[:1] == ["clone"]:
     Path(args[-1]).mkdir(parents=True)
 '''
+
+
+@unittest.skipUnless(shutil.which("zsh"), "zsh is required")
+class FzfConfigTests(unittest.TestCase):
+    def test_widget_labels_preserve_runtime_match_counts(self):
+        with tempfile.TemporaryDirectory(prefix="fzf-config-test-") as directory:
+            home = Path(directory)
+            plugin = home / ".oh-my-zsh/custom/plugins/fzf-tab/fzf-tab.plugin.zsh"
+            plugin.parent.mkdir(parents=True)
+            plugin.write_text("")
+            result = subprocess.run(
+                ["zsh", "-f", "-c", """
+                    fzf() { print -r -- ':'; }
+                    bindkey() { :; }
+                    source "$1"
+                    print -r -- "$FZF_CTRL_T_OPTS"
+                    print -r -- "$FZF_ALT_C_OPTS"
+                    print -r -- "$FZF_CTRL_R_OPTS"
+                """, "test", str(REPO / "zsh/conf.d/fzf.zsh")],
+                env=dict(os.environ, HOME=directory, ZDOTDIR=directory,
+                         FZF_INFO="must not expand while sourcing"),
+                text=True, capture_output=True, timeout=10,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            options = shlex.split(result.stdout)
+            commands = [options[index + 1] for index, option in enumerate(options)
+                        if option == "--info-command"]
+            self.assertEqual(len(commands), 3)
+            for label, command in zip(("files", "directories", "history"), commands):
+                with self.subTest(label=label):
+                    rendered = subprocess.run(
+                        ["/bin/sh", "-c", command],
+                        env=dict(os.environ, FZF_INFO="12/340"),
+                        text=True, capture_output=True, timeout=10,
+                    )
+                    self.assertEqual(rendered.returncode, 0, rendered.stderr)
+                    self.assertEqual(rendered.stdout, f"{label} | 12/340")
 
 
 class MaintenanceSetupTests(unittest.TestCase):
