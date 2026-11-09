@@ -8,9 +8,16 @@ description: Find what a code or configuration change could break outside its ow
 Find what a change breaks somewhere else before it ships. Listing callers is
 the easy part; the job is the breakage a text search does not show.
 
-This is analysis, not editing. Do not change the code under review. Temporary
+This is analysis, not editing. Do not change the code under review or its
+repository state: no stash, checkout, reset, commit, merge, or rebase there,
+even as a probe that would be a no-op, and no `git merge-tree --write-tree`,
+which writes objects into its `.git`. If a probe needs to change Git state or
+simulate a merge, run it in a throwaway clone. Temporary
 probe scripts are fine if they live outside the repository or are deleted
-before you finish.
+before you finish. Put probes and throwaway clones in a fresh `mktemp -d`
+directory, never a fixed shared path you might delete someone else's files
+from, and stop probes leaving caches such as `__pycache__` in the repository
+(for Python, run with `-B`).
 
 ## Scope
 
@@ -85,9 +92,11 @@ Push each claim as far as is cheap, and say where it stopped.
    (`git rev-list --count HEAD..<base>`), read the ones that touch the changed
    code, its callers, or what it depends on. New callers of changed code and
    changed dependencies break only after merging, and neither side's diff shows
-   it. Check for textual conflicts with `git merge-tree --write-tree --name-only
-   HEAD <base>` (Git 2.38 or later). If that command is unavailable, report
-   files changed on both sides since `git merge-base HEAD <base>` as possible
+   it. Check for textual conflicts in a throwaway `git clone --mirror`, which
+   keeps the same ref names, because merge-tree writes objects: `git
+   --git-dir=<mirror> merge-tree --write-tree --name-only <branch> <base>`
+   (Git 2.38 or later). If you cannot clone or the command is unavailable,
+   report files changed on both sides since `git merge-base HEAD <base>` as possible
    conflicts. Either way this covers committed work only, so compare
    uncommitted changes with the upstream commits separately. Do not merge,
    rebase, or check anything out.
@@ -106,6 +115,8 @@ Push each claim as far as is cheap, and say where it stopped.
 - **Safe because of.** The key fact, its evidence level, and the proof. Mark
   it unproven if it stopped below "Executed".
 - **Risks.** Each with mechanism, location, likelihood, cost, and how to check.
+  When you propose a fix, name the concrete change (which encoding, guard, or
+  check, and where), not only the property it should have.
 - **Cleared.** What you checked and why it is fine.
 - **Before merging.** The cheapest test or reproduction that would catch the
   real failure, and whether it is worth keeping as a permanent test. If the
