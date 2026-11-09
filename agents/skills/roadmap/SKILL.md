@@ -19,7 +19,7 @@ Classify the repository's roadmap first, then read only what applies.
 | No roadmap, and the owner asks for one | Read the manual, run `init`, and write the purpose paragraph with the owner. |
 | No roadmap, owner did not ask | Do the task without one; offer a roadmap only if planning keeps getting lost. |
 | Another format, owner asks to migrate | Read [references/repair.md](references/repair.md) and the manual, then migrate. |
-| Another format, owner asks to fix or clean it up | Read [references/repair.md](references/repair.md) only. It is a cleanup, not a migration. |
+| Another format, owner asks to fix or clean it up | Read [references/repair.md](references/repair.md) only. It is a cleanup: do not migrate, but offer migration as a proposal. |
 | Another format, anything else | **Stop reading this skill.** Follow the roadmap's own rules, structure and status names, and the repository's AGENTS.md. Do not run the script; it exits 2 on other formats. |
 
 In every case: listing an item on a roadmap does not authorise implementing it,

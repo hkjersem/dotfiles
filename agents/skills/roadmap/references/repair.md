@@ -65,7 +65,8 @@ Anything that removes content or changes what the roadmap commits to:
 - Moving narrative prose, such as a "current direction" section that has become
   a changelog, out of the index; say where each part would go. Usually that is
   the item it describes (its brief, or its archived brief), keeping only the
-  current direction in the index.
+  current direction in the index. Lasting decisions that span several items,
+  such as architecture choices, go to a design document or ADRs instead.
 - Moving files that are not items out of the brief directory: idea lists become
   one-liners under Ideas or `idea` briefs, and design notes go to the
   documentation.

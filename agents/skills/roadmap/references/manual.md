@@ -115,7 +115,11 @@ the month's end, so a routine done on the 31st falls due on the 28th in
 February and stays on the 28th afterwards. Committed routines get their own
 Routines list; an `idea` or a `when` condition pauses one in Later. Routines
 never become `verifying` or `done`, and nothing can `depends_on` one; stopping
-one means dropping it. A routine can be `blocked` like any item.
+one means dropping it. A routine can be `blocked` like any item. When the owner
+wants an item to wait for a routine's next run, say why it cannot depend on it
+and offer the options: a `when` condition, which moves the item to Later until
+cleared, or a finishable item to depend on. Do not apply one yourself, because
+either changes what is committed.
 
 Nothing runs on a schedule. The roadmap only shows what is due when someone
 runs `ready` or asks what to do next; real scheduling needs cron or similar,
