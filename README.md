@@ -90,6 +90,8 @@ not five hours after each resume. The 24-hour unattended clock resets on
 activity, quota or scheduling barriers, and missed checks—not just because a
 stop is old. The scan covers chats with a catalogue update or session-log
 modification in the last eight days, even when the catalogue date is stale.
+The `--status` list groups chats by continuation time, earliest first, with
+the most recently stopped first within each window and unplanned chats last.
 
 ```sh
 codex-resume --time 15.03 --chat "explore pwa"

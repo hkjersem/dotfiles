@@ -1272,7 +1272,8 @@ def print_stuck_overview(state, morning=None):
         print("  None.")
         return
     rows = []
-    for chat, outcome, at in overview:
+    for chat, outcome, at in sorted(overview, key=lambda entry: (
+            entry[2] is None, entry[2] or now, -entry[0]["stopped"].timestamp())):
         if outcome == "resume":
             plan = "next check"
         elif outcome == "skip":

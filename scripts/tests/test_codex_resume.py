@@ -956,6 +956,25 @@ class CodexResumeTests(unittest.TestCase):
             after_reset, after_reset, after_reset, shown("2026-10-23T01:30:00+02:00"),
             shown("2026-10-23T01:30:00+02:00")))
 
+    def test_status_sorts_by_resume_time_then_newest_stop_with_unplanned_chats_last(self):
+        now = datetime.fromisoformat("2026-11-10T13:55:00+01:00")
+        planned = [
+            ({"id": "later", "name": "later", "stopped": now}, "wait", now + timedelta(hours=5)),
+            ({"id": "unplanned", "name": "unplanned", "stopped": now}, "wait", None),
+            ({"id": "older", "name": "older", "stopped": now - timedelta(days=2)}, "wait",
+             now + timedelta(hours=1)),
+            ({"id": "newer", "name": "newer", "stopped": now - timedelta(days=1)}, "wait",
+             now + timedelta(hours=1)),
+            ({"id": "next", "name": "next", "stopped": now - timedelta(days=3)}, "resume", now),
+        ]
+        with (patch.object(codex_resume, "stuck_overview", return_value=planned),
+              patch.object(codex_resume, "local_now", return_value=now),
+              redirect_stdout(io.StringIO()) as output):
+            codex_resume.print_stuck_overview({"resumed": {}, "sends": []})
+        rows = output.getvalue().splitlines()[-5:]
+        self.assertEqual([row.rsplit("  ", 1)[-1] for row in rows],
+                         ["'next'", "'newer'", "'older'", "'later'", "'unplanned'"])
+
     def test_status_while_a_limit_is_used_up_counts_the_windows_that_pass_marked_chats_by(self):
         now = datetime.fromisoformat("2026-10-22T20:00:00+02:00")
         chats = [{"id": name, "name": name} for name in ("a", "!b")]

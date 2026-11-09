@@ -90,6 +90,10 @@ half, or only the lowest tier when tiers differ, and takes no later chats. The
 rest wait for the 04.00 window. From an hour after that, at 05.00, chats wait
 for the morning, so a new window is free then.
 
+The `--status` list sorts by continuation time, earliest first, then by the
+latest stop within each window. Chats without a planned time come last.
+This only changes the display order, not scheduling.
+
 Only chats with a catalogue update or session-log modification in the last
 eight days are checked; a stale catalogue date does not hide recent activity.
 A chat is left alone
