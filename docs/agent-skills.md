@@ -36,6 +36,67 @@ is one vendor's study, not a general rule.
   `AGENTS.md`, e.g. "Explore the project first, then use the vue skill". Vercel
   found that "explore first" wording worked better than "you must invoke".
 
+## Eval and feedback loop
+
+Each repo-authored skill has `evals/evals.json`: realistic task prompts,
+expected outcomes, and observable assertions. The repository test
+`test_repo_authored_skills_have_valid_eval_cases` checks that every authored
+skill has non-empty, valid evals and that referenced fixture files exist. CI
+checks the catalog's structure only; it does not run an agent or claim that a
+skill passes its evals.
+
+Run evals from the repository root with
+`python3 scripts/skill-evals.py <skill>[:id]`; without arguments it lists the
+cases, and `--dry-run` shows the planned runs. Each case runs in a fresh Copilot
+CLI session (`copilot -p`, memory off) started in a workspace outside this
+repository, so its instructions and docs do not help either run. Some models
+never end a `copilot -p` reply with a question, even when told to, so
+assertions check that nothing is applied without approval rather than how the
+agent asks. A case's
+`setup` field names a script, relative to the skill, that builds a disposable
+repository there; `workdir` names the subfolder to start in. Without `setup`,
+the case's `files` are copied in. One run leaves the skill available rather
+than forcing it, so it also shows whether the skill triggers; the baseline adds
+`--excluded-tools skill`. Use `--runs 3` to see variance and `--model` to check
+another model. The command flags failed runs, skill use in the wrong arm, and
+changes to this repository during the runs.
+
+Add `--grade` to grade the runs afterwards, or grade an earlier results folder
+with `--regrade <folder>`. Each run is copied to a temporary folder
+whose name does not reveal the arm, and a fresh Copilot CLI session with skills
+excluded grades it against the case's assertions: the burden of proof is on the
+assertion, claimed checks must show in the transcript, and an "unchanged"
+assertion fails on any write, even one later undone. The transcript still shows
+whether the skill was loaded, so grading is blind to the folder, not to the
+behaviour. The grade is checked to cover every assertion and saved as
+`grading.json` beside the run, with any feedback on the eval itself. The summary
+compares the two arms per case, which separates a skill improvement from a task
+the agent already handles, and lists assertions every run passed: they do not
+separate the arms and should be tightened or removed. Mark a case
+`"guard": true` when the agent is expected to pass it without the skill, such
+as a trivial change that must not be over-planned; it still guards against
+the skill making things worse, but is left out of that list. Graders use AI
+credits too. `summary.json` records both arms' scores, the gap between them and
+the runner and grader models.
+
+Pin both models when comparing over time (`--model` and `--grader-model`, the
+grader from a different model family than the runner); otherwise a new CLI
+default looks like a skill change. Compare the gap rather than absolute pass
+rates, since it changes less between models. When a pinned model is retired,
+run one baseline with its replacement and compare later runs to that. Record
+assertion
+outcomes and concrete evidence; do not commit transcripts, private
+conversations, or unrelated task data.
+
+Add or revise an eval when a skill-related miss or correction reveals a
+generalizable failure mode. Keep assertions behavioral and discriminating:
+they should expose the failure, not require matching exact prose. For code
+behavior, prefer a regression test; for a repository-wide invariant, prefer an
+automated check or concise instruction. Use a skill for reusable multi-step
+judgment that neither test nor rule can capture. Re-run the focused eval after
+the change, with a no-skill comparison where practical. Defer broader work to
+the roadmap rather than expanding an unrelated task.
+
 ## Skills for dotfiles commands
 
 The `dotfiles` skill lets agents in other repositories run `codex-resume`,

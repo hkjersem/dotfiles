@@ -592,7 +592,13 @@ Skills authored in this repository live under `agents/skills/`.
 `scripts/sync-agent-skills.sh` links them into the runtime canonical directory
 at `~/.agents/skills/` without overwriting name collisions. A skill that ships a
 script is tested from `scripts/tests/`, so the skill directory itself stays
-free of repository-specific tooling.
+free of repository-specific tooling. Every authored skill has prompt evals;
+CI checks their structure, while running and grading them is an explicit agent
+review. `python3 scripts/skill-evals.py` lists the cases, and adding
+`<skill>[:id]` runs them in
+isolated Copilot CLI sessions with and without the skill, and `--grade` has a
+fresh agent grade each run blind to its arm; runs and grading use AI credits.
+See [the eval and feedback loop](docs/agent-skills.md#eval-and-feedback-loop).
 
 `agents/skills/skills.txt` lists third-party global skills installed on every
 machine, and `agents/skills/sources.txt` lists skill directories owned by other
