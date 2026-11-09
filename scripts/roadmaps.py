@@ -38,6 +38,7 @@ import output  # noqa: E402
 import command_help  # noqa: E402
 
 INDEX_FOLDERS = ("docs", "tasks", "planning")
+DUE_SOON_DAYS = 3
 
 
 def config_path() -> str:
@@ -47,6 +48,11 @@ def config_path() -> str:
 def home_short(path: str) -> str:
     home = os.path.expanduser("~")
     return "~" + path[len(home):] if path == home or path.startswith(home + os.sep) else path
+
+
+def display_text(text: str) -> str:
+    """Keep roadmap metadata from emitting terminal controls."""
+    return "".join(char if char.isprintable() else repr(char)[1:-1] for char in text)
 
 
 def conforming(index: str, problems: List[str]) -> bool:
@@ -228,30 +234,31 @@ Exit status: 0 success; 1 errors or no roadmaps in check/sync; 2 usage; 130 Ctrl
                 print(f"  {output.mark('ok')} Valid roadmap: {repo.index} "
                       f"({open_count} open, {len(briefs) - open_count} archived)")
             continue
-        view = rm.Overview(briefs, today)
+        view = rm.Overview(briefs, today, due_soon_days=DUE_SOON_DAYS)
         verifying = [b for b in view.now if b.status == "verifying"]
         active = [b for b in view.now if b.status != "verifying"]
         name = os.path.basename(root)
-        if not (view.due or verifying or active or report.errors):
-            quiet.append(name + (f" ({len(view.can_start)} ready to start)" if view.can_start else ""))
+        if not (view.due or verifying or active or view.can_start or report.errors):
+            quiet.append(name)
             continue
         output.section(f"{name}  {home_short(root)}")
         if view.due:
-            output.subsection(f"Due (overdue or within {rm.DUE_SOON_DAYS} days)")
-            print("\n".join("  " + line for line in view.due))
+            output.subsection(output.paint(f"Due (overdue or within {DUE_SOON_DAYS} days)", "yellow"))
+            print("\n".join("  " + display_text(line) for line in view.due))
         if verifying:
-            output.subsection("Awaiting your acceptance")
-            print("\n".join(f"    {b.slug}: {b.title}" for b in verifying))
+            output.subsection(output.paint("Awaiting your acceptance", "cyan"))
+            print("\n".join(display_text(f"    {b.slug}: {b.title}") for b in verifying))
         if active:
-            output.subsection("In progress")
-            print("\n".join(f"    {b.slug}: {b.title}"
-                            + (f", blocked: {b.get('blocked')}" if b.get("blocked") else "")
+            output.subsection(output.paint("In progress", "cyan"))
+            print("\n".join(display_text(
+                                f"    {b.slug}: {b.title}"
+                                + (f", blocked: {b.get('blocked')}" if b.get("blocked") else ""))
                             for b in active))
-        if view.can_start or report.errors:
-            print()
         if view.can_start:
-            print(f"  {output.mark('info')} Ready to start: {len(view.can_start)}")
+            output.subsection(output.paint(f"Ready to start: {len(view.can_start)}", "dim"))
+            print("\n".join("  " + display_text(line) for line in view.can_start))
         if report.errors:
+            print()
             failed = True
             print(f"  {output.mark('fail')} {len(report.errors)} error(s); "
                   f"run roadmaps --check {shlex.quote(root)}")

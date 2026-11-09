@@ -123,7 +123,7 @@ COMMANDS = (
     Command("audit-repo", "repos", "Triage Git activity, workspaces, tests and dependencies",
             "Read-only; audit, outdated and CI-result checks may use the network.",
             ("audit-repo", "audit-repo --workspaces", "audit-repo --skip-security")),
-    Command("roadmaps", "repos", "Find due, awaiting-acceptance and in-progress roadmap items",
+    Command("roadmaps", "repos", "Find roadmap items due within 3 days, awaiting acceptance, in progress or ready to start",
             "Read-only by default; --sync writes generated indexes for explicitly supplied paths.",
             ("roadmaps", "roadmaps .", "roadmaps --check", "roadmaps --check --strict .",
              "roadmaps --sync ."), True),

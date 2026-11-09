@@ -16,9 +16,13 @@ beside the index, or at the repository root.
 
 The overview and check modes are read-only. No mode fetches, executes project
 code, migrates layouts or changes item statuses. The overview shows overdue
-items and items due within seven days, work awaiting acceptance, active work
-and validation errors. Quiet roadmaps appear under "Nothing needs attention",
-with a count of ready items when present.
+items and items due within three days, work awaiting acceptance, active work,
+ready-to-start items and validation errors. Due headings are yellow, current-work
+headings (including acceptance) cyan, and ready-to-start headings dimmed; pipes and `NO_COLOR`
+keep output plain. Ready-to-start items show their slug and title, even when
+there is no due or active work. Roadmaps without any of these items or errors
+appear under "Nothing needs attention".
+Task rows escape terminal control characters from roadmap metadata.
 
 For detailed validation, use `roadmaps --check .` or `roadmaps . --check`.
 Without paths, `roadmaps --check` checks the configured locations. It uses the
