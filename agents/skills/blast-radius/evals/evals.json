@@ -1,0 +1,60 @@
+{
+  "skill_name": "blast-radius",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "This change adds tenant isolation to our profile cache. Review the supplied change.diff and fixture files and keep them read-only; you may run the tests and temporary probes outside the fixture. What could this change break, and is it safe to merge?",
+      "expected_output": "Trace the changed key through src/session_cache.py, run the supplied tests, and probe the real function with two distinct pairs whose identifiers contain the separator, such as (\"tenant:a\", \"profile\") and (\"tenant\", \"a:profile\"). Show that both produce the same key, then show through the real cache path that one tenant's lookup returns the other tenant's cached profile, so the separator-based encoding breaks tenant isolation and can return another tenant's cached profile. Distinguish the existing passing simple-case test from the reproduced collision, recommend an unambiguous encoding and a permanent regression test, and leave the fixture unchanged.",
+      "files": [
+        "evals/files/tenant-cache/change.diff",
+        "evals/files/tenant-cache/src/__init__.py",
+        "evals/files/tenant-cache/src/cache_keys.py",
+        "evals/files/tenant-cache/src/session_cache.py",
+        "evals/files/tenant-cache/tests/test_cache_keys.py"
+      ],
+      "assertions": [
+        "Follows the key from the changed function into the session-cache consumer.",
+        "Runs the supplied tests and reports their result without treating the simple tenant test as proof of all-pairs uniqueness.",
+        "Executes the real key function for two distinct pairs containing the separator and reports their equal output as a reproduced isolation failure.",
+        "Demonstrates the consequence through the real cache path, such as one tenant's lookup returning another tenant's cached profile, rather than inferring it from equal keys alone.",
+        "Proposes a concrete unambiguous key encoding, such as length-prefixing or escaping each part or keying by a tuple, plus a permanent regression test with IDs that contain the separator.",
+        "Does not modify the fixture or claim an unexecuted check passed."
+      ]
+    },
+    {
+      "id": 2,
+      "setup": "evals/files/branch-guard/setup.sh",
+      "prompt": "Is this branch safe to merge? It just simplifies the branch-name validation.",
+      "expected_output": "With no remote, compare against the local main and say so. Read the history of the removed dash check and cite fix #87: names starting with '-' were parsed by git as options. Find the main-only commit that adds src/webhook.py, which passes branch names from incoming webhooks to checkout, so the refactor's claim that names come from our own UI no longer holds. Prove with the real code that validate_branch now accepts a dash-prefixed name, and in a throwaway repository that checkout then lets git parse it as an option. Conclude it is not safe to merge; keep the check (or pass names after --end-of-options) and add a regression test. Leave the repository unchanged.",
+      "files": [
+        "evals/files/branch-guard/setup.sh"
+      ],
+      "assertions": [
+        "Reads the history of the removed check (git log, log -L or blame) and cites the fix commit's reason: dash-prefixed names were parsed by git as options.",
+        "States that it compared against local main because the repository has no remote.",
+        "Reports the main-only commit adding src/webhook.py, which passes webhook input to checkout, as a caller the branch would expose.",
+        "Runs the real validate_branch with a dash-prefixed name, directly or through a real caller, and reports that it is accepted.",
+        "Demonstrates the consequence in a throwaway repository outside the one under review: a dash-prefixed name passed through the real checkout is interpreted by git as an option.",
+        "Concludes the branch is not safe to merge and recommends keeping the check or using --end-of-options, plus a regression test for dash-prefixed names.",
+        "Leaves the repository under review unchanged: runs no stash, commit, checkout, reset, merge, rebase or git merge-tree --write-tree in it, leaves no generated files such as __pycache__ in it, and its working tree stays clean."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "My dedupe branch only removes duplicate entries from the backup listing, and the tests pass. Can I merge it?",
+      "expected_output": "With no remote, compare against local main and say so. Notice that the branch does more than dedupe: list_backups no longer returns names newest first. Find prune_backups, which deletes everything after the first three entries and so relies on that order. Run the real prune_backups against backups in a temporary directory and show that it now keeps the oldest three and deletes the newest. Explain that the existing test passes because it ignores order. Conclude it is not safe to merge, recommend restoring newest-first order (for example sorted(set(...), reverse=True)) and a regression test that pruning keeps the newest backups, and leave the repository unchanged.",
+      "files": [
+        "evals/files/backup-order/setup.sh"
+      ],
+      "setup": "evals/files/backup-order/setup.sh",
+      "assertions": [
+        "Identifies that the branch also changes list_backups from newest-first to oldest-first order, not only deduplication.",
+        "Finds prune_backups and explains that it keeps the first three entries and therefore depends on newest-first order.",
+        "Runs the real prune_backups against backups in a temporary directory outside the repository and reports that the newest backups are deleted.",
+        "Explains why the passing test is not evidence that pruning still keeps the newest backups.",
+        "Concludes the branch is not safe to merge and recommends restoring newest-first order plus a regression test that pruning keeps the newest backups.",
+        "Leaves the repository under review unchanged: runs no stash, commit, checkout, reset, merge, rebase or git merge-tree --write-tree in it, leaves no generated files such as __pycache__ in it, and its working tree stays clean."
+      ]
+    }
+  ]
+}

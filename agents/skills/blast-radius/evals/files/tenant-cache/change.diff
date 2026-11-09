@@ -1,0 +1,8 @@
+diff --git a/src/cache_keys.py b/src/cache_keys.py
+--- a/src/cache_keys.py
++++ b/src/cache_keys.py
+@@ -1,2 +1,2 @@
+-def cache_key(object_id: str) -> str:
+-    return object_id
++def cache_key(tenant_id: str, object_id: str) -> str:
++    return f"{tenant_id}:{object_id}"

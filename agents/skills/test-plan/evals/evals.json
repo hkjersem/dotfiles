@@ -1,0 +1,57 @@
+{
+  "skill_name": "test-plan",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Before implementing a `--older-than` option for a cleanup command, help me choose the tests. The contract says only generated artifacts may be deleted, containers and volumes are never targets, and unreadable age metadata must abort before deletion. Existing tests cover the age parser but not the command's cleanup boundary. Give me the test plan only; don't write tests.",
+      "expected_output": "A concise plan grounded in the stated contract, covering the age behavior, fail-closed unreadable metadata, and the cleanup boundary through the public command or existing side-effect seam. Name observable results that would expose each violation, avoid tests that merely restate parser internals, and state what the existing parser tests already cover.",
+      "files": [],
+      "assertions": [
+        "Uses the stated cleanup contract as the source of expected behavior.",
+        "Covers unreadable age metadata aborting before any deletion and checks that containers and volumes remain untouched.",
+        "Chooses a focused public or integration boundary for deletion safety rather than relying only on age-parser unit tests.",
+        "Names observable failures and excludes redundant tests of parser internals.",
+        "Presents a plan only and does not implement tests or the option."
+      ],
+      "guard": true
+    },
+    {
+      "id": 2,
+      "prompt": "What tests should I add for a history-retention change? The ticket just says 'keep entries for 30 days'. Each entry has an event timestamp, and the history file has its own modification time. I want a test plan, not implementation.",
+      "expected_output": "Identify that the age source and exact-boundary behavior change expected test results, ask a focused clarification before presenting a settled plan, and avoid silently choosing a timestamp or inclusivity rule. No tests are written.",
+      "files": [],
+      "assertions": [
+        "Recognizes that both the timestamp source and exact-30-day boundary are unresolved behavior decisions.",
+        "Leaves the open behavior for the user to decide, naming the alternatives for each decision, instead of assuming one.",
+        "Does not present tests based on an invented retention rule.",
+        "Does not write tests or implementation."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "I'm renaming the internal Python helper `parse_age` to `parse_duration` in our cleanup scripts with my editor's rename refactoring. Behavior doesn't change, and the existing unit tests call the helper directly. What tests should I plan for this?",
+      "expected_output": "Recognize a mechanical rename that existing tests cover, say so, and stop: plan no new tests. Name the existing checks to run, such as the unit tests that call the helper and a search for the old name in places the refactoring tool may miss (strings, other languages, docs).",
+      "files": [],
+      "assertions": [
+        "Identifies the change as trivial or mechanical and plans no new tests.",
+        "Names existing checks to run, including the helper's unit tests and a search for remaining references to the old name.",
+        "Keeps the answer short instead of producing a full risk-ranked plan."
+      ],
+      "guard": true
+    },
+    {
+      "id": 4,
+      "prompt": "We're adding a --json flag to our disk-report command so a dashboard can read it. The README documents the shape: each node is {\"path\": str, \"bytes\": int, \"children\": [...]}, sizes are in bytes, and the default text output must not change. Existing tests snapshot the text output for two sample directory trees. Give me the test plan only; don't write tests.",
+      "expected_output": "Take expected behavior from the README contract and the text-output requirement. Rely on the existing text snapshots to show the default output is unchanged instead of planning new tests for it. Plan a focused contract test that runs the command with --json on a known sample tree and parses the result, checking keys, types, nesting and byte sizes against values derived independently from the sample tree. Keep the plan short and prioritised, without an end-to-end dashboard test or tests that restate the serializer. Present the plan only.",
+      "files": [],
+      "assertions": [
+        "Uses the README's documented JSON shape and byte units as the source of expected behavior.",
+        "Relies on the existing text snapshot tests as the main check that the default output is unchanged, adding at most one focused check for an interaction the snapshots miss.",
+        "Plans a test through the command's public interface that parses the --json output for a known sample tree and checks keys, types, nesting and byte sizes against independently known values.",
+        "Plans at most six tests, ranked by risk: no end-to-end dashboard test and no tests that only restate the JSON serializer or implementation.",
+        "Presents a plan only and does not write tests or implementation."
+      ],
+      "guard": true
+    }
+  ]
+}

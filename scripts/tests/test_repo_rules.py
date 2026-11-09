@@ -1,5 +1,6 @@
 """Static checks for repository rules that agents have broken before."""
 
+import json
 from pathlib import Path, PurePosixPath
 import re
 import subprocess
@@ -115,6 +116,76 @@ class RepoRulesTests(unittest.TestCase):
                     if not (REPO / target).exists():
                         broken.append(f"{path}:{number}: ~/.dotfiles/{target}")
         self.assert_no_violations(broken, "Skills point to repository files that do not exist")
+
+    def test_repo_authored_skills_have_valid_eval_cases(self):
+        violations = []
+        skill_files = [
+            path for path in repo_files("agents/skills/")
+            if path.name == "SKILL.md" and len(path.parts) == 4
+        ]
+        for skill_file in skill_files:
+            skill_dir = Path(*skill_file.parts[:-1])
+            eval_file = skill_dir / "evals/evals.json"
+            if not (REPO / eval_file).is_file():
+                violations.append(f"{skill_dir}: missing evals/evals.json")
+                continue
+            try:
+                data = json.loads((REPO / eval_file).read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+                violations.append(f"{eval_file}: invalid JSON ({error})")
+                continue
+            if not isinstance(data, dict) or data.get("skill_name") != skill_dir.name:
+                violations.append(f"{eval_file}: skill_name must match {skill_dir.name!r}")
+                continue
+            evals = data.get("evals")
+            if not isinstance(evals, list) or not evals:
+                violations.append(f"{eval_file}: evals must be a non-empty list")
+                continue
+            identifiers = set()
+            for case in evals:
+                if not isinstance(case, dict):
+                    violations.append(f"{eval_file}: each eval must be an object")
+                    continue
+                identifier = case.get("id")
+                valid_identifier = isinstance(identifier, int) and not isinstance(identifier, bool)
+                if not valid_identifier or identifier in identifiers:
+                    violations.append(f"{eval_file}: eval IDs must be unique integers")
+                else:
+                    identifiers.add(identifier)
+                for field in ("prompt", "expected_output"):
+                    if not isinstance(case.get(field), str) or not case[field].strip():
+                        violations.append(f"{eval_file}: eval {identifier!r} needs a non-empty {field}")
+                assertions = case.get("assertions")
+                if not isinstance(assertions, list) or not assertions or any(
+                    not isinstance(assertion, str) or not assertion.strip()
+                    for assertion in assertions
+                ):
+                    violations.append(f"{eval_file}: eval {identifier!r} needs non-empty assertions")
+                if not isinstance(case.get("guard", False), bool):
+                    violations.append(f"{eval_file}: eval {identifier!r} guard must be true or false")
+                for field in ("setup", "workdir"):
+                    value = case.get(field)
+                    if value is None:
+                        continue
+                    relative = Path(value) if isinstance(value, str) and value.strip() else None
+                    if relative is None or relative.is_absolute() or ".." in relative.parts or (
+                        field == "setup" and not (REPO / skill_dir / relative).is_file()
+                    ):
+                        violations.append(
+                            f"{eval_file}: eval {identifier!r} {field} must be a relative path"
+                            + (" to an existing script" if field == "setup" else "")
+                        )
+                files = case.get("files", [])
+                if not isinstance(files, list) or any(not isinstance(path, str) for path in files):
+                    violations.append(f"{eval_file}: eval {identifier!r} files must be paths")
+                    continue
+                for path in files:
+                    relative = Path(path)
+                    if relative.is_absolute() or ".." in relative.parts or not (
+                        REPO / skill_dir / relative
+                    ).is_file():
+                        violations.append(f"{eval_file}: eval {identifier!r} file does not exist: {path}")
+        self.assert_no_violations(violations, "Every authored skill needs usable, local eval cases")
 
 
 class RuleCheckSelfTests(unittest.TestCase):

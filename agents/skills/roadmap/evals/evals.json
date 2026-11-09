@@ -30,15 +30,15 @@
     {
       "id": 3,
       "prompt": "Simulate the response from these facts only; do not inspect or modify a real repository. Describe what you would change directly, what you would propose, and your reply.\n\nThe user says 'cleanup my roadmap'. Repository ./notes-app has tasks/roadmap.md: one 60-row table with columns P#, Task, Status, Notes. Statuses include '✅ done' (41 rows, 12 of them with 'accepted by user 2026-08-02' in Notes), '🚧 in progress' (3 rows), 'todo' (10 rows, 4 linking a full spec in tasks/), and '⏸ parked, likely delete' (6 rows). Four links point to tasks/*.md files that were renamed to tasks/archive/*.md. Below the table, a 'Current direction' section of 40 paragraphs mixes dated changelog entries with two still-relevant architecture decisions. AGENTS.md links to tasks/roadmap.md.",
-      "expected_output": "Classifies the roadmap as foreign and drifting. Directly fixes the four broken links. Proposes, rather than applies, the rest: archiving only the 12 accepted done items, asking about the 29 done items without recorded acceptance, mapping the parked rows, extracting the two architecture decisions to a design document and removing changelog prose, and migrating to ROADMAP.md plus roadmap/ as a separate confirmed step. Proposals are grouped with a recommendation for each so the owner can answer in one reply. Nothing is deleted.",
+      "expected_output": "Classifies the roadmap as foreign and drifting. Directly fixes the four broken links. Archives only the 12 accepted done items, directly or as a proposal. Proposes, rather than applies, the rest: asking about the 29 done items without recorded acceptance, mapping the parked rows, extracting the two architecture decisions to a design document and removing changelog prose, and migrating to ROADMAP.md plus roadmap/ as a separate confirmed step. Proposals are grouped with a recommendation for each so the owner can answer in one reply. Nothing is deleted.",
       "files": [],
       "assertions": [
         "Broken links are fixed directly.",
         "No rows, prose or ideas are deleted without the owner's agreement.",
-        "Done items are split by whether acceptance is recorded; only accepted ones are candidates for direct archiving.",
+        "Only the 12 done rows with recorded acceptance are archived or proposed for archiving; the 29 without it are proposed for confirmation, not archived.",
         "'Parked, likely delete' is treated as ambiguous and proposed, not mapped automatically.",
         "Migration to the skill's layout is proposed as a separate step, not performed.",
-        "The architecture decisions are preserved, with a proposed destination outside the index."
+        "The two architecture decisions are preserved and proposed to move to a named destination outside the index, such as a design document."
       ]
     },
     {
@@ -63,7 +63,8 @@
         "Does not create ROADMAP.md, a roadmap directory or briefs.",
         "Treats the user's statement as acceptance for this item.",
         "Mentions migration at most once and does not perform it."
-      ]
+      ],
+      "guard": true
     },
     {
       "id": 6,
@@ -74,7 +75,7 @@
         "rule-audit.md gets last_done: 2026-10-07 and a dated `## Log` line mentioning the two removed rules.",
         "The routine is not set to done or verifying, and no stale `due` remains.",
         "The reply presents due items first, then rule-preview as startable and imap-idle as having an open decision.",
-        "imap-idle does not get depends_on: [rule-audit]; the reply explains why and offers an alternative for the user to choose.",
+        "imap-idle does not get depends_on: [rule-audit]; the reply explains why and leaves any alternative for the user to choose instead of applying one itself.",
         "The reply does not ask the user to rank items."
       ]
     }
