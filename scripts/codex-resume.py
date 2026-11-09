@@ -37,18 +37,15 @@ continue to up to three chats, newest first, per Codex five-hour usage
 window, queueing them together and following them in one loop. Each usage
 window takes up to three chats of one tier, the number of ! their title starts
 with (read from Codex's thread records, which the catalogue only catches up
-with on restart). Each lower-tier window that passes a marked chat by trims its marks through
-the app server to one ! per waiting tier ahead of it, the running one included, so a chat
-the next window takes keeps one !, but its tier is retained until it resumes or its marks
-are changed by hand. Lower tiers finish before a higher tier starts its own window, even
-when the lower tier needs several windows. Resuming a marked chat removes
-any marks left. A waiting chat planned for a later window than its ! marks show, as when
-a window is full or the night holds it, gets a ~ before them for each window more, so
-the ~ and ! marks together count the windows it waits; the check records which chats
-it added ~ to and removes only those, when the chat resumes, its marks are right again or it
-no longer waits. A ~ never affects scheduling. A chat that waited at the last check but
-no longer stops at a limit, as when continued by hand, loses its ! marks too. With
---morning HH:MM, nights from ten hours before it split waiting
+with on restart). Lower tiers finish before a higher tier starts its own window, even
+when the lower tier needs several windows. Through the app server, the check then sets
+each waiting chat's marks to one ! per window it waits, the one it goes in included, so
+a chat the next window takes shows one !; its tier is retained until it resumes, and marks
+added or removed by hand move it by as many tiers, or to the first when none are left. A
+chat the morning holds back past a window that would otherwise take it also gets a ~,
+which never affects scheduling; the check records which chats it added ~ to and removes
+only those. Resuming a chat removes its marks, and so does no longer stopping at a limit,
+as when continued by hand. With --morning HH:MM, nights from ten hours before it split waiting
 chats between an early window and one five hours before it. When a used-up
 limit resets before the next check, the check waits and sends a minute after
 the reset, as --reset does. When each chat was last resumed is recorded before queueing in
@@ -136,11 +133,11 @@ RECURRING_CHATS = 3
 RECURRING_PERIOD = timedelta(hours=5)
 UNATTENDED_LIMIT = timedelta(hours=24)
 OBSERVATION_SLACK = timedelta(minutes=1)
-# Each leading ! in a chat's title places it in a later tier; a window that passes a marked chat by trims them to
-# one per waiting tier ahead of it, and the chat cannot join that window.
+# Each leading ! in a chat's title places it in a later tier; the check then sets them to one per window a waiting
+# chat waits, and a chat cannot join a window that passed it by.
 TIER_MARKER = "!"
-# Put before the ! marks of a waiting chat once for each window later than they show, as when a window is full
-# or the night holds it; the check removes only those it added itself, and they never affect scheduling.
+# Put before the ! marks of a waiting chat the morning holds back; the check removes only those it added itself,
+# and they never affect scheduling.
 HOLD_MARKER = "~"
 # With --morning, nights run this long before it; a window started this long before it ends by then, and one
 # may start up to LATE_SLACK later.
@@ -1015,7 +1012,10 @@ def with_chat_tiers(chats, passed=None, tiers=None):
         marks = len(chat_marks(chat)[0])
         previous = tiers.get(chat["id"])
         if previous is not None:
-            tier = previous["tier"] if previous["marks"] == marks else marks
+            # Marks added or removed by hand move the tier by as many, as the check's marks count windows; removing
+            # them all makes the chat unmarked.
+            tier = (previous["tier"] if marks == previous["marks"]
+                    else max(0, previous["tier"] + marks - previous["marks"]) if marks else 0)
         else:
             # Older records retain only the last window that removed a mark.
             tier = marks + (chat["id"] in passed)
@@ -1152,21 +1152,24 @@ def resume_times(chats, now, sends, window, morning=None, passed=None, start=Non
     return times
 
 
-def held_chats(chats, now, sends, window, morning=None, passed=None, start=None, limit_end=None):
-    """For each waiting chat planned for a later window than the ! marks on its title show, one for each window
-    before its own, by its id: how many windows later. Chats planned beyond PLAN_HORIZON count as one window
-    after the last planned."""
+def window_marks(chats, now, sends, window, morning=None, passed=None, start=None, limit_end=None):
+    """For each waiting chat not continuing now, by its id: how many windows it waits, the one it goes in
+    included, and whether the morning holds it back past a window that would otherwise take it. Chats planned
+    beyond PLAN_HORIZON count as going in the window after the last planned."""
     times = resume_times(chats, now, sends, window, morning, passed, start, limit_end)
+    # Without the morning, a night's early window is an ordinary one that takes later chats.
+    daytime = times if morning is None else resume_times(chats, now, sends, window and {**window, "early": False},
+                                                         None, passed, start, limit_end)
     moments = sorted({at for at in times.values() if at > now})
-    held = {}
+    marks = {}
     for chat in chats:
         at = times.get(chat["id"])
         if at is not None and at <= now:
             continue
-        later = (moments.index(at) if at is not None else len(moments)) + 1 - len(chat_marks(chat)[0])
-        if later > 0:
-            held[chat["id"]] = later
-    return held
+        free = daytime.get(chat["id"])
+        marks[chat["id"]] = ((moments.index(at) if at is not None else len(moments)) + 1,
+                             free is not None and (at is None or free < at))
+    return marks
 
 
 def chat_activity(chat):
@@ -1432,24 +1435,26 @@ def release_chats(held, waiting, gone):
 
 
 def pass_waiting_chats(state, waiting, chosen, now, forecast=None):
-    """Trim the marks of the waiting marked chats the running window passes by to the tiers still ahead of them,
-    and put a ~ before those planned for a later window than their marks show, as forecast plans from the
-    morning, start and limit_end it holds; without a forecast, the ~ marks are left as they are."""
+    """Mark each waiting chat with one ! per window it waits, the one it goes in included, and a ~ when the
+    morning holds it back, as forecast plans from the morning, start and limit_end it holds. Without a forecast,
+    only trim the marks of the chats the running window passes by to the tiers still ahead of them."""
     remaining = [chat for chat in waiting if chat not in chosen]
     after, passed = pass_by(remaining, [], state["window"], now, state["passed"])
     tiers = remember_chat_tiers(
         [chat for chat in waiting if state["resumed"].get(chat["id"]) is None
          or state["resumed"][chat["id"]] < chat["stopped"]])
     held = state["held"]
-    planned = None if forecast is None else held_chats(after, now, state["sends"], state["window"], passed=passed,
+    planned = {} if forecast is None else window_marks(after, now, state["sends"], state["window"], passed=passed,
                                                        **forecast)
     for before, chat in zip(remaining, after):
         name = without_own_hold(chat, held)
         own = len(chat["name"] or "") - len(name)
-        hold = own if planned is None else planned.get(chat["id"], 0)
-        if not name or name.startswith(("/", HOLD_MARKER)):
-            hold = 0
-        name = HOLD_MARKER * hold + name
+        hand, marks, rest = title_parts(name)
+        windows, hold = len(marks), own
+        if chat["id"] in planned and rest and not rest.startswith("/"):
+            windows, morning_hold = planned[chat["id"]]
+            hold = int(morning_hold and not hand)
+        name = HOLD_MARKER * hold + hand + TIER_MARKER * windows + rest
         trimmed = chat["name"] != before["name"]
         if name == before["name"]:
             if hold:
@@ -1458,15 +1463,15 @@ def pass_waiting_chats(state, waiting, chosen, now, forecast=None):
                 held.discard(chat["id"])
             continue
         renamed = {**chat, "name": name}
-        if rename_chat(before, name, "remove marks from" if trimmed else f"update the {HOLD_MARKER} on"):
+        if rename_chat(before, name, "update the marks on"):
             if chat["id"] in tiers:
-                tiers[chat["id"]]["marks"] = len(chat_marks(renamed)[0])
+                tiers[chat["id"]]["marks"] = windows
             if hold:
                 held.add(chat["id"])
             else:
                 held.discard(chat["id"])
-            reason = ("sits out this window" if trimmed else "waits beyond the window its marks show" if hold
-                      else "goes in the window its marks show")
+            reason = (f"waits {windows} window{'s' if windows != 1 else ''}"
+                      + (", held for the morning" if hold else ""))
             print(f"{log_stamp()}Chat {chat_label(before)} {reason}; renamed it {chat_label(renamed)}.", flush=True)
         elif trimmed:
             del passed[chat["id"]]
@@ -1656,10 +1661,10 @@ def set_up_recurring(minutes, morning=None):
 def recurring_summary(minutes):
     return (f"Every {minutes} minutes, once the usage limits allow it, up to {RECURRING_CHATS} chats on this Mac "
             "that stopped at a usage limit get continue via the Codex queue. Chats whose title starts with "
-            f"{TIER_MARKER} go in later tiers, one tier per 5-hour window. Each window that passes one by "
-            f"leaves one {TIER_MARKER} per tier still ahead of it without changing its tier, and a chat "
-            f"planned for later windows than that shows gets a {HOLD_MARKER} per extra window. Chats a "
-            "temporary error, such as the model being at capacity, stopped continue at the next check.")
+            f"{TIER_MARKER} go in later tiers, one tier per 5-hour window. Waiting chats then show one "
+            f"{TIER_MARKER} per window they wait without changing their tier, and a {HOLD_MARKER} when the "
+            "morning holds them back. Chats a temporary error, such as the model being at capacity, stopped "
+            "continue at the next check.")
 
 
 def night_summary(morning):

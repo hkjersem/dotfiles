@@ -55,32 +55,30 @@ before the next tier starts its own window, even if it takes several windows
 to resume all the lower-tier chats. Different tiers never share a window.
 Newly stopped chats of the running window's tier can join it while it has room.
 
-Each lower-tier window that runs while a marked chat waits trims its `!`, once,
-to one per waiting tier ahead of it, counting the running one. A chat the next
-window takes therefore keeps one `!`: with `Fix`, `!Fix` and `!!Fix` waiting,
-the first window resumes `Fix` and leaves `!Fix` and `!!Fix`, and the second
-resumes `!Fix` and trims `!!Fix` to `!Fix`. With only `Fix` and `!!Fix`
-waiting, the first trims `!!Fix` to `!Fix`. This changes the title, not its retained
-tier: removing marks automatically never lets tiers merge. A chat can't join
-the window that passed it by; this is recorded with the resumes. Marks never
-hold a chat back when no lower tier is waiting. When it is resumed, any marks
-left are removed and its next stop starts a fresh tier. Changing the number of
-leading `!` by hand changes its tier at the next check; other title edits leave
-it unchanged. The app shows a title the check changed after it restarts. Pause
-the check with `--recurring off` to keep a daytime window free.
+Once it has planned the windows, the check sets each waiting chat's marks to
+one `!` per window it waits, the one it goes in included, following the plan
+`--status` shows. A running chat has no marks, and a chat the next window takes
+has one. With the running window full and `Fix` and `!Fix` waiting, they
+become `!Fix` and `!!Fix`; when the next window resumes `Fix`, the other
+becomes `!Fix`. This changes the title, not its retained tier: changing marks
+automatically never lets tiers merge. A chat can't join the window that passed
+it by; this is recorded with the resumes. Marks never hold a chat back when no
+lower tier is waiting. When it is resumed, its marks are removed and its next
+stop starts a fresh tier. A chat that waited at the last check but no longer
+stops at a limit, as when you continued it, also loses its marks; a chat you
+mark while it runs keeps them for its next stop.
 
-A waiting chat planned for a later window than its `!` marks show gets a `~`
-before them for each window more: `~Fix` waits for the next window and
-`~~Fix` for the one after, when full windows or the night hold an unmarked
-chat, and `~!Fix` waits a window longer than its tier suggests. Together, the
-`~` and `!` marks count the windows a chat waits. The plan is the
-one `--status` shows. The `~` marks go when the chat resumes, when its marks
-are right again, or when it no longer waits. A chat that waited at the last
-check but no longer stops at a limit, as when you continued it, also loses its
-`!` marks; a chat you mark while it runs keeps them for its next stop.
-The check records which chats it added `~` to and removes only those, so a `~` you
-write stays and is skipped when counting `!`. A `~` never changes scheduling;
-if you remove one the check added, it adds it back while the chat is held.
+Adding or removing a leading `!` by hand moves a waiting chat as many tiers
+later or earlier at the next check, and removing them all makes it unmarked;
+the check then sets its marks to the windows it waits again. Other title edits
+leave the tier unchanged. The app shows a title the check changed after it
+restarts. Pause the check with `--recurring off` to keep a daytime window free.
+
+With `--morning`, a waiting chat the night holds back past a window that would
+otherwise take it also gets a `~`, as in `~!Fix`. A `~` never changes
+scheduling. The check records which chats it added `~` to and removes only
+those, once the chat is no longer held, so a `~` you write stays and is skipped
+when counting `!`; if you remove one the check added, it adds it back.
 
 Records from before tiers were retained can recover only the last removed `!`.
 The check adds that to the remaining marks when first assigning their tier.
