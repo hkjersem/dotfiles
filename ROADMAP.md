@@ -68,5 +68,6 @@ _Nothing committed._
 <!-- Rejected directions and why, so they are not proposed again. -->
 
 - **dotbot-brew / dotbot-git plugins**: these would make `./install` slow, need network access and rely on small, barely maintained plugins. Setup and update already run `brew bundle` and `install-zsh-plugins.sh`, and keeping links separate from installs is deliberate.
+- **Skill trigger evals**: check that each authored skill's description makes agents load it for the right prompts and not for near-misses; `skill-evals.py` only warns when the with-skill arm skips the skill. When: a skill fails to load in real use, or its description changes.
 - **Shell start-up rewrite (lazy loading, zimfw)**: an interactive shell starts in about 0.1 s with the compinit and zcompile shortcuts in place, so there is little to gain.
 - **direnv (per-directory environment)**: the machine profile covers each Mac and Git identity already switches by directory, so per-project variables add a tool without a current need.

@@ -21,7 +21,8 @@ expect today, and lists changes worth adopting. It covers:
   to `~/.agents/skills`.
 - **Skills:** changes to the skill format and frontmatter, plus updates to the
   repo-authored skills and to the third-party skills listed in
-  `agents/skills/skills.txt`.
+  `agents/skills/skills.txt`. Check the authored-skill eval catalog and follow
+  repeated regressions into a durable safeguard.
 - **Hooks, MCP servers, plugins and custom agents:** new or changed features in
   the agents we use that should be managed here. The repo manages none of them
   yet, so a finding becomes a proposal, not a change.
@@ -63,9 +64,22 @@ expect today, and lists changes worth adopting. It covers:
    it installs updates as well as listing them, as `dotfiles-update` does.
    Record which skills changed.
 6. Run `bash scripts/audit.sh` on this machine to confirm the installed state.
-7. Report findings with proposed changes. Larger changes become separate roadmap
-   items.
-8. Add a dated line to the Log with the outcome.
+7. Review regressions found since the previous run, using task briefs, test/CI
+   outcomes and eval changes. Corrections within a session are left to each
+   agent's own memory features; do not mine conversations or session history
+   here. For a repeated or costly agent miss, choose
+   the narrowest durable fix: a behavior test, repository check/instruction or
+   skill eval. Run `python3 scripts/skill-evals.py <skills> --runs 2 --grade --model <runner>
+   --grader-model <grader>` for every authored skill (it uses AI credits; ask
+   first), with the model pair from the previous eval Log entry. Record each
+   case's gap between the arms and the pair in the Log, and compare the gaps
+   with the previous entry. If a model was retired, pick its replacement and
+   record the new results as the new baseline. Tighten or remove assertions
+   listed under "Passed in every run". Defer larger work to a separate roadmap
+   item.
+8. Report findings and proposed changes.
+9. Add a dated line to the Log with the outcome, including whether a known
+   regression recurred and whether its safeguard prevented it.
 
 ## Log
 
@@ -94,3 +108,20 @@ expect today, and lists changes worth adopting. It covers:
 - 2026-10-20: VS Code reads `~/.copilot/skills`, `~/.claude/skills` and
   `~/.agents/skills` but lists each skill name once (61 unique names from 96
   folders), so the Claude links cause no duplicates. Dropped that check.
+- 2026-11-10: First graded eval baseline, 2 runs per arm, runner
+  `gpt-6.1-sol`, grader `claude-sonnet-5.5`. Gaps are with-skill minus
+  without-skill pass rates in percentage points; `g` marks guard cases.
+  - blast-radius 1–3: +8, +36, +17. dotfiles 1–3: +75, 0g, +80. test-plan
+    1–4: 0g, +62, 0g, 0g. blast-radius 3 and dotfiles 1 predate the last
+    skill edits.
+  - agents-md-repair 1–5: 0, +19, 0, 0, 0. handoff 1–5: +20, +36, +40, +21,
+    +50. repo-audit 1–5: +8, 0, +43, +40, +12.
+  - roadmap 1–6: +40, +30, 0, +12, 0, +40. tidy-diff 1–11: 0, +42, 0, 0, +17,
+    0, +8, +29, +17, 0, 0.
+  - `gpt-6.1-sol` never ends a `copilot -p` reply with a question, so
+    assertions check that a decision is left to the user, not how it is asked.
+  - Fixed: roadmap 6 applied `when:` itself (+40 to +50) and roadmap 3 never
+    offered migration or a home for the architecture decisions (0 to +25);
+    the manual and repair guide now cover both.
+  - The other 12 cases with no gap test restraint or general practice the
+    runner already has, so they are now guards rather than tightened.
