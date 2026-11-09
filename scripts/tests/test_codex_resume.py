@@ -1569,17 +1569,16 @@ class CodexResumeTests(unittest.TestCase):
         self.assertEqual(self.recurring(["a"], state=state)[0], [])
 
     def test_marked_chats_sit_out_a_window_per_mark(self):
-        # Unmarked chats get the first window, which removes one ! from each marked chat it passes by.
+        # Unmarked chats get the first window. Each marked chat keeps one ! per waiting tier ahead of it, the
+        # running one included, so the chats the next window takes keep one.
         resumed, _, state = self.recurring(["!b", "a", "!!c", "d"])
-        self.assertEqual((resumed, self.renames), (["a", "d"], [("!b", "b"), ("!!c", "!c")]))
+        self.assertEqual((resumed, self.renames), (["a", "d"], []))
         self.assertEqual(state["window"], {"start": "2026-10-21T10:00:00+02:00", "tier": 0, "early": False,
                                            "end": "2026-10-21T15:00:00+02:00"})
-        b, c = ("!b", "b"), ("!!c", "!c")
-        # A marked chat that stops meanwhile is passed by too, and cannot join the window that passed it by,
-        # though there is room; each window removes only one ! from a chat.
-        resumed, _, state = self.recurring([b, c, "!g"], state=state, now="2026-10-21T10:15:00+02:00")
-        self.assertEqual((resumed, self.renames), ([], [("!g", "g")]))
-        g = ("!g", "g")
+        b, c, g = "!b", "!!c", "!g"
+        # A marked chat that stops meanwhile cannot join the running window, though there is room.
+        resumed, _, state = self.recurring([b, c, g], state=state, now="2026-10-21T10:15:00+02:00")
+        self.assertEqual((resumed, self.renames), ([], []))
         # A check that cannot read the chats keeps the record of which window passed them by.
         with self.assertRaisesRegex(RuntimeError, "unreadable"):
             self.recurring([], state=state, now="2026-10-21T10:20:00+02:00", scan_error=RuntimeError("unreadable"))
@@ -1588,14 +1587,17 @@ class CodexResumeTests(unittest.TestCase):
         self.assertEqual((resumed, self.renames), (["e"], []))
         # The next window takes them as any other chats, newest first.
         resumed, _, state = self.recurring([b, g, c], state=state, now="2026-10-21T15:30:00+02:00")
-        self.assertEqual((resumed, self.renames), (["!b", "!g"], [("!!c", "c")]))
-        resumed, _, state = self.recurring([("!!c", "c")], state=state, now="2026-10-21T20:30:00+02:00")
+        self.assertEqual((resumed, self.renames), (["!b", "!g"], [("!b", "b"), ("!g", "g"), ("!!c", "!c")]))
+        resumed, _, state = self.recurring([("!!c", "!c")], state=state, now="2026-10-21T20:30:00+02:00")
         self.assertEqual((resumed, state["passed"]), (["!!c"], {}))
+        # Tiers no chat waits in are not counted, so the next window's chat keeps exactly one !.
+        resumed, _, state = self.recurring(["a", "!!!x"])
+        self.assertEqual((resumed, self.renames), (["a"], [("!!!x", "!x")]))
         # A failed rename is retried at the next check, so the chat does not sit out a window it was not counted
         # as passed by.
-        resumed, _, state = self.recurring(["a", "!b"], rename_error=RuntimeError("app server is down"))
+        resumed, _, state = self.recurring(["a", "!!b"], rename_error=RuntimeError("app server is down"))
         self.assertEqual((resumed, state["passed"]), (["a"], {}))
-        self.assertEqual(self.errors, "[stamp] Could not remove a ! from chat '!b': app server is down\n")
+        self.assertEqual(self.errors, "[stamp] Could not remove marks from chat '!!b': app server is down\n")
         # A failed rename is reported without stopping the run, and a window nothing was queued in never starts.
         resumed, _, _ = self.recurring(["!b"], rename_error=RuntimeError("app server is down"))
         self.assertEqual((resumed, self.watch.call_count), (["!b"], 1))
@@ -1621,23 +1623,93 @@ class CodexResumeTests(unittest.TestCase):
         }
         resumed, _, state = self.recurring(["!new", "a", "b", "c"], state=state,
                                             now="2026-10-21T11:04:00+02:00")
-        self.assertEqual((resumed, self.renames), ([], [("!new", "new")]))
-        chats = [("!new", "new"), "a", "b", "c"]
-        for moment, expected in (("13:09", ["a", "b", "c"]), ("14:08", []), ("18:09", ["!new"])):
+        # The full window holds them all, and the marked chat waits two windows, though it shows one !.
+        self.assertEqual((resumed, self.renames),
+                         ([], [("!new", "~!new"), ("a", "~a"), ("b", "~b"), ("c", "~c")]))
+        chats = [("!new", "~!new"), ("a", "~a"), ("b", "~b"), ("c", "~c")]
+        resumed, _, state = self.recurring(chats, state=state, now="2026-10-21T13:09:00+02:00")
+        self.assertEqual((resumed, self.renames),
+                         (["a", "b", "c"], [("a", "a"), ("b", "b"), ("c", "c"), ("!new", "!new")]))
+        chats = ["!new"]
+        for moment, expected in (("14:08", []), ("18:09", ["!new"])):
             resumed, _, state = self.recurring(chats, state=state, now=f"2026-10-21T{moment}:00+02:00")
             self.assertEqual(resumed, expected)
+        self.assertEqual(state["held"], [])
 
     def test_recurring_only_admits_new_chats_of_the_running_windows_tier(self):
         _, _, state = self.recurring(["!b"])
         resumed, _, state = self.recurring(["a", "!c", "!!d"], state=state,
                                             now="2026-10-21T10:15:00+02:00")
         self.assertEqual(resumed, ["!c"])
-        self.assertEqual(self.renames, [("!c", "c"), ("!!d", "!d")])
-        resumed, _, state = self.recurring(["a", ("!!d", "!d")], state=state,
-                                            now="2026-10-21T10:30:00+02:00")
-        self.assertEqual(resumed, [])
-        self.assertEqual(self.recurring(["a", ("!!d", "!d")], state=state,
-                                        now="2026-10-21T15:00:00+02:00")[0], ["a"])
+        self.assertEqual(self.renames, [("!c", "c"), ("a", "~a")])
+        resumed, _, state = self.recurring([("a", "~a"), "!!d"], state=state, now="2026-10-21T10:30:00+02:00")
+        self.assertEqual((resumed, self.renames), ([], []))
+        resumed, _, state = self.recurring([("a", "~a"), "!!d"], state=state, now="2026-10-21T15:00:00+02:00")
+        self.assertEqual((resumed, self.renames), (["a"], [("a", "a"), ("!!d", "!d")]))
+
+    def test_chats_planned_for_a_later_window_than_their_marks_show_get_a_tilde(self):
+        # The fourth unmarked chat waits for the next window, and the marked one for the window after.
+        resumed, output, state = self.recurring(["a", "b", "c", "d", "!e"])
+        self.assertEqual((resumed, self.renames), (["a", "b", "c"], [("d", "~d"), ("!e", "~!e")]))
+        self.assertIn("[stamp] Chat 'd' waits beyond the window its marks show; renamed it '~d'.", output)
+        self.assertEqual(state["held"], ["!e", "d"])
+        # Removing the ~ by hand changes nothing: the next check adds it back.
+        resumed, _, state = self.recurring(["d", ("!e", "~!e")], state=state, now="2026-10-21T10:15:00+02:00")
+        self.assertEqual((resumed, self.renames), ([], [("d", "~d")]))
+        # Once the next window is its own, the ~ goes; resuming removes it with the ! marks.
+        resumed, output, state = self.recurring([("d", "~d"), ("!e", "~!e")], state=state,
+                                                now="2026-10-21T15:00:00+02:00")
+        self.assertEqual((resumed, self.renames), (["d"], [("d", "d"), ("!e", "!e")]))
+        self.assertIn("[stamp] Chat '~!e' goes in the window its marks show; renamed it '!e'.", output)
+        resumed, _, state = self.recurring(["!e"], state=state, now="2026-10-21T20:00:00+02:00")
+        self.assertEqual((resumed, self.renames, state["held"]), (["!e"], [("!e", "e")], []))
+
+    def test_each_window_beyond_the_marks_adds_a_tilde(self):
+        resumed, _, state = self.recurring(["a", "b", "c", "d", "e", "f", "g", "!h"])
+        self.assertEqual((resumed, self.renames),
+                         (["a", "b", "c"], [("d", "~d"), ("e", "~e"), ("f", "~f"), ("g", "~~g"), ("!h", "~~!h")]))
+        # The next window takes three, and every ~ the check added is updated together.
+        chats = [("d", "~d"), ("e", "~e"), ("f", "~f"), ("g", "~~g"), ("!h", "~~!h")]
+        resumed, _, state = self.recurring(chats, state=state, now="2026-10-21T15:00:00+02:00")
+        self.assertEqual((resumed, self.renames[3:]), (["d", "e", "f"], [("g", "~g"), ("!h", "~!h")]))
+
+    def test_chats_continued_by_hand_lose_their_marks(self):
+        _, _, state = self.recurring(["a", "!b", "!!c"])
+        self.assertEqual(self.renames, [])
+        # Chats are named by their id here; !d was marked by hand while running and never waited.
+        names = {"!b": "!b", "!!c": "!c", "!d": "!d"}
+        with patch.object(codex_resume, "chat_names", return_value=names):
+            # !b is continued by hand, so it no longer waits.
+            _, output, state = self.recurring(["!!c"], state=state, now="2026-10-21T10:15:00+02:00")
+            self.assertEqual(self.renames, [("!!c", "!c"), ("!b", "b")])
+            self.assertIn("[stamp] Chat '!b' no longer waits; renamed it 'b'.", output)
+            _, _, state = self.recurring([], state=state, now="2026-10-21T10:30:00+02:00")
+        self.assertEqual(self.renames, [("!!c", "c")])
+
+    def test_chats_held_for_the_morning_get_a_tilde(self):
+        night = {"morning": "09:00", "stopped": "2026-10-21T21:00:00+02:00"}
+        resumed, _, state = self.recurring(["a", "b", "c"], now="2026-10-21T23:30:00+02:00", **night)
+        self.assertEqual((resumed, self.renames), (["a"], [("b", "~b"), ("c", "~c")]))
+        resumed, _, state = self.recurring([("b", "~b"), ("c", "~c")], state=state,
+                                            now="2026-10-22T04:30:00+02:00", **night)
+        self.assertEqual((resumed, self.renames), (["b", "c"], [("b", "b"), ("c", "c")]))
+
+    def test_a_tilde_written_by_hand_is_left_alone_and_does_not_change_the_tier(self):
+        _, _, state = self.recurring(["a", "b", "c"])
+        resumed, _, state = self.recurring(["~x", "~!y"], state=state, now="2026-10-21T10:15:00+02:00")
+        self.assertEqual((resumed, self.renames, state["held"]), ([], [], []))
+        self.assertEqual(state["tiers"]["~!y"]["tier"], 1)
+        resumed, _, state = self.recurring(["~x", "~!y"], state=state, now="2026-10-21T15:00:00+02:00")
+        self.assertEqual((resumed, self.renames), (["~x"], []))
+
+    def test_a_tilde_is_removed_from_chats_that_stop_waiting(self):
+        _, _, state = self.recurring(["a", "b", "c", "d"])
+        self.assertEqual(state["held"], ["d"])
+        # Continued by hand, the chat is no longer stuck.
+        with patch.object(codex_resume, "chat_names", return_value={"d": "~d"}):
+            resumed, output, state = self.recurring([], state=state, now="2026-10-21T10:15:00+02:00")
+        self.assertEqual((resumed, self.renames, state["held"]), ([], [("d", "d")], []))
+        self.assertIn("[stamp] Chat '~d' no longer waits; renamed it 'd'.", output)
 
     def test_same_tier_chats_wait_for_the_limit_reset_when_capacity_is_full(self):
         state = {"resumed": {}, "sends": ["2026-10-21T10:00:00+02:00"]}
@@ -1654,7 +1726,7 @@ class CodexResumeTests(unittest.TestCase):
         resumed, _, state = self.recurring([("!!b", "b"), "!c"], state=state,
                                             now="2026-10-21T10:15:00+02:00")
         self.assertEqual(resumed, [])
-        resumed, _, state = self.recurring([("!!b", "b"), ("!c", "c")], state=state,
+        resumed, _, state = self.recurring([("!!b", "b"), "!c"], state=state,
                                             now="2026-10-21T15:00:00+02:00")
         self.assertEqual(resumed, ["!!b"])
         # A later stop starts a fresh tier, not the one retained before its resume.

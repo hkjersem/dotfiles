@@ -84,7 +84,9 @@ screen is locked. `--recurring` keeps resuming chats a usage limit stopped,
 with `!` in a title to stagger chats behind unmarked ones and `--morning`
 to plan nights. Chats a temporary error stopped, such as the model being at
 capacity, continue at the next check. Each tier gets separate Codex usage
-windows, even after the check removes its `!` marks. The three-chat cap resets with Codex's five-hour limit,
+windows, even after the check trims its `!` marks; the chat the next window
+takes keeps one `!`, and a chat held for later windows than its marks show
+gets a `~` per extra window. The three-chat cap resets with Codex's five-hour limit,
 not five hours after each resume. The 24-hour unattended clock resets on
 activity, quota or scheduling barriers, and missed checks—not just because a
 stop is old. The scan covers chats updated in the last eight days.
