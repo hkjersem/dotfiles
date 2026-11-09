@@ -13,7 +13,9 @@ the largest number of passing tests.
 
 If the change is trivial, such as a rename, copy text, a comment, or a
 mechanical refactor that existing tests already cover, say so, name the
-existing checks to run, and stop. Do not plan new tests for it.
+existing checks to run, and stop. For a rename or move, include a search for
+remaining references to the old name, since tests only cover the callers they
+exercise. Do not plan new tests for it.
 
 ## 2. Get the expected behavior from outside the code
 
@@ -29,7 +31,13 @@ change:
 - Callers and consumers of what you are changing.
 
 If the expected behavior is ambiguous and the answer changes what you would
-test, ask before going further. Otherwise proceed and state your assumptions.
+test, stop and ask before planning. Name each open decision, its plausible
+alternatives, and how each would change the tests. End your reply with a
+direct question the user can answer, such as "Should an expired code be
+rejected or renewed?", without recommending an answer, then wait.
+Do not draft a plan on a guessed rule in the meantime: its tests would encode
+behavior nobody decided, and they pass or fail for the wrong reason. Proceed
+with stated assumptions only when no answer would change what you test.
 
 ## 3. List what must not break
 
@@ -71,6 +79,11 @@ external service, and whether it should block merging.
 
 Drop planned tests that duplicate existing coverage, only restate the
 implementation, or guard against failures that would be cheap and obvious.
+Also drop tests for behavior the change does not introduce or alter, such as
+general hardening of existing error paths or library behavior like escaping;
+list them under Not tested if they deserve a follow-up. Each kept test should
+guard a risk from step 3. If the plan still has more than a handful of tests,
+rank again and cut, since every extra test costs review and maintenance.
 List existing tests the change makes redundant or wrong as candidates for
 removal; do not delete them without asking.
 
@@ -85,7 +98,8 @@ Present the plan before implementing:
   reference independent of the implementation, such as a published contract, a
   known example, or a consumer's requirement.
 - **Not tested**: risks you chose not to cover, and why.
-- **Assumptions**: anything you inferred rather than found.
+- **Assumptions**: anything you inferred rather than found that would not
+  change which tests you plan.
 
 The approved plan settles which interfaces to test through, so do not start a
 second planning round. If a test-driven development skill is available, use it

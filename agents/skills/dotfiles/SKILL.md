@@ -42,3 +42,8 @@ interpreting unexpected output, or when the reference does not cover the case.
   the exact command for the user to run. Never work around it.
 - Quote the command's output. After a failure, say what it changed and what
   it left unchanged, as far as the output shows.
+- When the reference requires approval before a change, end with a direct
+  question the user can answer, such as "Delete these 2 branches and 1
+  worktree?". Saying that approval is required is not asking for it.
+- When explaining a command that deletes or changes things, also say what has
+  to happen before it applies them, as its reference describes.

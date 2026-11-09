@@ -26,8 +26,11 @@ than an earlier one showed.
    For a look without fetching, add `--no-fetch` (read-only, from the last
    fetch), but do not use that output for deletion approval.
 2. Show the user the repositories, the branches it would delete, and the
-   worktree paths it would remove, and ask for approval.
-3. Immediately before applying, repeat step 1. Run the same command with
+   worktree paths it would remove. End your reply with a yes/no question
+   naming what would be deleted, such as "Delete fix/login and its
+   worktree ../app-login?" A closing remark that deletion needs approval
+   leaves the user nothing to answer.
+3. Immediately before applying, repeat step 1. Run the same command
    without `--dry-run`, adding `--yes`, only when its plan matches the approved
    one; otherwise show the new plan and ask again. Never run `--yes` without
    this check. Plain invocation prompts [y/N]; closed input cancels.
