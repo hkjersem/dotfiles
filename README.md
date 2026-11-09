@@ -88,7 +88,8 @@ windows. Waiting chats show one `!` per window they wait, so a chat the next
 window takes has one, and a `~` when `--morning` holds them back. The three-chat cap resets with Codex's five-hour limit,
 not five hours after each resume. The 24-hour unattended clock resets on
 activity, quota or scheduling barriers, and missed checks—not just because a
-stop is old. The scan covers chats updated in the last eight days.
+stop is old. The scan covers chats with a catalogue update or session-log
+modification in the last eight days, even when the catalogue date is stale.
 
 ```sh
 codex-resume --time 15.03 --chat "explore pwa"

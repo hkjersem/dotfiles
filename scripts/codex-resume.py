@@ -919,6 +919,15 @@ def stuck_at_limit(chat, since=None, reasons=(USAGE_LIMIT_ERROR,)):
             "revision": f"{path.name}:{metadata.st_mtime_ns}:{metadata.st_size}"}
 
 
+def recently_active(chat, now):
+    """The catalogue can lag behind turns; a recently written session log keeps the chat in the scan too."""
+    cutoff = now - RECURRING_SCAN
+    if chat["updated"] >= cutoff:
+        return True
+    path = chat_log(chat)
+    return path is not None and path.stat().st_mtime >= cutoff.timestamp()
+
+
 def stuck_chats(now=None, resumed=None):
     """Chats on this Mac stuck at a usage limit, newest first. For a chat in resumed, only stops after it was
     last resumed count; time waiting for quota or its turn does not make a stop ineligible."""
@@ -926,7 +935,7 @@ def stuck_chats(now=None, resumed=None):
     resumed = resumed or {}
     found = []
     for chat in load_chats():
-        if chat["updated"] >= now - RECURRING_SCAN:
+        if recently_active(chat, now):
             stuck = stuck_at_limit(chat, resumed.get(chat["id"]))
             if stuck is not None:
                 found.append({**chat, **stuck})
@@ -941,7 +950,7 @@ def retry_chats(now=None, resumed=None):
     resumed = resumed or {}
     found = []
     for chat in load_chats():
-        if chat["updated"] < now - RECURRING_SCAN:
+        if not recently_active(chat, now):
             continue
         stuck = stuck_at_limit(chat, resumed.get(chat["id"]), RETRY_ERRORS)
         if stuck is None:

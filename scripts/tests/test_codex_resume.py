@@ -877,6 +877,27 @@ class CodexResumeTests(unittest.TestCase):
         self.assertEqual([chat["id"] for chat in found], ["latest", "older", "earlier-limit", "edge"])
         self.assertEqual(found[0]["name"], "latest")
 
+    def test_recent_session_activity_keeps_chats_with_a_stale_catalogue_in_the_scan(self):
+        self.fake_queue([self.queued()])
+        now = datetime.fromisoformat("2026-11-10T13:50:00+01:00")
+        chat = {**self.LOCAL_CHAT, "updated": datetime.fromisoformat("2026-10-28T11:02:14+01:00")}
+        with patch.object(codex_resume, "load_chats", return_value=[chat]):
+            for reason, discover in (("usage_limit_exceeded", codex_resume.stuck_chats),
+                                     ("internal_server_error", RETRY_CHATS)):
+                with self.subTest(reason=reason):
+                    self.write_session_log("task_started", {
+                        "type": "task_complete", "error": {"codex_error_info": reason},
+                    }, stamped=now)
+                    path = codex_resume.chat_log(chat)
+                    for age, expected in ((timedelta(), [chat["id"]]),
+                                          (timedelta(days=8), [chat["id"]]),
+                                          (timedelta(days=8, seconds=1), [])):
+                        written = (now - age).timestamp()
+                        os.utime(path, (written, written))
+                        self.assertEqual([entry["id"] for entry in discover(now)], expected)
+                    os.utime(path, (now.timestamp(), now.timestamp()))
+                    self.assertEqual(discover(now, {chat["id"]: now + timedelta(seconds=1)}), [])
+
     def test_status_lists_stuck_chats_with_what_the_next_check_does(self):
         now = datetime.fromisoformat("2026-10-22T20:00:00+02:00")
         limit = now - timedelta(hours=10)

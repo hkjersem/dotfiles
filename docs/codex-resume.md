@@ -90,7 +90,9 @@ half, or only the lowest tier when tiers differ, and takes no later chats. The
 rest wait for the 04.00 window. From an hour after that, at 05.00, chats wait
 for the morning, so a new window is free then.
 
-Only chats updated in the last eight days are checked. A chat is left alone
+Only chats with a catalogue update or session-log modification in the last
+eight days are checked; a stale catalogue date does not hide recent activity.
+A chat is left alone
 after 24 uninterrupted, observed hours in which quota and a scheduling slot
 were available but the chat had no activity. Its stop date alone does not
 make it too old. Messages, transcript changes, running turns and title or
