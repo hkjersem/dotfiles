@@ -255,8 +255,11 @@ class AgentSessionsTest(unittest.TestCase):
         except (ProcessLookupError, ChildProcessError):
             pass
 
-    def drain(self, fd, done, timeout=10):
-        """Read the pty until done(output) is true; macOS blocks exit on unread output."""
+    def drain(self, fd, done, timeout=30):
+        """Read the pty until done(output) is true; macOS blocks exit on unread output.
+
+        The timeout only bounds a failure; it is generous because parallel test runs slow
+        down interactive shell startup."""
         deadline = time.time() + timeout
         output = b""
         while time.time() < deadline:
@@ -1066,12 +1069,14 @@ _agent_session_follow "{marker}" $$ copilot
                 self.log.unlink()
 
     def check_closed_terminal_under_leader(self, leader):
-        pid, fd = self.interactive_shell(self.project, leader=leader, AGENT_TEST_HANG="1")
+        # The agent must still be running when the terminal closes; a leader that ignores HUP
+        # passes that on, so the agent finishes its hang, kept short to spare the wait.
+        pid, fd = self.interactive_shell(self.project, leader=leader, AGENT_TEST_HANG="1",
+                                         AGENT_TEST_HANG_SECONDS="5")
         os.write(fd, b"copilot\n")
         self.wait_for_calls(fd, 1)
         session_id = self.args()[0][2]
         shell = int(subprocess.run(["pgrep", "-P", str(pid)], capture_output=True, text=True).stdout.split()[0])
-        # A leader that ignores HUP passes that on, so the agent finishes its 30-second hang.
         self.hang_up(pid, fd, timeout=45)
         deadline = time.time() + 10
         while time.time() < deadline:

@@ -116,7 +116,7 @@ class MachineProfileTests(unittest.TestCase):
         return subprocess.run(
             ["/bin/bash", str(self.dotfiles / relative), *args],
             env=env or self.env, cwd=self.root, input="", text=True,
-            capture_output=True, timeout=20,
+            capture_output=True, timeout=60,
         )
 
     def set_profile(self, value):
@@ -130,7 +130,7 @@ class MachineProfileTests(unittest.TestCase):
              '&& source "$1/scripts/lib/tool-updates.sh" && update_installed_tool "$2"',
              "test", str(self.dotfiles), tool],
             env=env or self.env, cwd=self.root, input="", text=True,
-            capture_output=True, timeout=20,
+            capture_output=True, timeout=60,
         )
 
     def calls(self, tool=None):
@@ -151,7 +151,7 @@ class MachineProfileTests(unittest.TestCase):
              "def brew(name); puts name; end; def cask(name); puts name; end; load ARGV[0]",
              str(self.dotfiles / "Brewfile")],
             env=dict(self.env, DOTFILES_PROFILE=profile), text=True,
-            capture_output=True, timeout=20,
+            capture_output=True, timeout=60,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         return result.stdout
