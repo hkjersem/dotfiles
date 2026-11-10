@@ -13,18 +13,39 @@ import unittest
 
 
 REPO = Path(__file__).resolve().parents[2]
+# Every fake tool is this shell wrapper. It logs the call as a NUL-separated record
+# (argument count, tool, arguments) and runs real Git directly for calls the fake
+# does not answer, since starting Python for each of an audit's ~40 Git calls
+# dominated the run time. The routing must match MOCK_TOOL's.
+TOOL_WRAPPER = r'''#!/bin/bash
+name=${0##*/}
+printf '%s\0' "$#" "$name" "$@" >> "$AUDIT_LOG"
+if [ "$name" = git ]; then
+  failure=
+  IFS= read -r failure < "$AUDIT_GIT_FAILURE"
+  verify= head=
+  for arg in "$@"; do
+    [ "$arg" = --verify ] && verify=1
+    [ "$arg" = HEAD ] && head=1
+  done
+  case ${1-} in
+    log|shortlog) ;;
+    *) if [ "${1-}" != "$failure" ] && [ -z "$verify" -o -z "$head" ]; then
+         exec "$AUDIT_REAL_GIT" "$@"
+       fi ;;
+  esac
+fi
+exec "$AUDIT_PYTHON" -I -S "$AUDIT_MOCK" "$name" "$@"
+'''
 MOCK_TOOL = r'''
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 
-name = Path(sys.argv[0]).name
-args = sys.argv[1:]
-state = json.loads(Path(os.environ["AUDIT_STATE"]).read_text())
-with open(os.environ["AUDIT_LOG"], "a") as log:
-    log.write(json.dumps([name, args]) + "\n")
+name, *args = sys.argv[1:]
+with open(os.environ["AUDIT_STATE"]) as stream:
+    state = json.load(stream)
 if name == "git":
     if args and args[0] == state.get("git_failure"):
         sys.exit("Simulated Git read failure")
@@ -67,7 +88,11 @@ class AuditRepoTests(unittest.TestCase):
         self.bin = self.root / "bin"
         self.bin.mkdir()
         self.state_file = self.root / "state.json"
-        self.log = self.root / "calls.jsonl"
+        self.log = self.root / "calls.log"
+        self.git_failure = self.root / "git-failure"
+        self.git_failure.write_text("\n")
+        mock = self.root / "mock_tool.py"
+        mock.write_text(MOCK_TOOL)
         self.state = {
             "commits": ["abc feature", "def feature"],
             "authors": "1 First\n1 Second",
@@ -88,14 +113,15 @@ class AuditRepoTests(unittest.TestCase):
                         GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1",
                         PATH=str(self.bin) + os.pathsep + os.environ["PATH"],
                         AUDIT_STATE=str(self.state_file), AUDIT_LOG=str(self.log),
-                        AUDIT_REAL_GIT=self.git)
+                        AUDIT_GIT_FAILURE=str(self.git_failure), AUDIT_MOCK=str(mock),
+                        AUDIT_PYTHON=sys.executable, AUDIT_REAL_GIT=self.git)
         for key in ("BASH_ENV", "ENV", "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
             self.env.pop(key, None)
         subprocess.run([self.git, "init", "--quiet", str(self.project)],
                        env=self.env, check=True, capture_output=True)
         for name in ("git", "npm", "pnpm", "bun", "yarn", "node", "corepack", "gh"):
             tool = self.bin / name
-            tool.write_text("#!" + sys.executable + "\n" + MOCK_TOOL)
+            tool.write_text(TOOL_WRAPPER)
             tool.chmod(0o755)
 
     def write(self, path, content):
@@ -120,6 +146,7 @@ class AuditRepoTests(unittest.TestCase):
 
     def run_audit(self, *args, cwd=None, stage=True):
         self.state_file.write_text(json.dumps(self.state))
+        self.git_failure.write_text(self.state.get("git_failure", "") + "\n")
         self.log.write_text("")
         if stage:
             subprocess.run([self.git, "-C", str(self.project), "add", "--all"],
@@ -136,8 +163,13 @@ class AuditRepoTests(unittest.TestCase):
         return result
 
     def calls(self, name):
-        return [args for tool, args in map(json.loads, self.log.read_text().splitlines())
-                if tool == name]
+        fields = self.log.read_text().split("\0")[:-1]
+        calls = []
+        while fields:
+            count, tool = int(fields[0]), fields[1]
+            calls.append((tool, fields[2:2 + count]))
+            del fields[:2 + count]
+        return [args for tool, args in calls if tool == name]
 
     def test_workspace_listing_hidden_without_additional_worktrees(self):
         result = self.run_audit("--no-package-manager")
@@ -573,7 +605,7 @@ class AuditRepoTests(unittest.TestCase):
         # A local-only repository never asks GitHub.
         result = self.run_audit("--skip-security")
         self.assertIn("No remote — CI check skipped", result.stdout)
-        self.assertNotIn('"gh"', self.log.read_text())
+        self.assertEqual(self.calls("gh"), [])
         self.add_remote()
         branch = subprocess.check_output([self.git, "-C", str(self.project), "symbolic-ref", "--short", "HEAD"],
                                          env=self.env, text=True).strip()
@@ -599,9 +631,8 @@ class AuditRepoTests(unittest.TestCase):
                 result = self.run_audit("--skip-security")
                 self.assertIn(expected, result.stdout)
                 self.assertEqual(result.returncode, code, result.stdout)
-        calls = [json.loads(line) for line in self.log.read_text().splitlines()]
-        self.assertIn(["gh", ["run", "list", "--branch", branch, "--limit", "20",
-                              "--json", "status,conclusion,createdAt,displayTitle"]], calls)
+        self.assertIn(["run", "list", "--branch", branch, "--limit", "20",
+                       "--json", "status,conclusion,createdAt,displayTitle"], self.calls("gh"))
 
         self.state["gh_run"] = {"stderr": "gh: not logged in", "status": 1}
         result = self.run_audit("--skip-security")
