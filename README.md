@@ -440,13 +440,21 @@ available. Some fixtures also use `/usr/bin/python3`, `/usr/bin/ruby`, and macOS
 copy/archive tools. No Python test packages need to be installed.
 
 ```sh
-TZ=UTC python3 -B -m unittest discover -s scripts/tests
+python3 scripts/run-tests.py
 # One suite:
+python3 scripts/run-tests.py -p 'test_package_updates.py'
+# Serially, with unittest's own output:
 TZ=UTC python3 -B -m unittest discover -s scripts/tests -p 'test_package_updates.py'
 ```
 
-CI runs in UTC, so `TZ=UTC` makes local runs catch tests that only pass in the
-Mac's own time zone. Tests that depend on local time pin their zone themselves.
+`run-tests.py` splits each test file into batches of a few tests and runs them
+in parallel processes, since most test time is spent waiting on the scripts the
+tests start; the full suite takes about 2 minutes instead of 12. It prints
+failing batches in full and counts skipped tests as unverified.
+
+CI runs in UTC, and the runner sets `TZ=UTC` too, so local runs catch tests that
+only pass in the Mac's own time zone. Tests that depend on local time pin their
+zone themselves.
 
 Tests use disposable fixtures and mocked package-manager/network operations,
 not live installations. Shell regressions run under `/bin/bash` to exercise
