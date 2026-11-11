@@ -93,7 +93,7 @@ _agent_session_capture() {
       file=$_agent_sessions_claude/sessions/$pid.json
       [[ -f $file ]] || continue
       [[ $mode == live ]] || _agent_session_process_matches "$pid" "$starts[$pid]" || continue
-      zstat -A mtime +mtime -- "$file" || continue
+      zstat -F %s.%N -A mtime +mtime -- "$file" || continue
       (( mtime[1] >= starts[$pid] && mtime[1] <= sampled )) || continue
       [[ "$(<$file)" =~ '"sessionId": *"([0-9a-f-]+)"' ]] && current=$match[1]
     done
@@ -115,10 +115,10 @@ _agent_session_capture() {
         pid=${${lock:t}#inuse.}
         pid=${pid%.lock}
         [[ $mode == live ]] || _agent_session_process_matches "$pid" "$starts[$pid]" || continue
-        zstat -A mtime +mtime -- "$lock" || continue
+        zstat -F %s.%N -A mtime +mtime -- "$lock" || continue
         (( mtime[1] >= starts[$pid] && mtime[1] <= sampled )) || continue
         for file in $lock ${lock:h}/events.jsonl(N); do
-          zstat -A mtime +mtime -- $file 2>/dev/null || continue
+          zstat -F %s.%N -A mtime +mtime -- $file 2>/dev/null || continue
           (( mtime[1] >= newest )) || continue
           newest=$mtime[1]
           current=${${lock:h}:t}

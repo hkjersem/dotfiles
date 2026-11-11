@@ -817,6 +817,32 @@ class AgentSessionsTest(unittest.TestCase):
         self.open_and_close(self.project)
         self.assertEqual(self.args(), [["copilot", f"--resume={ID_A}"]])
 
+    def test_follower_ignores_lock_or_session_file_changed_after_its_sample(self):
+        for agent in ("copilot", "claude"):
+            for offset, expected in ((0.6, None), (0.1, ID_B)):
+                with self.subTest(agent=agent, offset=offset):
+                    marker = self.write_marker(ID_A, self.project, launcher=agent, agent=agent)
+                    # Same whole second as the sample, so only sub-second times tell them apart.
+                    second = int(time.time()) - 5
+                    self.write_snapshot(marker, 41003, second - 10, second + 0.3)
+                    if agent == "claude":
+                        folder = self.tmp / "claude/sessions"
+                        folder.mkdir(parents=True, exist_ok=True)
+                        files = [folder / "41003.json"]
+                        files[0].write_text(json.dumps({"sessionId": ID_B}))
+                    else:
+                        folder = self.tmp / "copilot/session-state" / ID_B
+                        folder.mkdir(parents=True, exist_ok=True)
+                        files = [folder / "inuse.41003.lock", folder / "events.jsonl"]
+                        files[0].touch()
+                        files[1].write_text("{}\n")
+                    for file in files:
+                        os.utime(file, (second + offset, second + offset))
+                    self.run_zsh(f"_agent_session_capture {marker} {agent} || true")
+                    current = marker.with_name(f"{marker.name}.current")
+                    self.assertEqual(current.read_text().strip() if current.exists() else None, expected)
+                    shutil.rmtree(folder)
+
     def test_reused_pid_log_does_not_replace_recorded_session(self):
         marker = self.write_marker(ID_A, self.project, launcher="copilot", age=180)
         marker.with_name(f"{marker.name}.current").write_text(f"{ID_A}\n")
