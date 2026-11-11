@@ -161,3 +161,4 @@ listed item does not authorise implementing it.
 - Keep ShellCheck at zero warnings (CI enforces it; command in the [README](README.md#testing)). Fix real findings; silence a false positive only on its line, with a reason.
 - For configuration-writing tests, isolate `HOME`, XDG configuration, and Git configuration as needed. Mock package-manager/network calls and destructive operations; do not use live setup, update, defaults, or cleanup commands as automated test runners.
 - Keep success, error, and cancellation cases together. A sandbox- or PTY-related skip is an unverified case, not a passing check; report it without bypassing restrictions.
+- Wait for an observable event, such as a file, output or exit, instead of a fixed sleep or run time, which a busy machine or CI runner can overrun. Keep a pseudo-terminal's follower end open until the child has exited, then read what is left; macOS can drop unread output once it closes.
