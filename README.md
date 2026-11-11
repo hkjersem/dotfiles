@@ -465,7 +465,7 @@ when the environment blocks them; skipped checks are not verified passes.
 
 GitHub Actions runs shell syntax checks, ShellCheck, and the full regression
 suite on an Apple Silicon macOS runner for pushes and pull requests. Apart from
-installing ShellCheck, the workflow uses the runner's preinstalled tools and
+installing ShellCheck and ripgrep, the workflow uses the runner's preinstalled tools and
 does not run machine setup or live updates. Run the same lint locally:
 
 ```sh
