@@ -74,7 +74,7 @@ _agent_session_capture() {
   emulate -L zsh -o extended_glob
   zmodload -F zsh/stat b:zstat
   local marker=$1 agent=$2 mode=${3:-live} pid started sampled=0 stamp lock file current
-  local activity newest=0
+  local activity newest=0 tmp
   local -a locks logs mtime match fallback
   local -A starts
   [[ -f $marker ]] || return 1
@@ -138,9 +138,14 @@ _agent_session_capture() {
   for file in "$marker.current" "$marker.pids" "$_agent_sessions_observed/${marker:t}"; do
     [[ -f $file && $file -nt $activity ]] && activity=$file
   done
-  print -r -- "$current" > "$marker.current.tmp" || return 1
-  [[ $mode == live ]] || touch -r "$activity" "$marker.current.tmp" || return 1
-  command mv -- "$marker.current.tmp" "$marker.current" || return 1
+  # A follower orphaned by a hangup can still be capturing while the next
+  # terminal restores, so each process writes its own temporary file;
+  # a shared one could be emptied after the other had moved it into place.
+  zmodload zsh/system
+  tmp=$marker.current.tmp.$sysparams[pid]
+  print -r -- "$current" > "$tmp" || return 1
+  [[ $mode == live ]] || touch -r "$activity" "$tmp" || return 1
+  command mv -- "$tmp" "$marker.current" || { rm -f -- "$tmp"; return 1 }
   # Observing the selected session hands ownership to the new record.
   [[ -z $_agent_session_resume_claim ]] || rm -f -- "$_agent_session_resume_claim"
   return 0
@@ -234,7 +239,7 @@ _agent_session_hung_up() {
 _agent_session_forget() {
   emulate -L zsh
   local marker=$1
-  rm -f -- "$marker" "$marker.current" "$marker.current.tmp" "$marker.pids" "$marker.pids.tmp" \
+  rm -f -- "$marker" "$marker.current" "$marker.current.tmp" "$marker".current.tmp.<->(N) "$marker.pids" "$marker.pids.tmp" \
     "$_agent_sessions_observed/${marker:t}"
 }
 
@@ -540,7 +545,7 @@ _agent_session_resume() {
     done
     [[ -n $owner ]] && continue
     case ${${file:t}#*.} in
-      current|current.tmp|pids|pids.tmp|<->)
+      current|current.tmp|current.tmp.<->|pids|pids.tmp|<->)
         rm -f -- "$file" "$_agent_sessions_observed/${f:t}"
         ;;
     esac

@@ -843,6 +843,19 @@ class AgentSessionsTest(unittest.TestCase):
                     self.assertEqual(current.read_text().strip() if current.exists() else None, expected)
                     shutil.rmtree(folder)
 
+    def test_concurrent_captures_of_one_record_do_not_collide(self):
+        # A follower orphaned by a hangup can capture while the next terminal restores the record.
+        marker = self.write_marker(ID_A, self.project)
+        current = marker.with_name(f"{marker.name}.current")
+        current.write_text(f"{ID_A}\n")
+        result = self.run_zsh(
+            f"for w in 1 2; do {{ repeat 200 {{ _agent_session_capture {marker} copilot || print -n F }} }} & done\n"
+            "wait"
+        )
+        self.assertEqual(result.stdout, "", result.stderr)
+        self.assertEqual(current.read_text(), f"{ID_A}\n")
+        self.assertEqual(sorted(p.name for p in marker.parent.iterdir()), [marker.name, current.name])
+
     def test_reused_pid_log_does_not_replace_recorded_session(self):
         marker = self.write_marker(ID_A, self.project, launcher="copilot", age=180)
         marker.with_name(f"{marker.name}.current").write_text(f"{ID_A}\n")
