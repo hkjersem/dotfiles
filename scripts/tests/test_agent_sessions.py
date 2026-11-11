@@ -123,7 +123,15 @@ if os.environ.get("AGENT_TEST_HOOK") and (session or switches):
     subprocess.run(["/usr/bin/python3", "-B", os.environ["AGENT_TEST_HOOK"],
                     "--hook", "start", "copilot"],
                    input=json.dumps({"sessionId": target}), text=True, check=True)
-if os.environ.get("AGENT_TEST_HANG"):
+if os.environ.get("AGENT_TEST_HANG") == "until-closed":
+    # Notices the closed terminal itself, for when only a login leader gets the hangup.
+    try:
+        while True:
+            os.write(1, b"\\0")
+            time.sleep(0.05)
+    except OSError:
+        sys.exit(int(os.environ.get("AGENT_TEST_HUP_STATUS", "0")))
+elif os.environ.get("AGENT_TEST_HANG"):
     time.sleep(float(os.environ.get("AGENT_TEST_HANG_SECONDS", "30")))
 if os.environ.get("AGENT_TEST_INPUT"):
     print("AGENT_INPUT_READY", flush=True)
@@ -798,8 +806,8 @@ class AgentSessionsTest(unittest.TestCase):
     def test_closed_restored_session_with_nonzero_exit_has_only_one_record(self):
         self.write_marker(ID_A, self.project, launcher="copilot")
         pid, fd = self.interactive_shell(
-            self.project, leader="trap '' HUP;", AGENT_TEST_HANG="1",
-            AGENT_TEST_HANG_SECONDS="0.6", AGENT_TEST_HUP_STATUS="129", AGENT_TEST_STATUS="129",
+            self.project, leader="trap '' HUP;", AGENT_TEST_HANG="until-closed",
+            AGENT_TEST_HUP_STATUS="129",
         )
         self.wait_for_calls(fd, 1)
         self.drain(fd, lambda _: ID_A in self.currents())
@@ -811,8 +819,12 @@ class AgentSessionsTest(unittest.TestCase):
 
     def test_crash_after_successful_restore_does_not_restore_original_retry_record(self):
         self.write_marker(ID_A, self.project, launcher="copilot")
-        self.open_and_close(self.project, AGENT_TEST_HANG="1",
-                            AGENT_TEST_HANG_SECONDS="0.5", AGENT_TEST_STATUS="3")
+        pid, fd = self.interactive_shell(self.project, AGENT_TEST_INPUT=str(self.tmp / "input"),
+                                         AGENT_TEST_STATUS="3")
+        # A fixed run time races the follower on a busy machine; crash once it has seen the session.
+        self.drain(fd, lambda _: ID_A in self.currents())
+        os.write(fd, b"\n")
+        self.exit_shell(pid, fd)
         self.assertEqual(self.markers(), [])
         self.open_and_close(self.project)
         self.assertEqual(self.args(), [["copilot", f"--resume={ID_A}"]])
