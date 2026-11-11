@@ -193,6 +193,7 @@ class PackageUpdateTests(unittest.TestCase):
 
     def test_actions_diagnostics_print_after_the_progress_line_is_cleared(self):
         import pty
+        import select
         self.actions_fixture()
         self.fixture["outdated_stderr"] = "ERR_PNPM_FETCH_401 Unauthorized"
         self.fixture_path.write_text(json.dumps(self.fixture))
@@ -200,16 +201,15 @@ class PackageUpdateTests(unittest.TestCase):
         process = subprocess.Popen(
             ["/bin/bash", str(REPO / "scripts/package-manager/run.sh"), "--actions", "--dry-run"],
             cwd=self.project, env=self.env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=follower)
-        os.close(follower)
+        # Keep the follower open until the script exits: macOS can drop unread output once it closes.
         chunks = []
         while True:
-            try:
-                chunk = os.read(main, 4096)
-            except OSError:
+            done = process.poll() is not None
+            while select.select([main], [], [], 0 if done else 0.05)[0]:
+                chunks.append(os.read(main, 4096))
+            if done:
                 break
-            if not chunk:
-                break
-            chunks.append(chunk)
+        os.close(follower)
         os.close(main)
         self.assertEqual(process.wait(timeout=30), 0)
         stderr = b"".join(chunks).decode()

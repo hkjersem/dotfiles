@@ -1,6 +1,7 @@
 import io
 import os
 import pty
+import select
 import subprocess
 import sys
 import unittest
@@ -35,16 +36,17 @@ out_summary 2 1 "All good"
 """
 
 
-def read_terminal(main):
+def read_terminal(main, follower, process):
+    """Reads what process wrote to the terminal. The follower end stays open until process
+    has exited, as macOS can drop unread output once its last follower end closes."""
     chunks = []
     while True:
-        try:
-            chunk = os.read(main, 4096)
-        except OSError:
+        done = process.poll() is not None
+        while select.select([main], [], [], 0 if done else 0.05)[0]:
+            chunks.append(os.read(main, 4096))
+        if done:
             break
-        if not chunk:
-            break
-        chunks.append(chunk)
+    os.close(follower)
     os.close(main)
     # The terminal turns each newline into a carriage return and a newline.
     return b"".join(chunks).decode().replace("\r\n", "\n")
@@ -63,8 +65,7 @@ def bash_output(terminal, no_color):
                               check=True).stdout
     main, follower = pty.openpty()
     process = subprocess.Popen(["/bin/bash", "-c", BASH], env=env, stdout=follower)
-    os.close(follower)
-    text = read_terminal(main)
+    text = read_terminal(main, follower, process)
     if process.wait() != 0:
         raise AssertionError(f"bash exited with {process.returncode}")
     return text
@@ -86,8 +87,7 @@ def bash_stderr(stderr_is_terminal, script=STDERR_BASH):
     else:
         process = subprocess.Popen(["/bin/bash", "-c", script], env=env,
                                    stdout=follower, stderr=subprocess.PIPE)
-    os.close(follower)
-    on_terminal = read_terminal(main)
+    on_terminal = read_terminal(main, follower, process)
     piped = ""
     if process.stderr:
         piped = process.stderr.read().decode()
@@ -151,8 +151,7 @@ for kind in folder symlink file; do out_listing_name name "$kind"; printf '\\n';
                         if terminal:
                             main, follower = pty.openpty()
                             process = subprocess.Popen(["/bin/bash", "-c", script], stdout=follower)
-                            os.close(follower)
-                            actual = read_terminal(main)
+                            actual = read_terminal(main, follower, process)
                             self.assertEqual(process.wait(), 0)
                         else:
                             actual = subprocess.run(
