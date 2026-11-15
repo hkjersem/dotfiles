@@ -287,6 +287,27 @@ class MachineProfileTests(unittest.TestCase):
                          [["components", "update", "--quiet"]])
         self.assertEqual(result.stdout.count("Tools & integrations"), 1)
 
+    def test_updater_recovers_when_homebrew_removes_cached_bash(self):
+        self.set_profile("personal")
+        fallback = self.root / "fallback"
+        self.write_mock(fallback / "bash")
+        with (self.bin / "brew").open("a") as mock:
+            mock.write(
+                '\nif args == ["cleanup"]:\n'
+                '    (root / "bin/bash").unlink()\n'
+            )
+
+        result = self.run_script(
+            "macos/update.sh", "--no-defaults",
+            env=dict(self.env, PATH=f"{self.bin}:{fallback}"),
+        )
+
+        self.assertFalse((self.bin / "bash").exists())
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        bash_scripts = [call[1][0] for call in self.calls("bash")]
+        for script in ("install-node.sh", "install-zsh-plugins.sh", "audit.sh"):
+            self.assertIn(str(self.dotfiles / "scripts" / script), bash_scripts)
+
     def test_personal_software_heading_is_shared_by_multiple_updates(self):
         self.set_profile("personal")
         self.install_nav()

@@ -77,6 +77,8 @@ update_command_line_tools || exit 1
 HOMEBREW_NO_ASK=1 brew bundle install --file="$HOME/.dotfiles/Brewfile" --quiet || exit 1
 brew upgrade --yes || exit 1
 brew cleanup
+# Homebrew may remove cached executables, including Bash itself.
+hash -r
 
 header "Zsh"
 # Update Zsh plugins
