@@ -154,5 +154,6 @@ contain verified managed links and empty directories. For most agents that is
 `antigravity/global_skills`. Real content, foreign links, and sibling
 directories such as `skills-backup` are preserved.
 `--quiet` changes output only; it does not disable requested repairs or hide
-warnings as successful checks. Python 3 is required for link-target checks,
+warnings as successful checks. It still names each skill it links, unlinks,
+installs or removes, so `dotfiles-update` shows what changed. Python 3 is required for link-target checks,
 and jq is required for manifest/lockfile verification.

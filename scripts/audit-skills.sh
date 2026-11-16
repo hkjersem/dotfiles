@@ -24,7 +24,7 @@
 #                    for skills whose folder no longer exists on disk.
 #   --clean-stale    Remove listed agent directories only when their skills
 #                    subtrees contain verified managed links and empty dirs.
-#   --quiet          Suppress per-check output; only print a one-line summary.
+#   --quiet          Suppress per-check output; print repairs made and a one-line summary.
 
 # ── CONFIGURATION ─────────────────────────────────────────────────────────────
 
@@ -140,7 +140,12 @@ if ! (return 0 2>/dev/null); then
     ok()   { SECTION_OUTPUT+=("  $OUT_OK $1"); }
     warn() { SECTION_OUTPUT+=("  $OUT_WARN $1"); ((WARNINGS++)); ((SECTION_WARNINGS++)); }
     fail() { SECTION_OUTPUT+=("  $OUT_FAIL $1"); ((ISSUES++)); ((SECTION_ISSUES++)); }
-    fixed() { ok "$1"; CHANGES=$((CHANGES + 1)); }
+    fixed() {
+        ok "$1"
+        CHANGES=$((CHANGES + 1))
+        [ "$QUIET_MODE" -eq 1 ] && echo "  $OUT_OK $1"
+        return 0
+    }
 
     _SKILLS_STANDALONE=1
 else

@@ -50,9 +50,14 @@ info() {
     [ "$QUIET" -eq 1 ] || printf '  %s\n' "$1"
 }
 
+# Changes are reported even with --quiet, so updates name what they linked or removed.
+report() {
+    printf '  %s\n' "$1"
+}
+
 changed() {
     CHANGES=$((CHANGES + 1))
-    info "linked: $1"
+    report "linked: $1"
 }
 
 conflict() {
@@ -85,7 +90,7 @@ sync_authored_skills() {
             info "would unlink: $skill_name (repo-authored skill no longer present)"
         elif rm "$destination"; then
             CHANGES=$((CHANGES + 1))
-            info "unlinked: $skill_name (repo-authored skill no longer present)"
+            report "unlinked: $skill_name (repo-authored skill no longer present)"
         else
             error "could not remove dangling link $skill_name"
         fi
@@ -141,7 +146,7 @@ sync_external_skills() {
                 info "would unlink: $skill_name (external skill no longer present)"
             elif rm "$link"; then
                 CHANGES=$((CHANGES + 1))
-                info "unlinked: $skill_name (external skill no longer present)"
+                report "unlinked: $skill_name (external skill no longer present)"
             else
                 error "could not remove dangling link $skill_name"
             fi
@@ -248,7 +253,7 @@ sync_third_party_skills() {
                     error "$skill_name still exists after uninstall"
                 else
                     CHANGES=$((CHANGES + 1))
-                    info "uninstalled: $skill_name ($source)"
+                    report "uninstalled: $skill_name ($source)"
                 fi
             else
                 error "could not uninstall $skill_name from $source"
@@ -289,6 +294,7 @@ sync_third_party_skills() {
                 && skills_valid_lockfile "$LOCK_FILE" \
                 && [[ "$(jq -r --arg skill "$skill_name" '.skills[$skill].source // empty' "$LOCK_FILE")" == "$source" ]]; then
                 CHANGES=$((CHANGES + 1))
+                report "installed: $skill_name ($source)"
             else
                 error "$skill_name installation could not be verified"
             fi
