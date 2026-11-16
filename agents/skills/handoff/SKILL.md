@@ -85,6 +85,23 @@ in the handoff and identify the missing source. Preserve observed outcomes and
 their provenance without pretending the original artifact remains available.
 Redact secrets and sensitive data from both summaries and references.
 
+### Orchestrated sessions
+
+If this session was orchestrating, delegating work to subagents and checking
+their results, say so plainly so the owner can ask the next session to
+orchestrate again. Point to the lasting tracker the session used, such as a
+todo file or roadmap item, instead of copying it; leave out short-lived
+dispatch state such as waits.
+
+For each delegated task still running or unverified, give its scope, brief,
+reported edits and verification state, and mark it unfinished. Let running
+workers finish or stop them before writing, where the tool allows; if you
+cannot confirm they stopped, record that as a risk to resolve before further
+edits. Agent IDs are not a reliable way back from a new session: do not make
+the next step depend on reaching or waiting for an agent. Tell the next session
+to inspect the files in the task's scope, verify what is there, and finish,
+redo or re-dispatch only what remains.
+
 ## Disposition
 
 End with one explicit overall disposition, while retaining individual task states:

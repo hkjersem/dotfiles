@@ -68,6 +68,23 @@
         "Does not list the merely planned worker/config.go edit as completed.",
         "Uses disposition continue for the authorized inspection/reconciliation and invents no test or production execution permission."
       ]
+    },
+    {
+      "id": 6,
+      "prompt": "You have been orchestrating this session; do not inspect anything beyond this workspace. Lasting follow-ups are tracked in notes/followups.md. State so far: scout S1 (explore, haiku) found that src/import/parse.ts splits rows on every comma, ignoring quotes; you verified this by reading the file. Worker W2 (agent ID w2-7f3a, sonnet) is still running with the brief: 'Make splitRow in src/import/parse.ts respect double-quoted fields; check `npm test -- parse`; no commits.' It has not reported. Nothing has been committed.\n\nThe user now writes: 'My context is running out. Write a handoff for a fresh session. Do not commit.'",
+      "expected_output": "Writes one handoff file in the workspace root. It says the session was orchestrating, points to notes/followups.md instead of copying its items, lists W2's task and brief as unfinished and unverified, flags that W2 may still be writing or must be stopped before further edits, tells the next session to inspect the task's files and redo or re-dispatch rather than reach agent w2-7f3a, keeps S1's finding as verified, and ends with a disposition. Does not change src/import/parse.ts or the existing items in notes/followups.md and does not commit.",
+      "files": [
+        "evals/files/orchestrated/notes/followups.md",
+        "evals/files/orchestrated/src/import/parse.ts"
+      ],
+      "assertions": [
+        "A handoff markdown file exists in the workspace root",
+        "The handoff states plainly that the previous session was orchestrating and that the next session can be asked to orchestrate again",
+        "The handoff names notes/followups.md as the place where lasting follow-ups are kept",
+        "The handoff lists W2's task as unfinished and unverified, does not make the next step depend on reaching agent w2-7f3a, and says to inspect the task's files and then finish, redo or re-dispatch the remaining work",
+        "The handoff says W2 may still be writing to the workspace, or that it was stopped, and that this must be resolved before further edits to src/import/parse.ts",
+        "src/import/parse.ts is unchanged, the existing items in notes/followups.md are unchanged (adding a lasting follow-up is allowed), and nothing was committed"
+      ]
     }
   ]
 }

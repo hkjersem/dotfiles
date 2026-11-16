@@ -169,6 +169,11 @@ should not be lost. Implementing something directly needs no item. If the work
 matches an existing item, update that item; otherwise leave the roadmap alone
 and at most mention a follow-up worth recording.
 
+When the owner asks for a temporary item to track the work in progress, keep
+its follow-ups in it instead of splitting them out. Delete it, rather than
+archive it, only as they instructed and once nothing in it is still open, then
+sync.
+
 - **Add:** write the brief as `idea` unless the owner has said they will do it,
   then sync. Do not ask where it ranks. A thought not yet worth a brief goes
   under Ideas as a one-liner with its entry condition.
