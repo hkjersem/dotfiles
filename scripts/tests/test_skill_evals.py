@@ -12,7 +12,8 @@ REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "scripts" / "skill-evals.py"
 
 # As a run, records its arguments and working directory and writes a transcript that shows a
-# skill call unless skills are excluded (or FAKE_ALWAYS_SKILL imitates a leaking baseline).
+# call to the evaluated skill (named by the run folder, or FAKE_LOADED) unless skills are
+# excluded (or FAKE_ALWAYS_SKILL imitates a leaking baseline).
 # As a grader (assertions.json present), passes every assertion for runs with the skill and only
 # the first without, citing its working folder as evidence. FAKE_BAD_GRADE=count, text or exit
 # makes it return too few entries, entries for other assertions, or a valid file and exit 1.
@@ -40,7 +41,8 @@ json.dump({"expectations": entries[:1] if bad == "count" else entries}, open("gr
   exit 0
 fi
 printf '# run\\n' > "$share"
-if [ "$excluded" = 0 ] || [ -n "${FAKE_ALWAYS_SKILL:-}" ]; then printf '\\n### `skill`\\n' >> "$share"; fi
+loaded=${FAKE_LOADED:-$(pwd | sed -E 's#.*/([^/]+)/eval-[0-9]+/.*#\\1#')}
+if [ "$excluded" = 0 ] || [ -n "${FAKE_ALWAYS_SKILL:-}" ]; then printf '\\n### `skill`\\n\\n**%s**\\n' "$loaded" >> "$share"; fi
 printf '{"tokenDetails": {"output": {"tokenCount": 5}}, "modelMetrics": {"fake-model": {}}}' > "$usage"
 printf 'cwd=%s\\nexcluded=%s\\n' "$PWD" "$excluded"
 ls -R
@@ -94,6 +96,19 @@ class SkillEvalsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("without_skill 1", result.stdout)
         self.assertIn("skill used", result.stdout)
+
+    def test_a_skill_run_must_load_the_evaluated_skill(self):
+        result = self.run_evals("test-plan:3", env=dict(self.env, FAKE_LOADED="handoff"))
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("test-plan not loaded (loaded handoff)", result.stdout)
+
+    def test_a_case_can_require_that_its_skill_stays_unloaded(self):
+        loaded = self.run_evals("orchestrate:17")
+        self.assertEqual(loaded.returncode, 1)
+        self.assertIn("orchestrate loaded where it should not be", loaded.stdout)
+        self.out = self.out.with_name("out-other")
+        other = self.run_evals("orchestrate:17", env=dict(self.env, FAKE_LOADED="handoff"))
+        self.assertEqual(other.returncode, 0, other.stdout + other.stderr)
 
     def test_grade_writes_blind_gradings_and_compares_the_arms(self):
         result = self.run_evals("test-plan:3", "test-plan:2", "--grade")

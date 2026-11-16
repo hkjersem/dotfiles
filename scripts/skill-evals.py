@@ -13,8 +13,9 @@ the arms, lists assertions every run passed outside guard cases (which pin
 behaviour the agent already shows without the skill), and saves summary.json
 with the runner and grader models. --regrade DIR grades an existing results
 folder. Without SKILL arguments it lists the cases and runs nothing. Exits 1
-when a run or grading fails, the skill was not used where available or used
-where excluded, or this repository changed during the runs.
+when a run or grading fails, the skill run did not load the evaluated skill
+(or loaded it in a case marked "expect_skill": false), the baseline loaded any
+skill, or this repository changed during the runs.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ import concurrent.futures
 import datetime
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -39,6 +41,9 @@ ARMS = ("with_skill", "without_skill")
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import output  # noqa: E402
 import command_help  # noqa: E402
+
+
+SKILL_CALL = re.compile(r"^### `skill`\n\n\*\*([^*\n]+)\*\*", re.MULTILINE)
 
 
 def home_short(path: Path) -> str:
@@ -90,7 +95,8 @@ def run_one(skill: str, case: dict, arm: str, number: int, out: Path, model: str
     run = out / skill / f"eval-{case['id']}" / arm / f"run-{number}"
     outputs = run / "outputs"
     outputs.mkdir(parents=True)
-    result = {"skill": skill, "id": case["id"], "arm": arm, "run": number, "ok": False}
+    result = {"skill": skill, "id": case["id"], "arm": arm, "run": number, "ok": False,
+              "expect_skill": case.get("expect_skill", True)}
     try:
         workdir = prepare(skill, case, run / "workspace")
     except (OSError, subprocess.CalledProcessError) as error:
@@ -124,7 +130,8 @@ def run_one(skill: str, case: dict, arm: str, number: int, out: Path, model: str
         transcript = (outputs / "transcript.md").read_text()
     except OSError:
         transcript = ""
-    result["used_skill"] = "\n### `skill`" in transcript
+    result["used_any_skill"] = "\n### `skill`" in transcript
+    result["skills_loaded"] = sorted(set(SKILL_CALL.findall(transcript)))
     result["seconds"] = seconds
     if status not in (0, None):
         result["error"] = f"copilot exited {status}"
@@ -151,6 +158,19 @@ Write grading.json next to assertions.json, not inside outputs/, with exactly th
  "eval_feedback": "optional: an assertion that would pass for a wrong answer, or an
  important outcome no assertion checks; empty when none"}
 Then reply with one line: the number of passed assertions out of the total."""
+
+
+def skill_problem(result: dict) -> str:
+    if result["arm"] == "without_skill":
+        return "skill used" if result.get("used_any_skill") else ""
+    loaded = result.get("skills_loaded", [])
+    others = [name for name in loaded if name != result["skill"]]
+    extra = f" (loaded {', '.join(others)})" if others else ""
+    if result.get("expect_skill", True) and result["skill"] not in loaded:
+        return f"{result['skill']} not loaded{extra}"
+    if not result.get("expect_skill", True) and result["skill"] in loaded:
+        return f"{result['skill']} loaded where it should not be"
+    return ""
 
 
 def run_dirs(out: Path) -> list:
@@ -405,16 +425,15 @@ Examples:
     output.section("Runs")
     for result in sorted(results, key=lambda r: (r["skill"], r["id"], r["arm"], r["run"])):
         label = f"{result['skill']}:{result['id']} {result['arm']} {result['run']}"
-        expected = result["arm"] == "with_skill"
         detail = f"{result.get('seconds', 0)}s"
         if result.get("models"):
             detail += f", {', '.join(result['models'])}"
         if not result["ok"]:
             problems += 1
             output.row("fail", label, result.get("error", "failed"))
-        elif result["used_skill"] != expected:
+        elif problem := skill_problem(result):
             problems += 1
-            output.row("warn", label, detail + (", skill not used" if expected else ", skill used"))
+            output.row("warn", label, f"{detail}, {problem}")
         else:
             output.row("ok", label, detail)
     if changed:

@@ -58,8 +58,10 @@ repository there; `workdir` names the subfolder to start in. Without `setup`,
 the case's `files` are copied in. One run leaves the skill available rather
 than forcing it, so it also shows whether the skill triggers; the baseline adds
 `--excluded-tools skill`. Use `--runs 3` to see variance and `--model` to check
-another model. The command flags failed runs, skill use in the wrong arm, and
-changes to this repository during the runs.
+another model. The command flags failed runs, a skill run that loaded another
+skill instead of the evaluated one, any skill in the baseline, and changes to
+this repository during the runs. Mark a case `"expect_skill": false` when the
+skill must not load, such as a request its description excludes.
 
 Add `--grade` to grade the runs afterwards, or grade an earlier results folder
 with `--regrade <folder>`. Each run is copied to a temporary folder
