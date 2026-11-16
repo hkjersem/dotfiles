@@ -44,6 +44,10 @@ expect today, and lists changes worth adopting. It covers:
      lists in `scripts/audit-skills.sh`
    - skill sync: `scripts/sync-agent-skills.sh`, `agents/skills/`
    - instructions: `agents/AGENTS.md`
+   - subagent mechanics: `agents/skills/orchestrate/references/tools.md`
+     (spawn tools, built-in agent types, per-dispatch model choice, nesting
+     and background behaviour). Update its checked date and recheck its open
+     questions.
 4. Check what other installers write and where, and that nothing shows twice:
    - `npx skills`: which agent folders it links into for `-g` installs, and
      whether it still treats `~/.agents/skills` as the canonical store.
@@ -125,3 +129,12 @@ expect today, and lists changes worth adopting. It covers:
     the manual and repair guide now cover both.
   - The other 12 cases with no gap test restraint or general practice the
     runner already has, so they are now guards rather than tightened.
+- 2026-11-16: Baseline for the new `orchestrate` skill (11 cases; 6
+  guards). Runner `gpt-6.1-sol`, grader `claude-sonnet-5.5`, 3 runs: cases
+  2, 3, 7, 8, 11: +44, 0, -7, +25, +8 after fixes (8 and 11 re-run).
+  Runner `claude-sonnet-5.5`, grader `gpt-6.1-sol`, 2 runs: +25, 0, +30g,
+  +12, +25. Copilot's own system prompt already teaches delegation, so the
+  no-skill arm is strong there; Claude Code and Codex were not measured.
+  - Fixed during the baseline: the skill now names the injected instruction
+    to the user, names concrete models, and gives workers a check of their
+    own.
