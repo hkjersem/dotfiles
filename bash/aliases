@@ -117,19 +117,19 @@ alias rebootuserspace="sudo launchctl reboot userspace"
 alias path='echo -e ${PATH//:/\\n}'
 
 # Install a Node version via fnm and carry over global packages
-# Usage: install_node [version]  e.g. install_node 20, install_node lts
-install_node() { bash "$HOME/.dotfiles/scripts/install-node.sh" "$@"; }
+# Usage: install-node [version]  e.g. install-node 20, install-node lts
+install-node() { bash "$HOME/.dotfiles/scripts/install-node.sh" "$@"; }
 
 # Diff global npm packages between two node versions
-# Usage: npm_globals_diff <version_a> [version_b]  (version_b defaults to current node)
+# Usage: npm-globals-diff <version_a> [version_b]  (version_b defaults to current node)
 #   Versions can be a major (22), full string (v22.22.0), or lts
-#   e.g. npm_globals_diff 22, npm_globals_diff lts 22
-npm_globals_diff() { bash "$HOME/.dotfiles/scripts/npm-globals-diff.sh" "$@"; }
+#   e.g. npm-globals-diff 22, npm-globals-diff lts 22
+npm-globals-diff() { bash "$HOME/.dotfiles/scripts/npm-globals-diff.sh" "$@"; }
 
 # Check days since release for an npm package (last 10 versions by default)
-# Usage: npm_release_age <package>[@version] [--all|-a] [--date|-d] [--beta|-b]
-#   e.g. npm_release_age react, npm_release_age react@19 --all, npm_release_age react@19.1.1
-npm_release_age() { bash "$HOME/.dotfiles/scripts/npm-release-age.sh" "$@"; }
+# Usage: npm-release-age <package>[@version] [--all|-a] [--date|-d] [--beta|-b]
+#   e.g. npm-release-age react, npm-release-age react@19 --all, npm-release-age react@19.1.1
+npm-release-age() { bash "$HOME/.dotfiles/scripts/npm-release-age.sh" "$@"; }
 
 # Detects bun, pnpm or npm for the current project (packageManager field → lockfile)
 _detect_pm() { bash "$HOME/.dotfiles/scripts/package-manager/_detect-pm.sh"; }
@@ -202,8 +202,8 @@ nosync() { python3 "$HOME/.dotfiles/scripts/nosync.py" "$@"; }
 wipe() { bash "$HOME/.dotfiles/scripts/wipe.sh" "$@"; }
 # Read-only folder reports: files <count|large|changed|sizes|empty|types|duplicates> [-r] [path]
 files() { python3 "$HOME/.dotfiles/scripts/files.py" "$@"; }
-clean_caches() { python3 "$HOME/.dotfiles/scripts/clean-caches.py" "$@"; }
-clean_docker() { python3 "$HOME/.dotfiles/scripts/clean-docker.py" "$@"; }
+clean-caches() { python3 "$HOME/.dotfiles/scripts/clean-caches.py" "$@"; }
+clean-docker() { python3 "$HOME/.dotfiles/scripts/clean-docker.py" "$@"; }
 
 
 # Repository triage — Git signals for all languages; extra checks for JS/TS
@@ -211,13 +211,13 @@ clean_docker() { python3 "$HOME/.dotfiles/scripts/clean-docker.py" "$@"; }
 audit-repo() { bash "$HOME/.dotfiles/scripts/audit-repo.sh" "$@"; }
 
 # Preview stale branches and clean worktrees, then ask before deleting (--dry-run skips the prompt)
-# Usage: prune_branches [--dry-run | --yes] [--no-fetch] [--depth N] [path]
-prune_branches() { bash "$HOME/.dotfiles/scripts/prune-branches.sh" "$@"; }
+# Usage: prune-branches [--dry-run | --yes] [--no-fetch] [--depth N] [path]
+prune-branches() { bash "$HOME/.dotfiles/scripts/prune-branches.sh" "$@"; }
 
 # Delete all known build artifacts and dependency folders from the current directory.
-# Usage: wipe_clean
-wipe_clean() { bash "$HOME/.dotfiles/scripts/wipe-clean.sh" "$@"; }
+# Usage: wipe-clean
+wipe-clean() { bash "$HOME/.dotfiles/scripts/wipe-clean.sh" "$@"; }
 
 # Clone-copy the current directory without known build artifacts.
-# Usage: copy_clean [--ignore-git] [--keep-name] [--zip] [source] [destination]
-copy_clean() { bash "$HOME/.dotfiles/scripts/copy-clean.sh" "$@"; }
+# Usage: copy-clean [--ignore-git] [--keep-name] [--zip] [source] [destination]
+copy-clean() { bash "$HOME/.dotfiles/scripts/copy-clean.sh" "$@"; }

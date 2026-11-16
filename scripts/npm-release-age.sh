@@ -17,8 +17,8 @@ for arg in "$@"; do
         --date|-d)  SORT_BY_DATE=true ;;
         --beta|-b)  SHOW_BETA=true ;;
         --help|-h)
-            python3 "$(dirname "${BASH_SOURCE[0]}")/dotfiles-help.py" --render-help npm_release_age <<'EOF'
-Usage: npm_release_age <package>[@version] [--all] [--date] [--beta]
+            python3 "$(dirname "${BASH_SOURCE[0]}")/dotfiles-help.py" --render-help npm-release-age <<'EOF'
+Usage: npm-release-age <package>[@version] [--all] [--date] [--beta]
 
 {summary}
 

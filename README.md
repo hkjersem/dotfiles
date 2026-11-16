@@ -271,10 +271,10 @@ and `npx` in projects with a `packageManager` field. See
 workspaces, local libraries, and how `dotfiles-update` manages package-manager
 and Node versions.
 
-Related Node helpers: `install_node [version]` installs through fnm, migrates
+Related Node helpers: `install-node [version]` installs through fnm, migrates
 global packages, and installs and enables corepack if the Node version does not
-bundle it; `npm_globals_diff <version_a> [version_b]` compares globals;
-`npm_release_age <package>[@version]` shows release ages.
+bundle it; `npm-globals-diff <version_a> [version_b]` compares globals;
+`npm-release-age <package>[@version]` shows release ages.
 
 ## Inspect files and folders
 
@@ -307,12 +307,12 @@ behaviour, leftover matching and examples.
 
 ## Clean and copy projects
 
-`wipe_clean` removes generated project artifacts after a preview and confirmation.
-`copy_clean` copies or ZIPs a project without those artifacts.
+`wipe-clean` removes generated project artifacts after a preview and confirmation.
+`copy-clean` copies or ZIPs a project without those artifacts.
 
 ```sh
-wipe_clean --dry-run --sort size
-copy_clean ../project-copy
+wipe-clean --dry-run --sort size
+copy-clean ../project-copy
 ```
 
 See [project cleanup and copying](docs/cleanup.md#clean-and-copy-projects)
@@ -320,13 +320,13 @@ for age filters, exclusions, ZIP options and space measurements.
 
 ## Clean Docker storage
 
-`clean_docker` inspects storage or cleans explicitly selected build cache and
+`clean-docker` inspects storage or cleans explicitly selected build cache and
 untagged dangling images after confirmation. Containers, volumes and tagged
 images are kept.
 
 ```sh
-clean_docker --inspect
-clean_docker --only build-cache --older-than 30d --dry-run
+clean-docker --inspect
+clean-docker --only build-cache --older-than 30d --dry-run
 ```
 
 See [Docker cleanup](docs/cleanup.md#clean-docker-storage) for context and
@@ -334,13 +334,13 @@ builder selection, age filtering and safety boundaries.
 
 ## Clean global caches
 
-`clean_caches` previews global developer caches. Cleaning requires explicit
+`clean-caches` previews global developer caches. Cleaning requires explicit
 `--only` selection and confirmation; `--deep` permits expensive cleaners.
 Sizes show disk usage, not guaranteed savings.
 
 ```sh
-clean_caches --dry-run --sort size
-clean_caches --only uv,pip
+clean-caches --dry-run --sort size
+clean-caches --only uv,pip
 ```
 
 See [global cache cleanup](docs/cleanup.md#clean-global-caches) for tool discovery,
@@ -348,18 +348,18 @@ report-only storage, orphan cleanup and per-tool safety boundaries.
 
 ## Prune stale branches
 
-`prune_branches` finds local branches whose upstream branch was deleted on its
+`prune-branches` finds local branches whose upstream branch was deleted on its
 remote, typically after a pull request was merged. Inside a repository or
 worktree it checks that repository; elsewhere it searches subdirectories
 (`--depth`, default 4), skipping generated folders and submodules.
 
 ```sh
-prune_branches --dry-run          # fetch, then show the plan without prompting
-prune_branches                    # show the plan, ask [y/N], then delete
-prune_branches --dry-run --include-merged   # preview merged branches whose remote branch still exists
-prune_branches --dry-run --include-detached # preview eligible detached linked worktrees
-prune_branches --dry-run --older-than 7d    # retain recent tips and worktree contents
-prune_branches --dry-run --no-fetch ~/Developer   # read-only, uses the last fetch
+prune-branches --dry-run          # fetch, then show the plan without prompting
+prune-branches                    # show the plan, ask [y/N], then delete
+prune-branches --dry-run --include-merged   # preview merged branches whose remote branch still exists
+prune-branches --dry-run --include-detached # preview eligible detached linked worktrees
+prune-branches --dry-run --older-than 7d    # retain recent tips and worktree contents
+prune-branches --dry-run --no-fetch ~/Developer   # read-only, uses the last fetch
 ```
 
 A branch is deleted only when its remote branch is gone and its commits are
@@ -392,14 +392,14 @@ rules, worktree handling, and recovery.
 The default audit lists registered worktrees and branches.
 Add `audit-repo --workspaces` for allocated sizes and keep/review assessments
 of this repository's registered worktrees, including linked paths outside it.
-This opt-in report reuses `prune_branches` safety checks and the native size
+This opt-in report reuses `prune-branches` safety checks and the native size
 scanner; it never deletes workspaces or discovers unrelated clones.
 
 `audit-repo` reports Git activity, ownership concentration, frequently changed
 files, source sizes, test-file conventions, build configuration, and recent
 GitHub Actions results for the current branch. Run it
 inside a repository or select one explicitly; a subdirectory is resolved to
-the Git root. It also lists what `prune_branches` would delete, review, or
+the Git root. It also lists what `prune-branches` would delete, review, or
 keep, based on remote-tracking refs from the last fetch; it never fetches or
 deletes branches itself. In a repository without a remote, the stale-branch,
 CI and knowledge-concentration checks are skipped.

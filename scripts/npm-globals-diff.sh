@@ -7,8 +7,8 @@
 
 case "${1:-}" in
     -h|--help)
-        python3 "$(dirname "${BASH_SOURCE[0]}")/dotfiles-help.py" --render-help npm_globals_diff <<'EOF'
-Usage: npm_globals_diff <version_a> [version_b]
+        python3 "$(dirname "${BASH_SOURCE[0]}")/dotfiles-help.py" --render-help npm-globals-diff <<'EOF'
+Usage: npm-globals-diff <version_a> [version_b]
 
 {summary}
 

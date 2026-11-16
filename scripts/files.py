@@ -124,7 +124,7 @@ def parser():
                "  -r, --recursive  Descend into subfolders\n"
                "  -v, --verbose  Show warning paths and tool-managed leftover matches\n"
                "  --local-only  Exclude cloud-only files and folders\n"
-               "  --clean  Exclude wipe_clean's shared generated-artifact targets\n"
+               "  --clean  Exclude wipe-clean's shared generated-artifact targets\n"
                "  --clean-git  Exclude generated artifacts and .git entries at every depth\n"
                "  --exclude GLOB  Skip a name or relative-path glob; repeatable\n"
                "  --limit N  Show at most N rows/groups (default 20; 0 means all)\n"
@@ -154,7 +154,7 @@ def parser():
         command.add_argument("-r", "--recursive", action="store_true",
                              help="also list nested folders" if name == "sizes" else "descend into subfolders")
         command.add_argument("--clean", action="store_true",
-                             help="exclude wipe_clean's shared generated-artifact targets")
+                             help="exclude wipe-clean's shared generated-artifact targets")
         command.add_argument("--clean-git", action="store_true",
                              help="exclude generated artifacts and .git entries at every depth")
         command.add_argument("--exclude", action="append", default=[], metavar="GLOB",
@@ -601,7 +601,7 @@ def report_caches(args):
             output.note("Tool location queries may refresh the tools' own metadata.")
         else:
             output.note("Custom tool paths are not queried; use --include-configured to include them.")
-        output.note("Preview cleanup: clean_caches --dry-run")
+        output.note("Preview cleanup: clean-caches --dry-run")
     if skipped or errors:
         output.section("Configured location queries")
         for label, reason in skipped:

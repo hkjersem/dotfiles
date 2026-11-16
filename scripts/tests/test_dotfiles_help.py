@@ -162,8 +162,8 @@ class DotfilesHelpTests(unittest.TestCase):
     def test_node_modules_shortcut_points_to_previewable_cleanup(self):
         sheet = self.run_help("nrr").stdout
         self.assertIn("without confirmation", sheet)
-        self.assertIn("$ wipe_clean --dry-run", sheet)
-        self.assertIn("$ clean_caches --dry-run", sheet)
+        self.assertIn("$ wipe-clean --dry-run", sheet)
+        self.assertIn("$ clean-caches --dry-run", sheet)
         self.assertIn("both cover more than node_modules", " ".join(sheet.split()))
 
     def test_command_details_and_task_search(self):

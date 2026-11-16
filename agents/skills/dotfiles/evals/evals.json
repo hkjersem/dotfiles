@@ -15,7 +15,7 @@
     },
     {
       "id": 2,
-      "prompt": "dotfiles, what exact command would I use to preview prune_branches for one repository without fetching? I only want the command and its limitation; don't execute it.",
+      "prompt": "dotfiles, what exact command would I use to preview prune-branches for one repository without fetching? I only want the command and its limitation; don't execute it.",
       "expected_output": "Give the script entry point with --dry-run --no-fetch and the target path, and note it uses the last fetch and must not be used as deletion approval. Do not execute it.",
       "files": [],
       "assertions": [

@@ -458,7 +458,7 @@ else
   STALE_REVIEW=$(( $(stale_count review) + $(stale_count unverified) ))
   STALE_HINTS=$(stale_count hint)
   if [[ "$STALE_DELETE" -gt 0 ]]; then
-    warn "${STALE_DELETE} branch(es) whose remote branch was deleted can be pruned (preview: prune_branches --dry-run)"
+    warn "${STALE_DELETE} branch(es) whose remote branch was deleted can be pruned (preview: prune-branches --dry-run)"
     stale_rows delete
   fi
   if [[ "$STALE_BLOCKED" -gt 0 ]]; then
@@ -507,7 +507,7 @@ if $WORKSPACES; then
         if [[ "$wt" == "$path" || "$name" == "$path" ]]; then
           case "$kind" in
             blocked) assessment="Keep: $detail" ;;
-            delete) assessment="Review: prune_branches candidate; $detail" ;;
+            delete) assessment="Review: prune-branches candidate; $detail" ;;
             *) assessment="Review: $detail" ;;
           esac
           break

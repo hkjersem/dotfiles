@@ -102,7 +102,7 @@ the roadmap rather than expanding an unrelated task.
 ## Skills for dotfiles commands
 
 The `dotfiles` skill lets agents in other repositories run `codex-resume`,
-`prune_branches`, `audit-repo`, `roadmaps`, `pmu` and `pma`, for example "run dotfiles
+`prune-branches`, `audit-repo`, `roadmaps`, `pmu` and `pma`, for example "run dotfiles
 prune branches". Its description makes agents load it only when a message
 says "dotfiles" and asks for a command or task, and its body runs a
 command only on a direct request, so mentioning one in discussion does

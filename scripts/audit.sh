@@ -333,7 +333,7 @@ else
     # install-node.sh keeps one installed version per major
     while IFS='|' read -r dup_major dup_versions; do
         [[ -z "$dup_major" ]] && continue
-        warn "Node $dup_major: multiple versions installed ($dup_versions) — run: install_node $dup_major (installs the newest $dup_major.x and removes the other installed versions)"
+        warn "Node $dup_major: multiple versions installed ($dup_versions) — run: install-node $dup_major (installs the newest $dup_major.x and removes the other installed versions)"
     done < <(fnm_duplicate_majors)
 
     # Informational only: a project may still need an end-of-life Node.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Clone-copy a directory without known build artifacts.
-# Usage: copy_clean [--ignore-git] [--keep-name] [--zip] [source] [destination]
+# Usage: copy-clean [--ignore-git] [--keep-name] [--zip] [source] [destination]
 
 set -euo pipefail
 
@@ -10,10 +10,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/clean-targets.sh"
 
 usage() {
-    python3 "$SCRIPT_DIR/dotfiles-help.py" --render-help copy_clean <<'EOF'
-Usage: copy_clean [--ignore-git] [--keep-name] [source] <destination>
-       copy_clean --zip [--ignore-git] [destination.zip]
-       copy_clean --zip [--ignore-git] <source> <destination.zip>
+    python3 "$SCRIPT_DIR/dotfiles-help.py" --render-help copy-clean <<'EOF'
+Usage: copy-clean [--ignore-git] [--keep-name] [source] <destination>
+       copy-clean --zip [--ignore-git] [destination.zip]
+       copy-clean --zip [--ignore-git] <source> <destination.zip>
 
 {summary}
 

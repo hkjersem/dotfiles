@@ -83,9 +83,9 @@ def confirm_cleanup(prompt="Clean selected Docker data?"):
 
 def parser():
     cli = argparse.ArgumentParser(
-        prog="clean_docker", description=command_help.description("clean_docker"),
+        prog="clean-docker", description=command_help.description("clean-docker"),
         epilog=command_help.help_epilog(
-            "clean_docker",
+            "clean-docker",
             "Containers and volumes are report-only. No --all or VM disk compaction.\n"
             "The default builder is the context's own builder, not Buildx's selected builder."),
         formatter_class=argparse.RawDescriptionHelpFormatter,

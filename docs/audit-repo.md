@@ -15,7 +15,7 @@ directories. The opt-in scan includes generated artifacts but excludes `.git`
 metadata, using the same native allocated-size scanner as `files sizes`.
 
 Assessments reuse the stale-branch plan and shared worktree checks from
-`prune_branches`, including local/ignored files, hidden index flags and
+`prune-branches`, including local/ignored files, hidden index flags and
 worktree-only history. The audited checkout and locked worktrees are kept;
 detached HEADs are flagged for review. Remote assessments use the last fetched
 refs, and unclassified worktrees are not described as safe to remove. With
@@ -25,7 +25,7 @@ worktree checks and sizing still run. No fetching or deletion is added.
 Permission-denied entries give incomplete sizes and warnings; missing
 registered paths are shown explicitly. Age is not used as evidence of safety.
 Large worktrees can take time; delayed terminal progress is shown. Existing
-`prune_branches` remains responsible for any approved cleanup.
+`prune-branches` remains responsible for any approved cleanup.
 
 ## CI results
 

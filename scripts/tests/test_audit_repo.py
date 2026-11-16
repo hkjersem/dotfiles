@@ -223,7 +223,7 @@ class AuditRepoTests(unittest.TestCase):
         remote = self.run_audit("--workspaces", "--skip-security", stage=False)
         self.assertEqual(remote.returncode, 0, remote.stdout + remote.stderr)
         workspace_section = remote.stdout.split("─ Workspace disk usage", 1)[1]
-        self.assertIn("Review: prune_branches candidate;", workspace_section)
+        self.assertIn("Review: prune-branches candidate;", workspace_section)
         self.assertIn("origin/master", workspace_section)
         self.assertFalse(any("fetch" in args for args in self.calls("git")))
 

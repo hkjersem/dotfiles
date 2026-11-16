@@ -35,7 +35,7 @@ Listings show up to 20 rows or duplicate groups; `--limit 0` shows all.
 ## Exclusions
 
 Add `--clean` to a path-based report to exclude generated directories and file
-patterns shared with `wipe_clean` and `copy_clean`, such as `node_modules`,
+patterns shared with `wipe-clean` and `copy-clean`, such as `node_modules`,
 `dist`, `.venv` and `*.tsbuildinfo`. The report marks when this filter is active.
 It does not exclude Git metadata or apply `.gitignore`.
 
@@ -132,7 +132,7 @@ and symlink roots/ancestors are reported but not followed. By default, custom
 tool cache locations are not queried and no package managers run.
 
 Add `--include-configured` to query installed tools from HOME using the same discovery
-as `clean_caches`. npm/Yarn versions under fnm and Corepack are included;
+as `clean-caches`. npm/Yarn versions under fnm and Corepack are included;
 matching paths appear once with all their source labels. Known locations are
 retained so caches left by missing tools stay visible. Missing tools are
 listed explicitly; failed queries mark the report incomplete and exit nonzero.
@@ -148,7 +148,7 @@ dependencies. Both remain report-only; see
 
 This subcommand accepts `--include-configured`, `--limit`, `--verbose` and `--help`, not a target path.
 When caches are found, it ends with a hint to preview cleanup with
-`clean_caches --dry-run`.
+`clean-caches --dry-run`.
 
 ## Examples
 

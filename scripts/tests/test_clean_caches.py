@@ -657,7 +657,7 @@ class CleanCachesTests(unittest.TestCase):
             self.assertIn("~/.bun/install/cache", text)
             self.assertIn(CACHES.human_size(payload.stat().st_blocks * 512), text)
             self.assertIn("\n    Tool unavailable. Preview orphan cleanup: "
-                          "clean_caches --only bun --orphaned --dry-run\n", text)
+                          "clean-caches --only bun --orphaned --dry-run\n", text)
             self.assertNotIn("Bun unavailable on PATH", text)
             self.assertIn("Orphan previews verify recognised artifacts separately; unknown entries stay.", text)
             self.assertIn("─ Notes ", text)

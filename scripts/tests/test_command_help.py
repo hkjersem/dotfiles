@@ -411,7 +411,7 @@ zpty -d z
         self.assertEqual(self.complete(["pmu"], " ", files=files, cwd="packages/cli")["pmu"],
                          {"express", "vitest"})
         self.assertEqual(self.complete(["pmr"], " ", files=files)["pmr"], {"express"})
-        self.assertEqual(self.complete(["npm_release_age"], " ex", files=files)["npm_release_age"],
+        self.assertEqual(self.complete(["npm-release-age"], " ex", files=files)["npm-release-age"],
                          {"express"})
 
     def test_pmu_offers_dependencies_only_where_it_takes_a_package(self):
@@ -500,33 +500,33 @@ zpty -d z
         self.assertIn("--exclude", offered)
 
     def test_wipe_clean_sort_flag_and_values_are_completed(self):
-        self.assertIn("--sort", self.complete(["wipe_clean"], " --")["wipe_clean"])
-        self.assertIn("--older-than", self.complete(["wipe_clean"], " --")["wipe_clean"])
-        self.assertEqual(self.complete(["wipe_clean"], " --sort ")["wipe_clean"] & {"path", "size"},
+        self.assertIn("--sort", self.complete(["wipe-clean"], " --")["wipe-clean"])
+        self.assertIn("--older-than", self.complete(["wipe-clean"], " --")["wipe-clean"])
+        self.assertEqual(self.complete(["wipe-clean"], " --sort ")["wipe-clean"] & {"path", "size"},
                          {"path", "size"})
 
     def test_cache_cleaner_names_and_pruning_flags_are_completed(self):
-        self.assertEqual(self.complete(["clean_caches"], " --")["clean_caches"],
+        self.assertEqual(self.complete(["clean-caches"], " --")["clean-caches"],
                          {"--only", "--deep", "--orphaned", "--dry-run", "--sort", "--help"})
-        self.assertIn("size", self.complete(["clean_caches"], " --sort ")["clean_caches"])
-        names = self.complete(["clean_caches"], " --only ")["clean_caches"]
+        self.assertIn("size", self.complete(["clean-caches"], " --sort ")["clean-caches"])
+        names = self.complete(["clean-caches"], " --only ")["clean-caches"]
         self.assertTrue({"npm", "uv", "gradle", "go-modules"}.issubset(names), names)
-        flags = self.complete(["prune_branches"], " --")["prune_branches"]
+        flags = self.complete(["prune-branches"], " --")["prune-branches"]
         self.assertTrue({"--include-detached", "--older-than"}.issubset(flags), flags)
 
     def test_docker_cleaner_is_listed_and_completes_selection(self):
         offered = self.complete(["dotfiles-help"], " cleanup ")["dotfiles-help"]
-        self.assertIn("clean_docker", offered)
-        self.assertEqual(self.complete(["clean_docker"], " --")["clean_docker"],
+        self.assertIn("clean-docker", offered)
+        self.assertEqual(self.complete(["clean-docker"], " --")["clean-docker"],
                          {"--only", "--older-than", "--context", "--builder", "--inspect", "--dry-run", "--help"})
-        self.assertEqual(self.complete(["clean_docker"], " --only ")["clean_docker"],
+        self.assertEqual(self.complete(["clean-docker"], " --only ")["clean-docker"],
                          {"build-cache", "dangling-images"})
 
     def test_duration_values_offer_examples_and_units_for_typed_numbers(self):
-        cases = (("prune_branches", " --stale-after "),
-                 ("prune_branches", " --older-than "),
-                 ("wipe_clean", " --older-than "),
-                 ("clean_docker", " --older-than "),
+        cases = (("prune-branches", " --stale-after "),
+                 ("prune-branches", " --older-than "),
+                 ("wipe-clean", " --older-than "),
+                 ("clean-docker", " --older-than "),
                  ("files", " leftovers --older-than "),
                  ("files", " changed --since "),
                  ("pmu", " --cooldown "),

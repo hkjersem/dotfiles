@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #
 # Delete all known build artifacts and dependency folders from the current directory.
-# Usage: wipe_clean
+# Usage: wipe-clean
 
 set -euo pipefail
 
 show_help() {
-    python3 "$(dirname "${BASH_SOURCE[0]}")/dotfiles-help.py" --render-help wipe_clean <<'EOF'
-Usage: wipe_clean [--dry-run] [--sort path|size] [--older-than AGE]
+    python3 "$(dirname "${BASH_SOURCE[0]}")/dotfiles-help.py" --render-help wipe-clean <<'EOF'
+Usage: wipe-clean [--dry-run] [--sort path|size] [--older-than AGE]
 
 {summary}
 

@@ -4,10 +4,10 @@
 # flags as indented "  -x, --flag  description" lines. flag-highlight.zsh reads
 # the same list.
 typeset -ga dotfiles_commands=(
-  agent-awake agent-sessions audit-repo clean_caches clean_docker codex-resume copy_clean
+  agent-awake agent-sessions audit-repo clean-caches clean-docker codex-resume copy-clean
   dotfiles-audit dotfiles-defaults dotfiles-help dotfiles-install dotfiles-profile dotfiles-update
-  files history-delete install_node nosync npm_globals_diff npm_release_age
-  pma pmc pmh pmi pml pmr pmu prune_branches roadmaps search wipe wipe_clean
+  files history-delete install-node nosync npm-globals-diff npm-release-age
+  pma pmc pmh pmi pml pmr pmu prune-branches roadmaps search wipe wipe-clean
 )
 compdef _gnu_generic $dotfiles_commands
 
@@ -34,7 +34,7 @@ _dotfiles_duration_flags() {
     pmu:--cooldown)
       _dotfiles_age cooldown
       return ;;
-    prune_branches:--older-than|prune_branches:--stale-after|audit-repo:--since)
+    prune-branches:--older-than|prune-branches:--stale-after|audit-repo:--since)
       _dotfiles_age
       return ;;
   esac
@@ -45,7 +45,7 @@ _dotfiles_duration_flags() {
   fi
   _gnu_generic
 }
-compdef _dotfiles_duration_flags prune_branches audit-repo
+compdef _dotfiles_duration_flags prune-branches audit-repo
 
 # Help and search
 
@@ -185,7 +185,7 @@ _dotfiles_npm_release_age() {
   (( CURRENT == 2 )) && [[ $PREFIX != -* ]] && _dotfiles_pm_dependencies update && return
   _gnu_generic
 }
-compdef _dotfiles_npm_release_age npm_release_age
+compdef _dotfiles_npm_release_age npm-release-age
 
 # Files and cleanup
 
@@ -245,7 +245,7 @@ _dotfiles_wipe_clean() {
     '--sort[Preview order]:order:(path size)' \
     '--older-than[No modification within this age, including descendants]:age:_dotfiles_age'
 }
-compdef _dotfiles_wipe_clean wipe_clean
+compdef _dotfiles_wipe_clean wipe-clean
 
 _dotfiles_cache_names() {
   _values -s , 'cleaner' npm pnpm brew bun yarn pip uv go-build go-modules gradle playwright xcode mise
@@ -259,7 +259,7 @@ _dotfiles_clean_caches() {
     '--orphaned[Remove recognised conventional cache artifacts only when the tool is unavailable]' \
     '(-n --dry-run)'{-n,--dry-run}'[Preview without prompting or cleaning]'
 }
-compdef _dotfiles_clean_caches clean_caches
+compdef _dotfiles_clean_caches clean-caches
 
 _dotfiles_docker_cleaners() {
   _values -s , 'cleaner' build-cache dangling-images
@@ -274,7 +274,7 @@ _dotfiles_clean_docker() {
     '(-n --dry-run --only --older-than)--inspect[Show storage and inspection guidance]' \
     '(--inspect -n --dry-run)'{-n,--dry-run}'[Show the cleanup plan without prompting or cleaning]'
 }
-compdef _dotfiles_clean_docker clean_docker
+compdef _dotfiles_clean_docker clean-docker
 
 # Git and machine setup
 

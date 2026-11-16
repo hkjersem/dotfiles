@@ -4,12 +4,12 @@
 
 ## Clean and copy projects
 
-`wipe_clean` previews generated directories and cache files with allocated
+`wipe-clean` previews generated directories and cache files with allocated
 sizes and an estimated total, then asks before deleting them. Hard links and
 shared APFS blocks may overstate reclaimed space. If sizing fails, cleanup
 stops without deleting anything. Git metadata and submodule directories are preserved.
 Use `--dry-run` to preview without prompting or deleting.
-Use `wipe_clean --sort size` to preview largest targets first; the default is
+Use `wipe-clean --sort size` to preview largest targets first; the default is
 alphabetical path order. After deletion, fast filesystem queries show available
 space before and after, without rescanning. This measures only the current
 filesystem; concurrent activity and APFS snapshots mean it is not an exact
@@ -21,19 +21,19 @@ metadata aborts cleanup, and selected ages are rechecked after confirmation.
 This needs additional metadata scans. Age does not prove a target is unused;
 stop builds and other writers first, since the scan and deletion are not atomic.
 The shared artifact list includes Python's `.pytest_cache`, also excluded by
-`copy_clean` and `files --clean`.
-`copy_clean` copies a project without the same generated artifacts, using
+`copy-clean` and `files --clean`.
+`copy-clean` copies a project without the same generated artifacts, using
 macOS clone-on-write copies where supported. Existing destinations are never
 overwritten.
 
 ```sh
-wipe_clean
-wipe_clean --sort size
-wipe_clean --older-than 7d --sort size
-copy_clean ../project-copy
-copy_clean --ignore-git --keep-name ../copies
-copy_clean --zip
-copy_clean --zip ../project ../project-clean.zip
+wipe-clean
+wipe-clean --sort size
+wipe-clean --older-than 7d --sort size
+copy-clean ../project-copy
+copy-clean --ignore-git --keep-name ../copies
+copy-clean --zip
+copy-clean --zip ../project ../project-clean.zip
 ```
 
 A single copy argument is the destination; the source defaults to the current
@@ -44,7 +44,7 @@ directories; otherwise Git metadata is copied too.
 
 ## Clean Docker storage
 
-`clean_docker --inspect` shows Docker storage and inspection guidance.
+`clean-docker --inspect` shows Docker storage and inspection guidance.
 `--dry-run` shows only the cleanup plan, for both supported cleaners by default
 or those selected with `--only`. Neither mode prompts or deletes.
 A normal run requires explicit `--only` selection, asks with the single-key
@@ -53,11 +53,11 @@ Containers, volumes and tagged images are never deleted; it never runs
 `system prune`, `--all`, or VM disk compaction.
 
 ```sh
-clean_docker --inspect
-clean_docker --dry-run
-clean_docker --only build-cache --older-than 30d
-clean_docker --only build-cache,dangling-images --older-than 7d --dry-run
-clean_docker --context colima --builder colima --only build-cache
+clean-docker --inspect
+clean-docker --dry-run
+clean-docker --only build-cache --older-than 30d
+clean-docker --only build-cache,dangling-images --older-than 7d --dry-run
+clean-docker --context colima --builder colima --only build-cache
 ```
 
 `--older-than` uses `m`, `h`, `d` or `w`: build-cache age means last use, while
@@ -90,8 +90,8 @@ work in all modes.
 
 ## Clean global caches
 
-`clean_caches` previews supported global developer caches. It runs from HOME
-regardless of your current folder; use `wipe_clean` for project-local output.
+`clean-caches` previews supported global developer caches. It runs from HOME
+regardless of your current folder; use `wipe-clean` for project-local output.
 Go cleanup prefers Go on PATH, otherwise discovers already-installed mise Go
 versions from HOME (active first, otherwise newest stable). The executable is
 pinned through the cache-path recheck and cleanup. Discovery is offline, and Go
@@ -109,9 +109,9 @@ paths beneath HOME use `~/`. Sizes show cache usage, not guaranteed savings.
 Add `--sort size` to list largest caches first, with missing caches last.
 
 ```sh
-clean_caches --dry-run
-clean_caches --only uv,pip
-clean_caches --only go-modules,playwright --deep
+clean-caches --dry-run
+clean-caches --only uv,pip
+clean-caches --only go-modules,playwright --deep
 ```
 
 Native cleaners: npm (`cache clean --force`), pnpm (`store prune`),
@@ -150,8 +150,8 @@ not a claim that the whole reported folder is eligible for deletion.
 For missing Bun, npm, pip or Go, explicit orphan cleanup is available:
 
 ```sh
-clean_caches --only bun --orphaned --dry-run
-clean_caches --only bun --orphaned
+clean-caches --only bun --orphaned --dry-run
+clean-caches --only bun --orphaned
 ```
 
 `--orphaned` requires an explicit allowlisted `--only` selection and refuses
@@ -198,7 +198,7 @@ visible. Nested rows can overlap; there is no reclaimable-space total.
 Failed queries make the command exit nonzero. Tool queries may refresh their
 own metadata; they never invoke a cleanup command or install a tool.
 
-`clean_caches --only mise` uses native `mise cache prune`, respecting
+`clean-caches --only mise` uses native `mise cache prune`, respecting
 `cache_prune_age` and environment-cache TTL. It previews the metadata cache,
 environment cache and any external task-cache root. Installed tools, config
 and general state are protected from overlapping cache roots. Discovery

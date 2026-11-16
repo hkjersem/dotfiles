@@ -84,7 +84,7 @@ clean contents and remote backup do not prove a worktree is inactive.
 branches and `--include-detached` worktrees. It requires an older tip
 **committer** timestamp and, when removing a worktree, older modification
 times for its root and all descendants except `.git` metadata. Supported
-units are `m`, `h`, `d`, `w`. It reuses `wipe_clean`'s modification scanner
+units are `m`, `h`, `d`, `w`. It reuses `wipe-clean`'s modification scanner
 and does not follow symlink destinations. Unreadable metadata retains the
 candidate with a reason; ages are rechecked immediately before removal.
 Scanning large worktrees costs time. Filesystem scans and removal are not

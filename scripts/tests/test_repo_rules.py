@@ -85,6 +85,16 @@ class RepoRulesTests(unittest.TestCase):
                         broken.append(f"{path}:{number}: ~/.dotfiles/{target}")
         self.assert_no_violations(broken, "Shell config points to repository files that do not exist")
 
+    def test_public_command_names_use_hyphens(self):
+        found = []
+        text = (REPO / "bash/aliases").read_text()
+        for number, line in enumerate(text.splitlines(), 1):
+            match = re.match(r"\s*(?:alias\s+(?:-g\s+)?(?:--\s+)?([^=\s]+)=|(?:function\s+)?([\w-]+)\s*\(\))", line)
+            name = match and (match.group(1) or match.group(2))
+            if name and not name.startswith("_") and "_" in name:
+                found.append(f"bash/aliases:{number}: {name}")
+        self.assert_no_violations(found, "Public command names use hyphens, not underscores")
+
     def test_bash_scripts_avoid_bash4_only_syntax(self):
         found = []
         for path in repo_files(*BASH_FILES):

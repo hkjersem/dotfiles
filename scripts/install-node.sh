@@ -9,8 +9,8 @@ set -euo pipefail
 
 case "${1:-}" in
     -h|--help)
-        python3 "$(dirname "${BASH_SOURCE[0]}")/dotfiles-help.py" --render-help install_node <<'EOF'
-Usage: install_node [version]
+        python3 "$(dirname "${BASH_SOURCE[0]}")/dotfiles-help.py" --render-help install-node <<'EOF'
+Usage: install-node [version]
 
 {summary}
 
@@ -28,7 +28,7 @@ Options:
 EOF
         exit $?
         ;;
-    -*) echo "Usage: install_node [version]" >&2; exit 2 ;;
+    -*) echo "Usage: install-node [version]" >&2; exit 2 ;;
 esac
 
 VERSION="${1:-lts}"

@@ -3,7 +3,7 @@
 # prune-branches.sh — remove local branches whose remote branch was deleted,
 # together with their clean linked worktrees, after confirmation.
 #
-# Usage: prune_branches [--dry-run | --yes] [--include-merged] [--no-fetch] [--depth N] [path]
+# Usage: prune-branches [--dry-run | --yes] [--include-merged] [--no-fetch] [--depth N] [path]
 
 set -uo pipefail
 
@@ -16,8 +16,8 @@ source "$SCRIPT_DIR/lib/stale-branches.sh" || exit 1
 source "$SCRIPT_DIR/package-manager/_update-lib.sh" || exit 1
 
 usage() {
-  python3 "$SCRIPT_DIR/dotfiles-help.py" --render-help prune_branches <<'EOF'
-Usage: prune_branches [options] [path]
+  python3 "$SCRIPT_DIR/dotfiles-help.py" --render-help prune-branches <<'EOF'
+Usage: prune-branches [options] [path]
 
 {summary}
 

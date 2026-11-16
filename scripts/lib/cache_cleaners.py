@@ -440,9 +440,9 @@ def configured_locations():
 
 def parser():
     result = argparse.ArgumentParser(
-        prog="clean_caches", description=command_help.description("clean_caches"),
+        prog="clean-caches", description=command_help.description("clean-caches"),
         epilog=command_help.help_epilog(
-            "clean_caches", "Runs globally from HOME, not in the current project. Project artifacts: wipe_clean.\n"
+            "clean-caches", "Runs globally from HOME, not in the current project. Project artifacts: wipe-clean.\n"
             "pnpm includes sibling store generations using installed Corepack pnpm versions,\n"
             "plus native metadata and expired execution-cache pruning. Nothing is installed.\n"
             "Cleaners: " + ", ".join(BY_NAME)),
@@ -485,7 +485,7 @@ def missing_go_cache(cleaner):
 
 
 def orphan_preview(name):
-    return f"clean_caches --only {name} --orphaned --dry-run"
+    return f"clean-caches --only {name} --orphaned --dry-run"
 
 
 def report_only_caches(names, include_inventory, progress):

@@ -81,11 +81,11 @@ should exist.
     - skills and instructions sync: 1,305/706/82; 15, 2,215.
     - audit-repo: 1,142/555/67; 12, 1,940; 4.
     - Node, corepack and npm helpers: 946/896/0; 11, 1,599;
-      `npm_release_age` 45, `npm_globals_diff` 6, `install_node` 2.
-    - prune_branches: 895/582/99; 7, 1,724; 5.
+      `npm-release-age` 45, `npm-globals-diff` 6, `install-node` 2.
+    - prune-branches: 895/582/99; 7, 1,724; 5.
     - agent-awake: 881/283/110; not yet committed; 0.
-    - wipe, wipe_clean, copy_clean: 423/214/0; 3, 631; `copy_clean` 14,
-      `wipe` 3, `wipe_clean` 1.
+    - wipe, wipe-clean, copy-clean: 423/214/0; 3, 631; `copy-clean` 14,
+      `wipe` 3, `wipe-clean` 1.
     - agent-sessions.zsh: 337/592/0; 5, 949; runs on every agent start.
     - output libraries: 186/168/0; 1, 208.
     - nosync: 162/366/0; 5, 972; 2.
@@ -104,8 +104,8 @@ should exist.
       extend the existing `FAKE_APP_SERVER` in that file rather than adding
       new fakes.
     - Few history entries on this Mac: `pml` (0; 109 lines plus tests),
-      `pmc` (1), `wipe_clean` (1). The owner keeps all three: `pml` is
-      brand new, `pmc` should be used more, and `wipe_clean` is useful.
+      `pmc` (1), `wipe-clean` (1). The owner keeps all three: `pml` is
+      brand new, `pmc` should be used more, and `wipe-clean` is useful.
       Keep `nosync` (used on the iCloud Mac) and `roadmaps` (new, expected
       to be used).
     - Tests outweigh code in agent-sessions, nosync and the shell help and
