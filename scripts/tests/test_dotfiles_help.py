@@ -89,7 +89,12 @@ class DotfilesHelpTests(unittest.TestCase):
         self.assertIn("working-tree edits remain", git)
         self.assertNotIn("$ git st", git)
         self.assertEqual(self.run_help("git unstage").stdout, git)
-        self.assertIn("Ctrl-R", self.run_help("zsh").stdout)
+        zsh = self.run_help("zsh").stdout
+        zsh_text = " ".join(zsh.split())
+        self.assertIn("Ctrl-R", zsh)
+        self.assertIn("z api", zsh)
+        self.assertIn("zi", zsh)
+        self.assertIn("local frecency database", zsh_text)
         self.assertIn("Not a secrecy guarantee", self.run_help("leading-space").stdout)
         self.assertNotIn("$ Press", self.run_help("Ctrl-R").stdout)
         self.assertIn("Ctrl-R", self.run_help("fuzzy-search").stdout)

@@ -210,6 +210,9 @@ pmh update                  # Search within package-manager commands
 
 The fzf pickers show `files`, `directories` or `history` beside their match
 counts for Ctrl-T, Alt-C and Ctrl-R respectively.
+Use `z <name>` to jump to a frequently visited directory from anywhere, or
+`zi` to choose one with fzf. Zoxide learns as you change directories and keeps
+its frecency database local to each Mac; it does not import shell history.
 
 Zsh completes topic and command names with Tab, including command names after
 a topic (`dotfiles-help packages <Tab>`). `pmh` completes only package-manager

@@ -12,6 +12,7 @@ source ~/.zsh_conf.d/flag-highlight.zsh
 source ~/.zsh_conf.d/prompt.zsh
 source ~/.zsh_conf.d/fnm.zsh
 source ~/.zsh_conf.d/fzf.zsh
+source ~/.zsh_conf.d/zoxide.zsh
 
 ###############################################################################
 # Tool-managed blocks — updated automatically by installers                   #

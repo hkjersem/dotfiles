@@ -61,7 +61,6 @@ _Nothing committed._
 - **codex-resume queue start**: the experimental `thread/queue/start` or `codex queue` could send right away instead of waiting for the app. `--reset` also ignores `rateLimitsByLimitId`. When: next codex-resume change.
 - **COPILOT_HOME warning**: setting it stops Copilot from reading `~/.agents/skills`, so the audit could warn when it is set. When: next time `audit-skills.sh` changes.
 - **Manage agent hooks, MCP and plugins**: Claude, Codex and Copilot all support user-level hooks and MCP. Keep files that hold secrets out of Git. When: a hook or MCP server is wanted on every machine.
-- **Frecency directory jumping**: [zoxide](https://github.com/ajeetdsouza/zoxide) (or similar) jumps to frequently used directories by partial name and works with fzf. It needs a Brewfile entry and an init line in `zsh/conf.d/`. When: anytime.
 
 ## Not doing
 

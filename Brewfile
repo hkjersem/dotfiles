@@ -11,6 +11,7 @@ brew "python"          # latest Python 3 (replaces python.org installers); used 
 brew "ripgrep"         # fast recursive search (rg) — respects .gitignore; used by fzf and AI agents
 brew "shellcheck"      # static analysis for shell scripts
 brew "tree"            # directory tree viewer
+brew "zoxide"          # frecency-based directory jumping
 
 brew "navikt/tap/nav-pilot" if ENV["DOTFILES_PROFILE"] == "work"
 

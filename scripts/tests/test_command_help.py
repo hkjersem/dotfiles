@@ -446,6 +446,8 @@ zpty -d z
         self.assertTrue({"..", "cpwd", "rr", "emptytrash"}.issubset(shell), shell)
         self.assertFalse({"pml", "unstage"} & shell, shell)
         self.assertEqual(self.complete(["dotfiles-help"], " zsh Ctrl-R")["dotfiles-help"], {"Ctrl-R"})
+        self.assertEqual(self.complete(["dotfiles-help"], " zsh z")["dotfiles-help"], {"z", "zi"})
+        self.assertEqual(self.complete(["dotfiles-help"], " zsh zi")["dotfiles-help"], {"zi"})
 
     def test_cheat_sheet_completes_unambiguous_cleanup_choices(self):
         offered = self.complete(["dotfiles-help"], " cleanup")["dotfiles-help"]
