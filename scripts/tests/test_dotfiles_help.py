@@ -194,6 +194,21 @@ class DotfilesHelpTests(unittest.TestCase):
         self.assertNotIn("$ pml", search)
         self.assertIn("$ pmu --dry-run", self.run_help("UPDATE", command="pmh").stdout)
 
+    def test_z_lookup_shows_zoxide_family_but_specific_lookups_stay_exact(self):
+        names = {line.split(":", 1)[0] for line in self.run_help("z", "--list").stdout.splitlines()}
+        self.assertEqual(names, {"z", "zi", "zla", "zcode", "zopen", "zfork"})
+        sheet = self.run_help("z").stdout
+        for example in ("z api", "$ zla frontend", "$ zcode frontend", "$ zopen frontend",
+                        "$ zfork frontend"):
+            self.assertIn(example, sheet)
+        self.assertIn("Interactively choose a frequently used directory", sheet)
+        for query, expected in ((("zla",), "zla"), (("zcode",), "zcode"),
+                                (("zopen",), "zopen"), (("zfork",), "zfork"),
+                                (("zsh", "z"), "z")):
+            with self.subTest(query=query):
+                matches = self.run_help(*query, "--list").stdout.splitlines()
+                self.assertEqual([line.split(":", 1)[0] for line in matches], [expected])
+
     def test_topic_and_package_completion_lists_are_scoped(self):
         packages = self.run_help("--list", command="pmh").stdout
         names = {line.split(":", 1)[0] for line in packages.splitlines()}

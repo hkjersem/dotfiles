@@ -33,6 +33,10 @@ alias tree="tree -A -C -L 2 --gitignore"
 alias tree1="tree -d -L 1"
 alias tree2="tree -d -L 2"
 alias cpwd="pwd|tr -d '\n'|pbcopy" # Copies current path to clipboard
+zla() { python3 "$HOME/.dotfiles/scripts/zoxide-command.py" --list "$@"; }
+zcode() { python3 "$HOME/.dotfiles/scripts/zoxide-command.py" --code "$@"; }
+zopen() { python3 "$HOME/.dotfiles/scripts/zoxide-command.py" --open "$@"; }
+zfork() { python3 "$HOME/.dotfiles/scripts/zoxide-command.py" --fork "$@"; }
 
 # Dependency cleanup
 alias nrr="wipe node_modules"

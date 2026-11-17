@@ -214,6 +214,14 @@ counts for Ctrl-T, Alt-C and Ctrl-R respectively.
 Use `z <name>` to jump to a frequently visited directory from anywhere, or
 `zi` to choose one with fzf. Zoxide learns as you change directories and keeps
 its frecency database local to each Mac; it does not import shell history.
+Use `zla frontend` to list a matching folder, `zcode frontend` to open it in
+VS Code, `zopen frontend` to open it in Finder, or `zfork frontend` to open it in
+Fork, without changing your current directory. These shortcuts accept multiple
+matching keywords; omit the name to choose with fzf. No match or cancelling
+the picker leaves the command unrun.
+`dotfiles-help z` shows the whole zoxide command family.
+Fork is optional per Mac: `zfork` reports an error if it is unavailable and
+never installs it or opens another app instead.
 
 Zsh completes topic and command names with Tab, including command names after
 a topic (`dotfiles-help packages <Tab>`). `pmh` completes only package-manager

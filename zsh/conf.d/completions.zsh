@@ -8,6 +8,7 @@ typeset -ga dotfiles_commands=(
   dotfiles-audit dotfiles-defaults dotfiles-help dotfiles-install dotfiles-profile dotfiles-update
   files history-delete install-node nosync npm-globals-diff npm-release-age
   pma pmc pmh pmi pml pmr pmu prune-branches roadmaps search wipe wipe-clean
+  zla zcode zopen zfork
 )
 compdef _gnu_generic $dotfiles_commands
 

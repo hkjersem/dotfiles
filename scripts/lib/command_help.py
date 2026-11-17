@@ -163,6 +163,19 @@ COMMANDS = (
     Command("o", "shell", "Open the current folder or a path in Finder",
             "Opens a Finder window.",
             ("o", "o ~/Downloads"), True),
+    Command("zla", "shell", "List a zoxide-matched folder with la's listing options",
+            "Read-only; does not change directory. With no name, opens the fzf picker.",
+            ("zla frontend",)),
+    Command("zcode", "shell", "Open a zoxide-matched folder in VS Code",
+            "Opens VS Code without changing directory. With no name, opens the fzf picker.",
+            ("zcode frontend",), True),
+    Command("zopen", "shell", "Open a zoxide-matched folder in Finder",
+            "Opens Finder without changing directory. With no name, opens the fzf picker.",
+            ("zopen frontend",), True),
+    Command("zfork", "shell", "Open a zoxide-matched folder in Fork",
+            "Requires Fork on this Mac; never installs it or falls back to another app. "
+            "With no name, opens the fzf picker.",
+            ("zfork frontend",), True),
     Command("cpwd", "shell", "Copy the current directory path to the clipboard",
             "Replaces the clipboard contents.",
             ("cpwd",), True),
@@ -432,6 +445,8 @@ def main(argv=None):
     commands = [command for command in COMMANDS if topic is None or command.topic == topic]
     if query:
         names = {" ".join(query), f"{topic} {' '.join(query)}"}
+        if topic is None and query == ["z"]:
+            names.update(("zi", "zla", "zcode", "zopen", "zfork"))
         exact = [command for command in commands if command.name in names]
         commands = exact or [
             command for command in commands
