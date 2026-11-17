@@ -28,6 +28,9 @@ repo's scripts still match them.
    compare the list below with `Brewfile`, `scripts/lib/tool-updates.sh`,
    `scripts/install-zsh-plugins.sh` and the `scripts/` wrappers. Add tools the
    repo now installs, wraps or audits, and remove those it no longer uses.
+   Do the same for the [live checks](#live-checks): add a row for each new
+   integration with another tool's internal API, file format or
+   undocumented behaviour, and remove rows for integrations that are gone.
 2. Find the previous run's date in the Log below. Read releases published since
    then (`gh release list -R <owner/repo>`, `npm view <pkg> time`), focusing on
    these tools and the files that depend on them:
@@ -41,12 +44,13 @@ repo's scripts still match them.
    - oh-my-zsh, zsh plugins and fzf: `scripts/install-zsh-plugins.sh`,
      `zsh/conf.d/`
    - dotbot: `install`, `install.conf.yaml`
+   - Native developer-cache cleaners: `scripts/lib/cache_cleaners.py` and
+     `scripts/lib/orphan_caches.py`. Check changed store formats, configured
+     paths, lock/retention semantics and newly supported native cleanup.
    - Codex desktop app and its bundled CLI: `scripts/codex-resume.py`,
      `docs/codex-resume.md`. Look for changes to the queue API
      (`thread/queue/*`), the rate-limit API, session logs and the chat
-     database. Then run `codex-resume --limits`, `codex-resume --list` and
-     `codex-resume --now --chat <id> --message "Reply with OK only."`, which
-     should report that the app took the message and the reply finished.
+     database.
 3. Check the version baselines against the projects in `~/Developer` (skip
    `fagtorsdag` and `worktrees`). Read `packageManager`, `devEngines`,
    `engines.node`, `.nvmrc` and `.node-version`, and compare them with the
@@ -59,11 +63,26 @@ repo's scripts still match them.
      npm no longer supports them (`update-node-versions.sh` warns about this).
    - Yarn, Bun and npm pins: flag majors the wrappers or corepack defaults do
      not cover.
-4. Ignore releases that change nothing the repo uses.
-5. Report findings briefly. For each one, either propose a change or say it
+4. Run every [live check](#live-checks), also when no release looked relevant:
+   changelogs rarely mention internal APIs, and unit tests use fakes that
+   cannot notice upstream changes.
+5. Ignore releases that change nothing the repo uses.
+6. Report findings briefly. For each one, either propose a change or say it
    needs nothing.
-6. Add a dated line to the Log listing the releases reviewed, the baselines
+7. Add a dated line to the Log listing the releases reviewed, the baselines
    and the outcome.
+
+## Live checks
+
+Read-only checks against the installed tools, one per integration that relies
+on another tool's internal API, file format or undocumented behaviour. Each
+fails clearly when the tool changes underneath us. Apart from the test
+message `codex-resume` sends, none changes chats, settings or other state.
+
+| Integration | Relies on | Check and expected result |
+|---|---|---|
+| codex-resume | App server queue, rate limits, session logs, chat database | `codex-resume --limits` and `--list`, then `codex-resume --now --chat <id> --message "Reply with OK only."`: the app takes the message and the reply finishes |
+| agent-awake hooks, all three agents | Each agent's hook configuration and turn events | `agent-awake --status`: helper and hooks installed, the reviewing agent's own hold shows as working, and each agent used since the last review has a recent hold |
 
 ## Log
 

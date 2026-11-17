@@ -55,6 +55,16 @@ should exist.
    Patching a script's own functions is a lead, not a finding: some wrap
    side effects on purpose. Report it only where a specific change was made
    harder, and prefer extending existing fakes over new test setups.
+   For file reports, cleanup and agent commands, trace shared scanning, size,
+   path validation, activity checks, metadata readers and deletion mechanisms.
+   Propose extraction only where callers share a contract; keep strict cleanup
+   failures separate from best-effort activity tracking. Compare maintained
+   tools or libraries with custom code, including dependency, platform, licence
+   and migration costs. Do not install replacements during the review.
+   Check that Codex app-server access goes through one shared client, not
+   per-command JSON-RPC code.
+   Check command descriptions and skill discovery against the shared
+   `dotfiles-help` registry rather than maintaining duplicate catalogues.
 5. Report a short table (group, cost, use, churn) and, for each finding,
    propose delete, merge, shrink, decouple tests or keep, with the lines it
    would save and what could break. Changes happen only on request.
