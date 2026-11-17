@@ -217,6 +217,32 @@ class DotfilesHelpTests(unittest.TestCase):
         self.assertIn("cleanup:", self.run_help("--list").stdout)
         self.assertNotIn("cleanup:", packages)
 
+    def test_agent_guide_uses_supported_subset_and_shared_descriptions(self):
+        guide = self.run_help("--agent-guide").stdout
+        candidates = self.run_help("--agent-guide", "--list").stdout
+        names = {line.split(":", 1)[0] for line in candidates.splitlines()}
+        self.assertEqual(names, {"codex-resume", "prune-branches", "audit-repo", "roadmaps", "pmu", "pma"})
+        self.assertIn("Discovery only", guide)
+        for name in names:
+            info = command_help.command_info(name)
+            self.assertIn(info.purpose, " ".join(guide.split()))
+            self.assertIn("Run: " + info.agent_run, guide)
+            script = REPO / info.agent_run.split("~/.dotfiles/", 1)[1]
+            self.assertTrue(script.is_file(), script)
+            reference = REPO / "agents/skills/dotfiles" / info.agent_reference
+            self.assertTrue(reference.is_file(), reference)
+            self.assertIn("Read first: ~/.dotfiles/agents/skills/dotfiles/" + info.agent_reference, guide)
+        self.assertNotIn("wipe-clean", guide)
+        self.assertEqual(
+            {line.split(":", 1)[0] for line in self.run_help("--agent-guide", "--packages", "--list").stdout.splitlines()},
+            {"pmu", "pma"},
+        )
+        detail = self.run_help("--agent-guide", "prune-branches").stdout
+        self.assertIn("scripts/prune-branches.sh", detail)
+        self.assertNotIn("scripts/codex-resume.py", detail)
+        self.run_help("--agent-guide", "wipe", expected=2)
+        self.assertEqual(self.run_help("--agent-guide", "wipe", "--list").stdout, "")
+
     def test_completion_names_distinguish_topics_from_colliding_commands(self):
         lines = self.run_help("--list").stdout.splitlines()
         names = [line.split(":", 1)[0] for line in lines]

@@ -108,8 +108,11 @@ says "dotfiles" and asks for a command or task, and its body runs a
 command only on a direct request, so mentioning one in discussion does
 nothing. Each command has a reference file in `references/` with the
 preview-before-change and approval steps agents follow. Keep command-specific
-guidance there: add another command as a reference file and a row in its table,
-not as a separate skill.
+guidance there: add another command as a reference file and attach its script
+and reference to the shared `scripts/lib/command_help.py` registry, not as a
+separate skill. `dotfiles-help --agent-guide` discovers just that supported
+subset using the same descriptions as ordinary help. It lists invocation and
+reference paths, but never grants execution permission.
 
 Other repo-authored skills may reuse these commands and consult their reference
 files instead of duplicating logic. They follow their own triggers; the user

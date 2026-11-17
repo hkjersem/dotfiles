@@ -234,6 +234,10 @@ by the cheat sheet, its completion candidates and individual command help.
 Usage syntax, flags and detailed behavior stay with each command; documentation
 keeps the longer workflows.
 
+`dotfiles-help --agent-guide` limits discovery to commands supported by the
+dotfiles skill, adding their direct script and reference paths. It reuses the
+same descriptions; discovery is not permission to execute the listed commands.
+
 In zsh, `G`, `H`, `T` and `L` are global aliases: use `files sizes G cache`
 to filter output, `files sizes H` or `files sizes T` for the first/last lines,
 and `dotfiles-help shell L` to page it. Quote these letters when you mean them

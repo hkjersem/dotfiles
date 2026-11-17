@@ -16,20 +16,28 @@ or questions about how a command works are not requests: answer them without
 running anything. If it is unclear which command, which options, or which
 repository or chat is meant, ask before running.
 
-## Commands
+## Discover commands
 
-| Command | Request | Run | Read first |
-|---------|---------|-----|------------|
-| `codex-resume` | Send `continue` or a message to a Codex desktop chat, now, at a time, or when a usage limit resets | `python3 ~/.dotfiles/scripts/codex-resume.py` | [references/codex-resume.md](references/codex-resume.md) |
-| `prune-branches` | Delete local branches, and their worktrees, whose remote branch is gone | `bash ~/.dotfiles/scripts/prune-branches.sh` | [references/prune-branches.md](references/prune-branches.md) |
-| `audit-repo` | Triage report for a repository: Git activity, tests, build, docs, packages | `bash ~/.dotfiles/scripts/audit-repo.sh` | [references/audit-repo.md](references/audit-repo.md) |
-| `roadmaps` | Show managed roadmaps, validate with `--check`, or refresh generated lists with `--sync` | `python3 ~/.dotfiles/scripts/roadmaps.py` | [references/roadmaps.md](references/roadmaps.md) |
-| `pmu` | Update npm, pnpm or bun dependencies, skipping releases newer than a cooldown | `bash ~/.dotfiles/scripts/package-manager/run.sh` | [references/package-managers.md](references/package-managers.md) |
-| `pma` | Audit dependencies for vulnerabilities, and fix them on request | `bash ~/.dotfiles/scripts/package-manager/audit.sh` | [references/package-managers.md](references/package-managers.md) |
+For an execution or discovery request, use the shared registry instead of a
+separate command catalogue:
 
-Match the request by command name or by task. Other dotfiles commands are not
-covered: say so rather than guessing a script. Read the reference before the
-first run in a conversation; each script also takes `--help`. Read the
+```sh
+python3 ~/.dotfiles/scripts/dotfiles-help.py --agent-guide
+python3 ~/.dotfiles/scripts/dotfiles-help.py --agent-guide <command-or-search-words>
+```
+
+This read-only lookup prints supported commands, descriptions, cautions,
+direct script invocations and the reference to read first. Match by name or
+task. A command appearing in ordinary `dotfiles-help` is not automatically
+supported by this skill; use the `--agent-guide` subset. If the flag, script or
+reference is unavailable, report it rather than guessing.
+For explanation-only questions, or if the user says not to run commands, read the registry in
+`~/.dotfiles/scripts/lib/command_help.py` as data and follow its reference
+instead of executing even the discovery lookup.
+
+Read the listed reference before the first execution in a conversation, then
+use the script's `--help` for current flags. Discovery never authorises execution
+or expands the user's requested scope. Read the
 matching doc in `~/.dotfiles/docs/` only when explaining how a command works,
 interpreting unexpected output, or when the reference does not cover the case.
 

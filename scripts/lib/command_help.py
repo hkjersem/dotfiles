@@ -21,6 +21,7 @@ Use a command name for examples and cautions, or search by what you want to do.
 
   -h, --help  Show this help
   --packages  Limit results to package-manager commands
+  --agent-guide  Show commands supported by the dotfiles skill, with script and reference paths
   --list      List completion candidates as name:description, one per line
 
 {examples}
@@ -51,6 +52,8 @@ class Command:
     examples: tuple[str, ...]
     changes: bool = False
     group: str = ""
+    agent_run: str = ""
+    agent_reference: str = ""
 
 
 COMMANDS = (
@@ -68,7 +71,9 @@ COMMANDS = (
             ("pmr lodash", "pmr --root lodash"), True),
     Command("pmu", "packages", "Preview or apply dependency updates with release-age cooldowns",
             "Asks before applying; --yes skips confirmation. --major permits breaking updates; --actions needs pnpm 12.7+.",
-            ("pmu --dry-run", "pmu react", "pmu --major", "pmu --actions"), True),
+            ("pmu --dry-run", "pmu react", "pmu --major", "pmu --actions"), True,
+            agent_run="bash ~/.dotfiles/scripts/package-manager/run.sh",
+            agent_reference="references/package-managers.md"),
     Command("pml", "packages", "Try changes in a local library, then undo the link",
             "Changes dependency links. Supports npm and pnpm 11+; undo before committing.",
             ("pml ../library", "pml --undo ../library"), True),
@@ -77,7 +82,9 @@ COMMANDS = (
             ("pmc --dry-run", "pmc"), True),
     Command("pma", "packages", "Audit vulnerabilities and apply supported fixes",
             "Applies fixes immediately by default; Bun only reports. --deep refreshes the pnpm lockfile.",
-            ("pma --dry-run", "pma"), True),
+            ("pma --dry-run", "pma"), True,
+            agent_run="bash ~/.dotfiles/scripts/package-manager/audit.sh",
+            agent_reference="references/package-managers.md"),
     Command("pmh", "packages", "Remember the package-manager wrappers",
             "Read-only. A shortcut for dotfiles-help --packages.",
             ("pmh", "pmh pml", "pmh update")),
@@ -119,14 +126,20 @@ COMMANDS = (
             ("wipe --help", "wipe '*.log' --file"), True),
     Command("prune-branches", "cleanup", "Preview stale Git branches and linked worktrees",
             "Fetches and asks before deleting. Never deletes never-pushed branches; preview first.",
-            ("prune-branches --dry-run", "prune-branches --older-than 30d"), True),
+            ("prune-branches --dry-run", "prune-branches --older-than 30d"), True,
+            agent_run="bash ~/.dotfiles/scripts/prune-branches.sh",
+            agent_reference="references/prune-branches.md"),
     Command("audit-repo", "repos", "Triage Git activity, workspaces, tests and dependencies",
             "Read-only; audit, outdated and CI-result checks may use the network.",
-            ("audit-repo", "audit-repo --workspaces", "audit-repo --skip-security")),
+            ("audit-repo", "audit-repo --workspaces", "audit-repo --skip-security"),
+            agent_run="bash ~/.dotfiles/scripts/audit-repo.sh",
+            agent_reference="references/audit-repo.md"),
     Command("roadmaps", "repos", "Separate overdue, due-today and upcoming items; show acceptance, active and ready-to-start work",
             "Read-only by default; --sync writes generated indexes for explicitly supplied paths.",
             ("roadmaps", "roadmaps .", "roadmaps --check", "roadmaps --check --strict .",
-             "roadmaps --sync ."), True),
+             "roadmaps --sync ."), True,
+            agent_run="python3 ~/.dotfiles/scripts/roadmaps.py",
+            agent_reference="references/roadmaps.md"),
     Command("gclone", "repos", "Clone a Git repository and enter its folder",
             "Downloads the repository and changes the current directory.",
             ("gclone https://github.com/owner/repo.git",), True),
@@ -138,7 +151,9 @@ COMMANDS = (
             ("agent-awake --status", "agent-awake --install"), True),
     Command("codex-resume", "agents", "Send or schedule a message to a Codex desktop chat",
             "Can start agent work. Scheduled and recurring runs create user LaunchAgents.",
-            ("codex-resume --limits", "codex-resume --time 15:30"), True),
+            ("codex-resume --limits", "codex-resume --time 15:30"), True,
+            agent_run="python3 ~/.dotfiles/scripts/codex-resume.py",
+            agent_reference="references/codex-resume.md"),
     Command("dotfiles-help", "setup", "Find custom commands by topic, name or task",
             "Read-only; examples are printed, never executed. This is a curated reference, not every plugin command.",
             ("dotfiles-help", "dotfiles-help packages", "dotfiles-help disk space")),
@@ -399,12 +414,15 @@ def help_epilog(name, extra=""):
     return "\n\n".join(part for part in (extra, examples(name)) if part)
 
 
-def detail(command, width):
+def detail(command, width, agent_guide=False):
     output.row("warn" if command.changes else "info", output.paint(command.name, "bold"), "")
     for line in textwrap.wrap(command.purpose, width=width):
         output.note(line)
     for line in textwrap.wrap(command.caution, width=width):
         output.note(output.paint(line, "dim"))
+    if agent_guide:
+        output.note("Run: " + command.agent_run)
+        output.note("Read first: ~/.dotfiles/agents/skills/dotfiles/" + command.agent_reference)
     for example in command.examples:
         if example == command.name:
             continue
@@ -426,6 +444,7 @@ def main(argv=None):
         return 0
     parser = ArgumentParser(add_help=False, allow_abbrev=False)
     parser.add_argument("--packages", action="store_true")
+    parser.add_argument("--agent-guide", action="store_true")
     parser.add_argument("--list", action="store_true")
     parser.add_argument("query", nargs="*")
     args = parser.parse_args(argv)
@@ -443,6 +462,8 @@ def main(argv=None):
             return 2
         topic = selected
     commands = [command for command in COMMANDS if topic is None or command.topic == topic]
+    if args.agent_guide:
+        commands = [command for command in commands if command.agent_run]
     if query:
         names = {" ".join(query), f"{topic} {' '.join(query)}"}
         if topic is None and query == ["z"]:
@@ -460,7 +481,7 @@ def main(argv=None):
         print(f"Error: no commands match {' '.join(args.query)!r}. Try dotfiles-help.", file=sys.stderr)
         return 2
     if args.list:
-        if topic is None and not query:
+        if topic is None and not query and not args.agent_guide:
             for name, topic_description in TOPICS.items():
                 print(f"{name}:Topic - {topic_description}")
         for command in commands:
@@ -469,8 +490,10 @@ def main(argv=None):
                 name = f"{command.topic} {name}"
             print(f"{name}:Command - {command.purpose}")
         return 0
-    detailed = bool(topic or query)
+    detailed = bool(topic or query or args.agent_guide)
     output.context("Read-only reference", "examples are not executed")
+    if args.agent_guide:
+        output.note("Discovery only; a direct request and the command reference govern execution.")
     width = max(20, min(88, shutil.get_terminal_size().columns) - 4)
     for name, topic_description in TOPICS.items():
         grouped = [command for command in commands if command.topic == name]
@@ -496,7 +519,7 @@ def main(argv=None):
             for index, command in enumerate(entries):
                 if index:
                     print()
-                detail(command, width)
+                detail(command, width, args.agent_guide)
     if not detailed:
         output.section("Help")
         output.row("info", "dotfiles-help <name>", "Examples and cautions for a command")

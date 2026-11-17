@@ -438,7 +438,11 @@ zpty -d z
         self.assertEqual(self.complete(["pmh"], " pml")["pmh"], {"pml"})
         flags = self.complete(["dotfiles-help", "pmh"])
         for command in flags:
-            self.assertEqual(flags[command], {"--help", "--list", "--packages"})
+            self.assertEqual(flags[command], {"--help", "--list", "--packages", "--agent-guide"})
+        self.assertEqual(
+            self.complete(["dotfiles-help"], " --agent-guide ")["dotfiles-help"],
+            {"codex-resume", "prune-branches", "audit-repo", "roadmaps", "pmu", "pma"},
+        )
 
     def test_cheat_sheet_completes_git_aliases_and_shell_shortcuts(self):
         self.assertEqual(self.complete(["dotfiles-help"], " git unst")["dotfiles-help"], {"unstage"})
