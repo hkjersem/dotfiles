@@ -14,8 +14,10 @@ import sys
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from files import ScanProgress, cache_locations, display, human_size, output, scan_sizes  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import output  # noqa: E402
 from lib import command_help  # noqa: E402
+from lib.filesystem import ScanProgress, cache_locations, display, human_size, scan_sizes  # noqa: E402
 from lib import orphan_caches  # noqa: E402
 
 

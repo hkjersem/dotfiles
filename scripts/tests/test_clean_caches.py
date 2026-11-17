@@ -193,7 +193,7 @@ class CleanCachesTests(unittest.TestCase):
 
         with patch.object(CACHES.subprocess, "run", side_effect=self.native), \
                 patch.object(CACHES, "scan_sizes", side_effect=scan), \
-                patch("files.time.monotonic", side_effect=itertools.count(0, 3)), \
+                patch("lib.filesystem.time.monotonic", side_effect=itertools.count(0, 3)), \
                 patch.object(CACHES.output, "progress", side_effect=lambda text: events.append("progress")), \
                 patch.object(CACHES.output, "progress_done", side_effect=lambda: events.append("cleared")), \
                 contextlib.redirect_stdout(Terminal()), contextlib.redirect_stderr(Terminal()):
