@@ -39,6 +39,7 @@ import time
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import agent_awake  # noqa: E402
 from agent_sessions import json_lines_from_end, session_name  # noqa: E402
+from processes import process_snapshot  # noqa: E402
 import output  # noqa: E402
 import command_help  # noqa: E402
 
@@ -134,23 +135,17 @@ def is_ours(entry):
 def agent_process(names):
     """The nearest ancestor process with one of these names, or None."""
     try:
-        listing = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,comm="], capture_output=True, text=True,
-                                 timeout=5).stdout
+        processes = process_snapshot()
     except (OSError, subprocess.SubprocessError):
         return None
-    parents, commands = {}, {}
-    for line in listing.splitlines():
-        parts = line.split(None, 2)
-        if len(parts) == 3 and parts[0].isdigit() and parts[1].isdigit():
-            parents[int(parts[0])] = int(parts[1])
-            commands[int(parts[0])] = os.path.basename(parts[2].strip())
     pid = os.getppid()
     for _ in range(20):
-        if commands.get(pid) in names:
+        process = processes.get(pid)
+        if process and os.path.basename(process.command) in names:
             return pid
-        if pid not in parents or pid <= 1:
+        if process is None or pid <= 1:
             return None
-        pid = parents[pid]
+        pid = process.parent
     return None
 
 

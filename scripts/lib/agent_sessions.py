@@ -4,6 +4,51 @@ import functools
 import json
 import os
 from pathlib import Path
+import re
+from typing import NamedTuple
+
+
+UUID = r"[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}"
+
+
+class RestorationRecord(NamedTuple):
+    cwd: str
+    launcher: str
+    pid: str
+    started: str
+    agent: str
+    app: str
+    session: str
+    observed: frozenset
+    invalid_observation: bool
+
+
+def restoration_record(lines, observations):
+    """Parse marker and observation metadata without resolving titles or transcripts."""
+    if len(lines) not in (7, 8):
+        return None
+    cwd, launcher, _, pid, started, initial, agent = lines[:7]
+    if not cwd or launcher not in ("copilot", "claude", "cplt") \
+            or agent not in ("copilot", "claude") or not pid.isdigit():
+        return None
+    session = initial if re.fullmatch(UUID, initial) else ""
+    observed = {session} if session else set()
+    invalid = bool(initial and not session)
+    valid = []
+    for stamp, content in observations:
+        if content and re.fullmatch(UUID, content[0]):
+            valid.append((stamp, content[0]))
+            observed.add(content[0])
+            if len(content) != 1:
+                invalid = True
+        else:
+            invalid = True
+    if valid:
+        valid.sort(key=lambda item: item[0], reverse=True)
+        session = valid[0][1]
+    return RestorationRecord(cwd, launcher, pid, started, agent,
+                             lines[7] if len(lines) == 8 else "",
+                             session, frozenset(observed), invalid)
 
 
 def agent_home(agent):

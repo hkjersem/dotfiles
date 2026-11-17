@@ -13,9 +13,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import agent_sessions  # noqa: E402
 import output  # noqa: E402
 import command_help  # noqa: E402
+from processes import process_snapshot  # noqa: E402
 
 
-UUID = r"[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}"
+UUID = agent_sessions.UUID
 HELP = f"""Usage: agent-sessions [--help]
 
 {command_help.description("agent-sessions")}
@@ -35,12 +36,7 @@ class Session(NamedTuple):
 
 
 def process_starts():
-    result = subprocess.run(
-        ["ps", "-A", "-o", "pid=", "-o", "lstart="],
-        capture_output=True, text=True, check=True, env={**os.environ, "LC_ALL": "C"},
-    )
-    return {parts[0]: " ".join(parts[1:]) for line in result.stdout.splitlines()
-            if len(parts := line.split()) == 6}
+    return {str(pid): process.started for pid, process in process_snapshot().items()}
 
 
 def read_optional(path):
@@ -56,24 +52,17 @@ def read_session(marker, starts, now):
     if lines is None:
         return None
     name, _, claim = marker.name.partition(".")
-    if len(lines) not in (7, 8):
-        return Session(name, "", "", "", "", "Invalid record")
-    cwd, launcher, _, pid, started, initial, agent = lines[:7]
-    app = lines[7] if len(lines) == 8 else ""
-    if not cwd or launcher not in ("copilot", "claude", "cplt") \
-            or agent not in ("copilot", "claude") or not pid.isdigit():
+    if agent_sessions.restoration_record(lines, []) is None:
+        launcher, pid = (lines[1], lines[3]) if len(lines) in (7, 8) else ("", "")
         return Session(name, "", "", launcher, pid, "Invalid record")
-    session = initial if re.fullmatch(UUID, initial) else ""
     observations = []
     for path in (marker.parent / f"{name}.current", Path.home() / ".cache/agent-sessions" / name):
         content, stamp = read_optional(path)
         activity = max(activity, stamp)
-        if content and re.fullmatch(UUID, content[0]):
-            observations.append((stamp, content[0]))
-    if observations:
-        # Stable sorting preserves .current on a timestamp tie, as the wrapper does.
-        observations.sort(key=lambda item: item[0], reverse=True)
-        session = observations[0][1]
+        if content is not None:
+            observations.append((stamp, content))
+    record = agent_sessions.restoration_record(lines, observations)
+    cwd, launcher, pid, started, agent, app, session = record[:7]
     live = pid in starts and (not started or starts[pid] == " ".join(started.split()))
     history = False
     if session:
@@ -163,7 +152,7 @@ def main(argv=None):
     try:
         entries = sessions(directory)
         report(directory, entries)
-    except (OSError, UnicodeError, subprocess.CalledProcessError) as error:
+    except (OSError, UnicodeError, subprocess.SubprocessError) as error:
         print(f"Error: could not read session restoration status: {error}", file=sys.stderr)
         return 1
     return int(any(entry.status == "Invalid record" for entry in entries))
