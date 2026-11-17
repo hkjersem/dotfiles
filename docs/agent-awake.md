@@ -77,9 +77,11 @@ While a hold counts, the helper sets `pmset disablesleep 1`, the only setting
 that keeps a closed MacBook awake without an external display; `caffeinate`
 and the agents' own keep-awake options only stop idle sleep. When no hold is
 left it sets `disablesleep 0` and, if the lid is closed and no external display
-is attached, runs `pmset sleepnow`. macOS can take a few seconds to report
-that the closed lid causes sleep again, so the helper checks for up to ten
-seconds before it leaves sleep to macOS. On battery below the `--battery` charge it
+is attached, runs `pmset sleepnow`. It looks for an external display in the
+display framebuffers, since in a dark wake, such as after a scheduled wake,
+macOS reports that the closed lid does not cause sleep even without one. When
+it cannot tell, it waits up to ten seconds for macOS to report that the closed
+lid causes sleep again, and otherwise leaves sleep to macOS. On battery below the `--battery` charge it
 allows sleep even while an agent works.
 
 The helper owns `disablesleep`: it clears a value you set by hand once no hold

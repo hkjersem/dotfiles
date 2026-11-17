@@ -30,9 +30,9 @@ WAKE_AFTER_SECONDS=600
 # helper. So each request gets a wake this many seconds before its time; the first one the helper catches
 # keeps the Mac awake, and the rest then change nothing.
 WAKE_OFFSETS="90 60 30 0"
-# After sleep was disabled, macOS takes a moment to report that closing the lid causes sleep again. In a
-# dark wake it does not report it at all, and macOS soon sleeps by itself. The helper checks this many
-# times, two seconds apart, before leaving sleep to macOS.
+# After sleep was disabled, macOS takes a moment to report that closing the lid causes sleep again. When it
+# cannot tell whether an external display is connected, the helper checks this many times, two seconds
+# apart, before leaving sleep to macOS.
 LID_CHECKS=5
 WAKE_HORIZON_SECONDS=$((8 * 24 * 3600))
 
@@ -159,8 +159,19 @@ sleep_disabled() {
     pmset -g 2>/dev/null | awk '$1 == "SleepDisabled" { print $2 }'
 }
 
+# Prints yes or no, or nothing when macOS lists no display framebuffers. An external port has "external" =
+# Yes; only a port with a display connected also has DisplayAttributes.
+external_display() {
+    ioreg -rw0 -c IOMobileFramebufferShim -d 1 2>/dev/null | awk '
+        /^\+-o/ { if (external && attributes) found = 1; seen = 1; external = attributes = 0 }
+        /"external" = Yes/ { external = 1 }
+        /"DisplayAttributes" = / { attributes = 1 }
+        END { if (external && attributes) found = 1; if (seen) print (found ? "yes" : "no") }'
+}
+
 # Prints open, sleeps (closed, and closing it puts the Mac to sleep) or awake (closed, but something such as
-# an external display or disabled sleep keeps the Mac awake).
+# an external display or disabled sleep keeps the Mac awake). In a dark wake macOS reports that the closed
+# lid does not cause sleep even without an external display, so that case counts as sleeps too.
 lid_state() {
     local state
     state=$(ioreg -r -k AppleClamshellState -d 1 2>/dev/null)
@@ -169,9 +180,13 @@ lid_state() {
         *) echo open; return 0 ;;
     esac
     case "$state" in
-        *'"AppleClamshellCausesSleep" = Yes'*) echo sleeps ;;
-        *) echo awake ;;
+        *'"AppleClamshellCausesSleep" = Yes'*) echo sleeps; return 0 ;;
     esac
+    if [ "$(external_display)" = no ]; then
+        echo sleeps
+    else
+        echo awake
+    fi
 }
 
 # A prompt submitted while the helper waits keeps the Mac awake after all.
@@ -212,7 +227,7 @@ reconcile() {
         esac
         checks=$((checks + 1))
         if [ "$checks" -ge "$LID_CHECKS" ]; then
-            log "The lid is closed, but macOS does not report that it causes sleep, as with an external display or in a dark wake; leaving sleep to macOS."
+            log "The lid is closed, but an external display or macOS keeps the Mac awake; leaving sleep to macOS."
             return 0
         fi
     done

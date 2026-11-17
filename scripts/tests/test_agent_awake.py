@@ -32,13 +32,18 @@ esac
 """
 STUBS = {
     "pmset": PMSET_STUB,
-    "ioreg": '#!/bin/bash\ncat "$STUB/ioreg"\n',
+    "ioreg": '#!/bin/bash\ncase "$*" in *IOMobileFramebufferShim*) cat "$STUB/framebuffers" 2>/dev/null ;; *) cat "$STUB/ioreg" ;; esac\n',
     "id": "#!/bin/bash\necho 0\n",
     # Runs what a test wants to happen while the helper waits for the clamshell state.
     "sleep": '#!/bin/bash\n[ -x "$STUB/during-sleep" ] && "$STUB/during-sleep"\nexit 0\n',
 }
 LID_CLOSED = '"AppleClamshellState" = Yes\n"AppleClamshellCausesSleep" = Yes\n'
 LID_CLOSED_WITH_DISPLAY = '"AppleClamshellState" = Yes\n"AppleClamshellCausesSleep" = No\n'
+# A built-in display and an unused external port, as ioreg lists them; a connected display adds attributes.
+FRAMEBUFFER = '+-o IOMobileFramebufferShim  <class IOMobileFramebufferShim>\n  {\n'
+NO_EXTERNAL_DISPLAY = (FRAMEBUFFER + '    "DisplayAttributes" = {"PortID"=0}\n  }\n'
+                       + FRAMEBUFFER + '    "external" = Yes\n  }\n')
+EXTERNAL_DISPLAY = NO_EXTERNAL_DISPLAY + FRAMEBUFFER + '    "DisplayAttributes" = {"PortID"=32}\n    "external" = Yes\n  }\n'
 ON_BATTERY = "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=1)\t{}%; discharging; 3:00 remaining\n"
 ON_ADAPTER = "Now drawing from 'AC Power'\n -InternalBattery-0 (id=1)\t80%; charged; 0:00 remaining\n"
 
@@ -461,6 +466,19 @@ class DaemonTests(unittest.TestCase):
                 calls, log = self.reconcile()
                 self.assertEqual(calls, ["-a disablesleep 0"])
                 self.assertEqual("leaving sleep to macOS" in log, lid == LID_CLOSED_WITH_DISPLAY)
+
+    def test_release_in_a_dark_wake_without_an_external_display_sleeps_at_once(self):
+        # After a scheduled wake macOS reports that the closed lid does not cause sleep, display or not.
+        self.set_state(disabled=1, lid=LID_CLOSED_WITH_DISPLAY)
+        (self.stub / "framebuffers").write_text(NO_EXTERNAL_DISPLAY)
+        calls, log = self.reconcile()
+        self.assertEqual(calls, ["-a disablesleep 0", "sleepnow"])
+        self.assertIn("The lid is closed; sleeping now.", log)
+        (self.stub / "framebuffers").write_text(EXTERNAL_DISPLAY)
+        self.set_state(disabled=1)
+        calls, log = self.reconcile()
+        self.assertEqual(calls, ["-a disablesleep 0"])
+        self.assertIn("leaving sleep to macOS", log)
 
     def test_release_waits_for_the_closed_lid_to_cause_sleep_again(self):
         # In a dark wake, macOS takes a while to report that the lid causes sleep after disablesleep is cleared.
