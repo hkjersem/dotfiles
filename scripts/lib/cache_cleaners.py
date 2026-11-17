@@ -67,9 +67,7 @@ def query(tool, args, environment=()):
 
 def tool_environment(overrides=()):
     return {**os.environ, "GOTOOLCHAIN": "local", "GOTELEMETRY": "off", "MISE_OFFLINE": "1",
-            "COREPACK_ENABLE_NETWORK": "0", "COREPACK_ENABLE_AUTO_PIN": "0",
-            "npm_config_manage_package_manager_versions": "false",
-            "PNPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS": "false", **dict(overrides)}
+            "COREPACK_ENABLE_NETWORK": "0", "COREPACK_ENABLE_AUTO_PIN": "0", **dict(overrides)}
 
 
 def go_executable():
@@ -243,10 +241,15 @@ def validated_path(name, value):
 
 
 def pnpm_version(tool, prefix=()):
-    version = query(tool, (*prefix, "--version"))
+    version = query(tool, (*prefix, "--version"),
+                    (("npm_config_manage_package_manager_versions", "false"),))
     if not re.fullmatch(r"\d+\.\d+\.\d+", version):
         raise OSError(f"unsupported pnpm version: {display(version)}")
     return version
+
+
+def pnpm_environment(version):
+    return (("npm_config_manage_package_manager_versions", "false"),) if version.startswith("10.") else ()
 
 
 def installed_pnpm():
@@ -300,7 +303,7 @@ def pnpm_cleaners():
         raise OSError("pnpm is not installed")
     current = replace(BY_NAME["pnpm"], tool=str(Path(executable).resolve()))
     version = pnpm_version(current.tool)
-    current = replace(current, version=version)
+    current = replace(current, version=version, environment=pnpm_environment(version))
     path = cache_path(current)
     if not re.fullmatch(r"v\d+", path.name):
         raise OSError(f"unsupported pnpm store layout: {display(path)}")
@@ -316,6 +319,7 @@ def pnpm_cleaners():
             version = pnpm_version(tool, prefix)
             options = (*prefix, "--store-dir", str(path.parent))
             candidate = replace(current, tool=tool, prefix=prefix, version=version,
+                                environment=pnpm_environment(version),
                                 query=(*options, "store", "path"),
                                 command=(*options, "store", "prune"))
             target = cache_path(candidate)
@@ -344,9 +348,10 @@ def cleaner_paths(cleaner):
     if cleaner.version:
         major = int(cleaner.version.split(".")[0])
         if major >= 11:
-            value = query(cleaner.tool, (*cleaner.prefix, "cache", "path"))
+            value = query(cleaner.tool, (*cleaner.prefix, "cache", "path"), cleaner.environment)
         else:
-            value = query(cleaner.tool, (*cleaner.prefix, "config", "get", "cache-dir"))
+            value = query(cleaner.tool, (*cleaner.prefix, "config", "get", "cache-dir"),
+                          cleaner.environment)
             if value == "undefined":
                 value = str(Path(os.environ.get(
                     "XDG_CACHE_HOME", Path.home() / "Library/Caches")) / "pnpm")

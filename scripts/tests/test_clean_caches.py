@@ -35,6 +35,8 @@ class CleanCachesTests(unittest.TestCase):
         })
         environment.start()
         self.addCleanup(environment.stop)
+        os.environ.pop("npm_config_manage_package_manager_versions", None)
+        os.environ.pop("PNPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS", None)
         self.cache = self.home / "custom-uv-cache"
         self.cache.mkdir()
         (self.cache / "data").write_bytes(b"x" * 10_000)
@@ -415,7 +417,11 @@ class CleanCachesTests(unittest.TestCase):
             raise AssertionError(command)
         self.assertEqual(kwargs["cwd"], self.home)
         self.assertEqual(kwargs["env"]["COREPACK_ENABLE_NETWORK"], "0")
-        self.assertEqual(kwargs["env"]["npm_config_manage_package_manager_versions"], "false")
+        if version.startswith("10.") or args == ["--version"]:
+            self.assertEqual(kwargs["env"]["npm_config_manage_package_manager_versions"], "false")
+        else:
+            self.assertIsNone(kwargs["env"].get("npm_config_manage_package_manager_versions"),
+                              "pnpm 11+ should not receive the pnpm 10 setting")
         return subprocess.CompletedProcess(command, 0, value, "")
 
     def test_pnpm_previews_all_generations_and_counts_shared_cache_once(self):
@@ -719,6 +725,8 @@ class CleanCachesTests(unittest.TestCase):
             target = targets[command[0]]
             self.assertEqual(command[1], str(Path(command[0]).with_name("npm")))
             self.assertEqual(kwargs["env"]["PATH"].split(os.pathsep)[0], str(Path(command[0]).parent))
+            self.assertIsNone(kwargs["env"].get("npm_config_manage_package_manager_versions"),
+                              "npm must not receive the pnpm-only setting")
             if command[2:] == ["config", "get", "cache"]:
                 return subprocess.CompletedProcess(command, 0, str(target), "")
             self.assertEqual(command[2:], ["cache", "clean", "--force"])
