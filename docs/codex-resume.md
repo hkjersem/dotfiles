@@ -157,7 +157,8 @@ once the chat is not busy and loaded. If the app isn't running, it is opened in
 the background. The app doesn't send to a chat it hasn't loaded, so when it
 hasn't taken the message within 30 seconds, the chat is opened in the
 background, also on a locked screen. That switches the app to the chat, so it
-is skipped while you may be using the app: Codex is the frontmost app, the
+is skipped while you may be using the app: a screen can show it (the lid is
+open, or an external display is connected), Codex is the frontmost app, the
 screen is unlocked, and you've used the Mac within the last five minutes. It
 is tried again every few seconds, so it still opens once you step away. If
 the app hasn't taken the message within two minutes, the message stays queued

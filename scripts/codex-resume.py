@@ -10,7 +10,8 @@ draft in the composer is left alone. When the app is not running, it is opened
 in the background. If the app has not taken the message within 30 seconds, the
 chat is probably not loaded, so it is opened in the background through a
 codex://threads link, which switches the app to it; that is skipped while you
-may be using the app: it is frontmost, the screen is unlocked, and you used the
+may be using the app: a screen can show it (the lid is open or an external
+display is connected), it is frontmost, the screen is unlocked, and you used the
 Mac within five minutes. If the app has not taken the message within two
 minutes, it stays queued and the app sends it once the chat is open. The chat is
 chosen with --chat or --project; without them it is the chat on this Mac with
@@ -538,12 +539,28 @@ def probe(*command):
     return subprocess.run(command, capture_output=True, check=True, timeout=10).stdout
 
 
+def external_display():
+    """Whether a display other than the built-in one is connected."""
+    import ctypes
+    graphics = ctypes.CDLL("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+    graphics.CGDisplayIsBuiltin.restype, graphics.CGDisplayIsBuiltin.argtypes = ctypes.c_bool, [ctypes.c_uint32]
+    displays, count = (ctypes.c_uint32 * 16)(), ctypes.c_uint32()
+    if graphics.CGGetOnlineDisplayList(16, displays, ctypes.byref(count)):
+        raise OSError("the connected displays cannot be read")
+    return any(not graphics.CGDisplayIsBuiltin(displays[index]) for index in range(count.value))
+
+
 def codex_in_use():
-    """Whether you may be using the Codex app: it is frontmost, the screen is unlocked, and you used the Mac
-    within OPEN_CHAT_IDLE_SECONDS. When this cannot be read, it counts as in use."""
+    """Whether you may be using the Codex app: a screen can show it (the lid is open or an external display is
+    connected), it is frontmost, the screen is unlocked, and you used the Mac within OPEN_CHAT_IDLE_SECONDS.
+    When this cannot be read, it counts as in use."""
     try:
         users = plistlib.loads(probe("/usr/sbin/ioreg", "-n", "Root", "-d1", "-a")).get("IOConsoleUsers", [])
         if any(user.get("CGSSessionScreenIsLocked") for user in users):
+            return False
+        # With the lid closed, CoreGraphics still reports the built-in display as active, so the lid is read.
+        lid = plistlib.loads(probe("/usr/sbin/ioreg", "-r", "-k", "AppleClamshellState", "-d1", "-a"))
+        if any(entry.get("AppleClamshellState") for entry in lid) and not external_display():
             return False
         hid = plistlib.loads(probe("/usr/sbin/ioreg", "-r", "-c", "IOHIDSystem", "-d1", "-a"))
         if min(entry["HIDIdleTime"] for entry in hid) / 1e9 >= OPEN_CHAT_IDLE_SECONDS:
@@ -552,9 +569,9 @@ def codex_in_use():
         info = probe("/usr/bin/lsappinfo", "info", "-only", "bundleid", front).decode() if front else ""
     except (OSError, subprocess.SubprocessError, ValueError, ExpatError, KeyError, TypeError, AttributeError):
         return True
-    if "CFBundleIdentifier" not in info:
-        return True
-    return f'"{APP_BUNDLE_ID}"' in info
+    # macOS 27 prints bundleID="…"; older versions printed "CFBundleIdentifier"="…".
+    found = re.search(r'(?:"CFBundleIdentifier"|bundleID)="([^"]*)"', info)
+    return found is None or found.group(1) == APP_BUNDLE_ID
 
 
 def open_chat(chat, stamp, announce=True):

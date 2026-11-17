@@ -2011,25 +2011,33 @@ class CodexResumeTests(unittest.TestCase):
                                  [["/usr/bin/open", "-g", "codex://threads/01a1-mine"]] * len(results))
 
     def test_codex_counts_as_in_use_only_when_frontmost_unlocked_and_recently_used(self):
-        def probes(locked=False, idle=10, front="com.openai.codex", asn=b"ASN:0x0-0x2c02c:\n"):
+        def probes(locked=False, idle=10, front="com.openai.codex", asn=b"ASN:0x0-0x2c02c:\n", lid_closed=False,
+                   info='[ NULL ]  ASN:0x0-0x41041: (in front) \n    bundleID="{}"\n    bundle path=[ NULL ] \n'):
             users = [{"kCGSSessionOnConsoleKey": True, **({"CGSSessionScreenIsLocked": True} if locked else {})}]
             outputs = {
                 "Root": plistlib.dumps({"IOConsoleUsers": users}),
+                "AppleClamshellState": plistlib.dumps([{"AppleClamshellState": lid_closed}]),
                 "IOHIDSystem": plistlib.dumps([{"HIDIdleTime": int(idle * 1e9)}]),
                 "front": asn,
-                "info": f'"CFBundleIdentifier"="{front}"\n'.encode(),
+                "info": info.format(front).encode(),
             }
             return lambda *command: next(value for key, value in outputs.items() if key in command)
 
-        for case, fake, expected in (
-            ("frontmost, unlocked and used", probes(), True),
-            ("screen locked", probes(locked=True), False),
-            ("idle five minutes", probes(idle=300), False),
-            ("another app frontmost", probes(front="com.microsoft.VSCode"), False),
-            ("no frontmost app read", probes(asn=b""), True),
-            ("state unreadable", MagicMock(side_effect=subprocess.CalledProcessError(1, "ioreg")), True),
+        for case, fake, external, expected in (
+            ("frontmost, unlocked and used", probes(), False, True),
+            ("screen locked", probes(locked=True), False, False),
+            ("lid closed without an external display", probes(lid_closed=True), False, False),
+            ("lid closed with an external display", probes(lid_closed=True), True, True),
+            ("idle five minutes", probes(idle=300), False, False),
+            ("another app frontmost", probes(front="com.microsoft.VSCode"), False, False),
+            ("another app frontmost, older format",
+             probes(front="com.microsoft.VSCode", info='"CFBundleIdentifier"="{}"\n'), False, False),
+            ("frontmost, older format", probes(info='"CFBundleIdentifier"="{}"\n'), False, True),
+            ("no frontmost app read", probes(asn=b""), False, True),
+            ("state unreadable", MagicMock(side_effect=subprocess.CalledProcessError(1, "ioreg")), False, True),
         ):
-            with self.subTest(case), patch.object(codex_resume, "probe", side_effect=fake):
+            with self.subTest(case), patch.object(codex_resume, "probe", side_effect=fake), \
+                    patch.object(codex_resume, "external_display", return_value=external):
                 self.assertEqual(codex_resume.codex_in_use(), expected)
 
     def test_queue_reports_how_the_reply_it_started_ended(self):
