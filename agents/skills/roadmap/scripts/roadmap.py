@@ -736,18 +736,28 @@ def check_report(args: argparse.Namespace) -> Tuple[Report, List[Brief]]:
 
 
 def due_lines(briefs: List[Brief], today: datetime.date,
-              due_soon_days: int = DUE_SOON_DAYS) -> List[Tuple[str, str]]:
+              due_soon_days: int = DUE_SOON_DAYS,
+              bucket: Optional[str] = None) -> List[Tuple[str, str]]:
     rows: List[Tuple[datetime.date, str, str]] = []
     for b in briefs:
         if not is_open(b) or (b.routine and horizon(b) == "later"):
             continue
         due = b.next_due()
-        if b.routine and due is None and not b.get("last_done") and parse_every(b.get("every")):
+        if (bucket != "upcoming" and b.routine and due is None and
+                not b.get("last_done") and parse_every(b.get("every"))):
             rows.append((datetime.date.min, b.slug, f"  {b.slug}: routine not done yet"))
             continue
-        if due is None or (due - today).days > due_soon_days:
+        if due is None:
             continue
         days = (due - today).days
+        if bucket == "overdue" and days >= 0:
+            continue
+        if bucket == "today" and days != 0:
+            continue
+        if bucket == "upcoming" and days <= 0:
+            continue
+        if bucket is None and days > due_soon_days:
+            continue
         when = (f"overdue since {due.isoformat()} ({-days} day(s))" if days < 0 else
                 "due today" if days == 0 else f"due {due.isoformat()} (in {days} day(s))")
         rows.append((due, b.slug, f"  {b.slug}: {when}"))
@@ -787,8 +797,14 @@ class Overview:
                 return f"parked until: {b.get('when')}"
             return self.held.get(slug)
 
-        self.due = [line + (f" ({due_note(slug)})" if due_note(slug) else "")
-                    for slug, line in due_lines(briefs, today, due_soon_days)]
+        def annotate(lines: List[Tuple[str, str]]) -> List[str]:
+            return [line + (f" ({due_note(slug)})" if due_note(slug) else "")
+                    for slug, line in lines]
+
+        self.due = annotate(due_lines(briefs, today, due_soon_days))
+        self.overdue = annotate(due_lines(briefs, today, bucket="overdue"))
+        self.due_today = annotate(due_lines(briefs, today, bucket="today"))
+        self.upcoming = annotate(due_lines(briefs, today, bucket="upcoming"))
         self.can_start: List[str] = []
         self.needs_planning: List[str] = []
         self.waiting: List[str] = []

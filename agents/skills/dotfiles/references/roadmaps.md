@@ -15,13 +15,15 @@ beside the index, or at the repository root.
 ## Report
 
 The overview and check modes are read-only. No mode fetches, executes project
-code, migrates layouts or changes item statuses. The overview shows overdue
-items and items due within three days, work awaiting acceptance, active work,
-ready-to-start items and validation errors. Due headings are yellow, current-work
-headings (including acceptance) cyan, and ready-to-start headings dimmed; pipes and `NO_COLOR`
-keep output plain. Ready-to-start items show their slug and title, even when
-there is no due or active work. Roadmaps without any of these items or errors
-appear under "Nothing needs attention".
+code, migrates layouts or changes item statuses. The overview separates overdue
+items, items due today and future-dated items under "Upcoming", then shows work
+awaiting acceptance, active work, ready-to-start items and validation errors.
+Overdue and due-today headings are yellow, current-work headings (including
+acceptance) cyan, and upcoming and ready-to-start headings dimmed; pipes and
+`NO_COLOR` keep output plain.
+Ready-to-start items show their slug and title, even when there is no due or
+active work. Roadmaps without any of these items or errors appear under
+"Nothing needs attention".
 Task rows escape terminal control characters from roadmap metadata.
 
 For detailed validation, use `roadmaps --check .` or `roadmaps . --check`.

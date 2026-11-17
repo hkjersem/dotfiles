@@ -238,13 +238,20 @@ Exit status: 0 success; 1 errors or no roadmaps in check/sync; 2 usage; 130 Ctrl
         verifying = [b for b in view.now if b.status == "verifying"]
         active = [b for b in view.now if b.status != "verifying"]
         name = os.path.basename(root)
-        if not (view.due or verifying or active or view.can_start or report.errors):
+        if not (view.overdue or view.due_today or view.upcoming or verifying or active or
+                view.can_start or report.errors):
             quiet.append(name)
             continue
         output.section(f"{name}  {home_short(root)}")
-        if view.due:
-            output.subsection(output.paint(f"Due (overdue or within {DUE_SOON_DAYS} days)", "yellow"))
-            print("\n".join("  " + display_text(line) for line in view.due))
+        if view.overdue:
+            output.subsection(output.paint("Overdue", "yellow"))
+            print("\n".join("  " + display_text(line) for line in view.overdue))
+        if view.due_today:
+            output.subsection(output.paint("Due today", "yellow"))
+            print("\n".join("  " + display_text(line) for line in view.due_today))
+        if view.upcoming:
+            output.subsection(output.paint("Upcoming", "dim"))
+            print("\n".join("  " + display_text(line) for line in view.upcoming))
         if verifying:
             output.subsection(output.paint("Awaiting your acceptance", "cyan"))
             print("\n".join(display_text(f"    {b.slug}: {b.title}") for b in verifying))

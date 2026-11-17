@@ -323,8 +323,11 @@ class RoadmapsTests(unittest.TestCase):
         self.assertTrue(out.startswith("2026-10-21\n"), out)
         busy = out.split("─ busy  ~/repos/busy ")[1].split("\n─ ")[0]
         self.assertIn("    weekly: overdue since 2026-10-08 (13 day(s))", busy)
-        self.assertIn("    launch: due 2026-10-23 (in 2 day(s))", busy)
-        self.assertNotIn("later", busy, "dates beyond three days are not due yet")
+        overdue = busy.split("  ▸ Overdue\n")[1].split(
+            "\n  ▸ Upcoming")[0]
+        self.assertNotIn("launch:", overdue)
+        self.assertIn("  ▸ Upcoming\n    launch: due 2026-10-23 (in 2 day(s))\n"
+                      "    later: due 2026-12-01 (in 41 day(s))", busy)
         self.assertIn("  ▸ Awaiting your acceptance\n    built: Built", busy)
         self.assertIn("  ▸ In progress\n    doing: Doing, blocked: needs key", busy)
         self.assertIn("─ calm  ~/repos/calm ", out)
@@ -333,7 +336,7 @@ class RoadmapsTests(unittest.TestCase):
         self.assertNotIn("hidden", out)
         self.assertNotIn("other", out)
 
-    def test_due_window_includes_three_days_but_not_four(self):
+    def test_overdue_due_today_and_future_items_are_separate(self):
         self.make_roadmap("repo", {
             slug: (f"title: {slug}\nstatus: planned\ndue: {date}", "")
             for slug, date in (("overdue", "2026-10-20"), ("today", "2026-10-21"),
@@ -341,11 +344,16 @@ class RoadmapsTests(unittest.TestCase):
         })
         result = self.run_roadmaps(str(self.home / "repo"))
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("Due (overdue or within 3 days)", result.stdout)
-        self.assertIn("overdue: overdue since 2026-10-20 (1 day(s))", result.stdout)
-        self.assertIn("today: due today", result.stdout)
-        self.assertIn("boundary: due 2026-10-24 (in 3 day(s))", result.stdout)
-        self.assertNotIn("future:", result.stdout)
+        self.assertIn("  ▸ Overdue\n    overdue: overdue since 2026-10-20 (1 day(s))",
+                      result.stdout)
+        self.assertIn("  ▸ Due today\n    today: due today", result.stdout)
+        self.assertNotIn("boundary:", result.stdout.split("Upcoming")[0])
+        self.assertIn("Upcoming\n    boundary: due 2026-10-24 (in 3 day(s))\n"
+                      "    future: due 2026-10-25 (in 4 day(s))", result.stdout)
+        self.assertLess(result.stdout.index("  ▸ Overdue"),
+                        result.stdout.index("  ▸ Due today"))
+        self.assertLess(result.stdout.index("  ▸ Due today"),
+                        result.stdout.index("  ▸ Upcoming"))
 
     def test_future_only_roadmap_does_not_need_attention(self):
         self.make_roadmap("repo", {
@@ -353,17 +361,22 @@ class RoadmapsTests(unittest.TestCase):
         })
         result = self.run_roadmaps(str(self.home / "repo"))
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("Nothing needs attention: repo", result.stdout)
-        self.assertNotIn("▸ Due", result.stdout)
+        self.assertNotIn("Nothing needs attention: repo", result.stdout)
+        self.assertIn("  ▸ Upcoming\n    future: due 2026-10-25 (in 4 day(s))",
+                      result.stdout)
 
     def test_headings_distinguish_due_current_and_ready_work_only_on_terminals(self):
         self.make_roadmap("repo", {
-            "due": ("title: Due\nstatus: planned\ndue: 2026-10-24", ""),
+            "overdue": ("title: Overdue\nstatus: planned\ndue: 2026-10-20", ""),
+            "due": ("title: Due\nstatus: planned\ndue: 2026-10-21", ""),
+            "upcoming": ("title: Upcoming\nstatus: planned\ndue: 2026-10-24", ""),
             "working": ("title: Working\nstatus: active", ""),
             "built": ("title: Built\nstatus: verifying", "\n## Acceptance\n"),
             "next": ("title: Next\nstatus: ready", ""),
         })
-        headings = (("Due (overdue or within 3 days)", "\033[1;33m"),
+        headings = (("Overdue", "\033[1;33m"),
+                    ("Due today", "\033[1;33m"),
+                    ("Upcoming", "\033[2m"),
                     ("In progress", "\033[0;36m"),
                     ("Awaiting your acceptance", "\033[0;36m"),
                     ("Ready to start: 1", "\033[2m"))

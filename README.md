@@ -38,13 +38,14 @@ commit or another install. Shell settings may require a new shell.
 | `dotfiles-defaults` | Apply macOS system preferences |
 | `dotfiles-audit` | Check for drift between repo and installed state (includes skills) |
 | `dotfiles-profile` | Show or choose the machine's personal/work profile |
-| `roadmaps` | Show due items, items awaiting acceptance, work in progress and errors across `roadmap` skill roadmaps in the repositories, or folders whose direct subfolders are repositories, listed one per line in the machine-local `~/.config/dotfiles/roadmap-paths`; or pass paths directly. Finds `roadmap.md` or `roadmaps.md` (any casing) at the root or in `docs/`, `tasks/` or `planning/`, with briefs in `roadmap/` beside the index or at the repository root. Add `--check` for detailed validation |
+| `roadmaps` | Show overdue, due-today and upcoming items, items awaiting acceptance, work in progress and errors across `roadmap` skill roadmaps in the repositories, or folders whose direct subfolders are repositories, listed one per line in the machine-local `~/.config/dotfiles/roadmap-paths`; or pass paths directly. Finds `roadmap.md` or `roadmaps.md` (any casing) at the root or in `docs/`, `tasks/` or `planning/`, with briefs in `roadmap/` beside the index or at the repository root. Add `--check` for detailed validation |
 
-The overview includes overdue items and items due within three days, and lists
-each ready-to-start task by its slug and title, even without due or active work.
-Headings are yellow for due items, cyan for current work (including acceptance),
-and dimmed for ready-to-start work. Pipes and `NO_COLOR` keep the output plain.
-Task rows escape terminal control characters from roadmap metadata.
+The overview separates overdue items, items due today, and future-dated items
+under Upcoming, and lists each ready-to-start task by its slug and title, even
+without due or active work. Headings are yellow for overdue and due-today items,
+dimmed for upcoming and ready-to-start work, and cyan for current work
+(including acceptance). Pipes and `NO_COLOR` keep the output plain. Task rows
+escape terminal control characters from roadmap metadata.
 
 Use `roadmaps --check .` (or `roadmaps . --check`) to validate the current
 repository without changing files. `roadmaps --check` validates all configured
