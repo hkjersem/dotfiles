@@ -243,6 +243,11 @@ class DotfilesHelpTests(unittest.TestCase):
         self.run_help("--agent-guide", "wipe", expected=2)
         self.assertEqual(self.run_help("--agent-guide", "wipe", "--list").stdout, "")
 
+    def test_agent_sessions_help_explains_how_to_view_the_list(self):
+        help_text = self.run_help("--help", command="agent-sessions").stdout
+        self.assertIn("Run agent-sessions without arguments to view the list.", help_text)
+        self.assertIn("does not resume or delete sessions", help_text)
+
     def test_completion_names_distinguish_topics_from_colliding_commands(self):
         lines = self.run_help("--list").stdout.splitlines()
         names = [line.split(":", 1)[0] for line in lines]

@@ -144,7 +144,7 @@ COMMANDS = (
             "Downloads the repository and changes the current directory.",
             ("gclone https://github.com/owner/repo.git",), True),
     Command("agent-sessions", "agents", "List tracked terminal sessions and restoration status",
-            "Read-only; does not resume or delete sessions.",
+            "Run agent-sessions without arguments to view the list. Read-only; does not resume or delete sessions.",
             ("agent-sessions",)),
     Command("agent-awake", "agents", "Keep the Mac awake while an agent works",
             "Opt-in per Mac. Installation adds agent hooks and a root helper; requires sudo.",
