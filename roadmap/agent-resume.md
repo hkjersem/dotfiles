@@ -58,6 +58,10 @@ Claude Code findings, 2026-11-03, against Claude Code 2.1.312, its docs
   `claude agents --json` lists open sessions (interactive and background), and
   `claude attach <id>` opens a background session in a terminal.
 
+Codex app-server access goes through the shared client
+`scripts/lib/codex_app_server.py`. Build the Codex backend on that client
+rather than on code inside `codex-resume.py`.
+
 ## Scope
 
 - In scope: the `agent-resume` command with Codex and Claude Code backends,

@@ -71,25 +71,6 @@ def local_zone(name):
         time.tzset()
 
 
-FAKE_APP_SERVER = """#!/usr/bin/env python3
-import json, sys
-mode = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] != "app-server" else "{mode}"
-for line in sys.stdin:
-    request = json.loads(line)
-    if request.get("id") == 1:
-        experimental = request["params"].get("capabilities", {{}}).get("experimentalApi")
-        print(json.dumps({{"id": 1, "result": {{}}}}), flush=True)
-    elif request.get("id") == 2 and mode == "exit":
-        sys.exit(0)
-    elif request.get("id") == 2 and mode != "silent":
-        if mode == "error":
-            reply = {{"id": 2, "error": {{"message": "not signed in"}}}}
-        else:
-            reply = {{"id": 2, "result": {{"method": request["method"], "params": request.get("params"),
-                                           "experimentalApi": experimental}}}}
-        print("not json", flush=True)
-        print(json.dumps(reply), flush=True)
-"""
 REAL_APP_SERVER_REQUEST = codex_resume.app_server_request
 REAL_OPEN_APP = codex_resume.open_app
 REAL_OPEN_CHAT = codex_resume.open_chat
@@ -697,63 +678,11 @@ class CodexResumeTests(unittest.TestCase):
                     codex_resume.main(arguments)
                 self.assertEqual(error.exception.code, 2)
 
-    def fake_cli(self, mode):
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        cli = Path(temporary.name) / "codex"
-        cli.write_text(FAKE_APP_SERVER.format(mode=mode))
-        cli.chmod(0o755)
-        patcher = patch.object(codex_resume, "CODEX_CLI_PATHS", (cli,))
-        patcher.start()
-        self.addCleanup(patcher.stop)
-
-    def test_app_server_request_waits_for_the_reply_before_closing_input(self):
-        self.fake_cli("answer")
-        self.assertEqual(
-            REAL_APP_SERVER_REQUEST("account/rateLimits/read"),
-            {"method": "account/rateLimits/read", "params": None, "experimentalApi": True},
-        )
-        self.assertEqual(
-            REAL_APP_SERVER_REQUEST("thread/queue/list", {"threadId": "01a1"}),
-            {"method": "thread/queue/list", "params": {"threadId": "01a1"}, "experimentalApi": True},
-        )
-
-    def test_app_server_errors_and_silence_are_reported(self):
-        self.fake_cli("error")
-        with self.assertRaisesRegex(codex_resume.AppServerRejectedError,
-                                    "rejected account/rateLimits/read: not signed in"):
-            REAL_APP_SERVER_REQUEST("account/rateLimits/read")
-        self.fake_cli("exit")
-        with self.assertRaisesRegex(RuntimeError, "exited without answering") as error:
-            REAL_APP_SERVER_REQUEST("account/rateLimits/read")
-        self.assertNotIsInstance(error.exception, codex_resume.AppServerRejectedError)
-        self.fake_cli("silent")
-        with patch.object(codex_resume, "APP_SERVER_TIMEOUT_SECONDS", 0.5):
-            with self.assertRaisesRegex(RuntimeError, "did not answer") as error:
-                REAL_APP_SERVER_REQUEST("account/rateLimits/read")
-        self.assertNotIsInstance(error.exception, codex_resume.AppServerRejectedError)
-        with (
-            patch.object(codex_resume, "CODEX_CLI_PATHS", ()),
-            patch.object(codex_resume.shutil, "which", return_value=None),
-            self.assertRaisesRegex(codex_resume.AppServerRejectedError, "Codex CLI is unavailable"),
-        ):
-            REAL_APP_SERVER_REQUEST("account/rateLimits/read")
-        with (
-            patch.object(codex_resume, "codex_cli", return_value="/nonexistent/codex"),
-            self.assertRaisesRegex(codex_resume.AppServerRejectedError, "could not be started"),
-        ):
-            REAL_APP_SERVER_REQUEST("account/rateLimits/read")
-        process = MagicMock()
-        process.stdout = iter(())
-        process.stdin.write.side_effect = BrokenPipeError(32, "Broken pipe")
-        with (
-            patch.object(codex_resume, "codex_cli", return_value="codex"),
-            patch.object(codex_resume.subprocess, "Popen", return_value=process),
-            self.assertRaisesRegex(RuntimeError, "stopped while sending thread/queue/add") as error,
-        ):
-            REAL_APP_SERVER_REQUEST("thread/queue/add", {"threadId": "01a1-mine"})
-        self.assertNotIsInstance(error.exception, codex_resume.AppServerRejectedError)
-        process.kill.assert_called_once()
+    def test_app_server_request_uses_the_shared_client_as_codex_resume(self):
+        with patch.object(codex_resume.codex_app_server, "request", return_value={"ok": 1}) as request:
+            self.assertEqual(REAL_APP_SERVER_REQUEST("thread/queue/list", {"threadId": "01a1"}), {"ok": 1})
+        request.assert_called_once_with("thread/queue/list", {"threadId": "01a1"}, client="codex-resume")
+        self.assertIs(codex_resume.AppServerRejectedError, codex_resume.codex_app_server.RejectedError)
 
     def fake_queue(self, listings, add_error=None, on_add=None, home=None):
         """Fake the app server's queue; each list request takes the next listing, repeating the last one."""

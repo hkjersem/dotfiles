@@ -111,7 +111,6 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 import unicodedata
 import uuid
@@ -119,6 +118,7 @@ from xml.parsers.expat import ExpatError
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import agent_awake  # noqa: E402
+import codex_app_server  # noqa: E402
 import output  # noqa: E402
 import command_help  # noqa: E402
 
@@ -175,11 +175,6 @@ LATE_SECONDS = 120
 CODEX_HOME = Path.home() / ".codex"
 CHAT_CATALOG = "sqlite/codex-dev.db"
 CHAT_NAMES = "state_5.sqlite"
-CODEX_CLI_PATHS = (
-    Path("/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex"),
-    Path.home() / "Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex",
-)
-APP_SERVER_TIMEOUT_SECONDS = 20
 LIST_LIMIT = 20
 LIMIT_NAMES = {300: "5-hour", 10080: "weekly"}
 FIVE_HOUR_MINUTES = 300
@@ -202,8 +197,7 @@ REPLY_RESULT_SECONDS = 30
 APP_BUNDLE_ID = "com.openai.codex"
 
 
-class AppServerRejectedError(RuntimeError):
-    """The app server could not be started or answered with an error, so it did nothing."""
+AppServerRejectedError = codex_app_server.RejectedError
 
 
 class NotQueuedError(RuntimeError):
@@ -419,71 +413,9 @@ def list_chats(query=None):
         print(f"… and {len(chats) - LIST_LIMIT} older; add a search term to narrow the list.")
 
 
-def codex_cli():
-    for path in CODEX_CLI_PATHS:
-        if os.access(path, os.X_OK):
-            return str(path)
-    found = shutil.which("codex")
-    if found is None:
-        raise AppServerRejectedError("The Codex CLI is unavailable, so its app server cannot be reached.")
-    return found
-
-
 def app_server_request(method, params=None):
     """Send one JSON-RPC request to a short-lived app server and return its result."""
-    try:
-        process = subprocess.Popen(
-            [codex_cli(), "app-server"],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
-        )
-    except OSError as error:
-        raise AppServerRejectedError(f"The Codex app server could not be started: {error}") from error
-    replies = {}
-    received = threading.Event()
-
-    def read():
-        try:
-            for line in process.stdout:
-                try:
-                    reply = json.loads(line)
-                except ValueError:
-                    continue
-                if reply.get("id") == 2:
-                    replies["reply"] = reply
-                    return
-        finally:
-            received.set()
-
-    reader = threading.Thread(target=read, daemon=True)
-    reader.start()
-    try:
-        try:
-            # The server exits at end of input before answering, so stdin stays open until the reply.
-            for request in (
-                # The queue methods are experimental and need this opt-in.
-                {"id": 1, "method": "initialize",
-                 "params": {"clientInfo": {"name": "codex-resume", "version": "1"},
-                            "capabilities": {"experimentalApi": True}}},
-                {"method": "initialized"},
-                {"id": 2, "method": method, **({"params": params} if params is not None else {})},
-            ):
-                process.stdin.write(json.dumps(request) + "\n")
-            process.stdin.flush()
-        except OSError as error:
-            # The server may have read the request before it went away, so whether it ran is unknown.
-            raise RuntimeError(f"The Codex app server stopped while sending {method}: {error}") from error
-        if not received.wait(APP_SERVER_TIMEOUT_SECONDS):
-            raise RuntimeError(f"The Codex app server did not answer {method} in time.")
-    finally:
-        process.kill()
-        process.wait()
-    reply = replies.get("reply")
-    if reply is None:
-        raise RuntimeError(f"The Codex app server exited without answering {method}.")
-    if "error" in reply:
-        raise AppServerRejectedError(
-            f"The Codex app server rejected {method}: {reply['error'].get('message', reply['error'])}")
-    return reply["result"]
+    return codex_app_server.request(method, params, client="codex-resume")
 
 
 def still_queued(chat, item):
