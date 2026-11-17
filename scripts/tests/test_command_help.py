@@ -138,7 +138,7 @@ class CommandHelpTests(unittest.TestCase):
             )
             self.assertEqual(help_result.returncode, 0, help_result.stderr)
             self.assertIn("  --no-clean", help_result.stdout)
-            self.assertIn("  -M, --max-columns WIDTH", help_result.stdout)
+            self.assertRegex(help_result.stdout, r"(?m)^  -M(?: WIDTH)?, --max-columns WIDTH\b")
             self.assertEqual(sandbox.tool_calls(), "")
             native_result = subprocess.run(
                 ["/bin/bash", "-c", 'source "$HOME/.aliases"; rg native-check'],
